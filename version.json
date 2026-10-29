@@ -5,7 +5,7 @@
   "title": "تحديث نظام صيدليتي 1.4.8",
   "release_notes": "• فحص دوري تلقائي للتحديثات كل دقيقتين أثناء تشغيل البرنامج: يظهر التحديث فور نزوله أونلاين حتى لو كان البرنامج مفتوحاً...\n• حماية من تكرار نوافذ التحديث: ظهور نافذة التحديث بانسيابية ومنع فتح أكثر من نافذة في نفس الوقت.",
   "download_url": "https://github.com/workabdallah400-ai/pharmacy-pos-updates/releases/download/v1.4.8/PharmacyPOS-Setup-1.4.8.exe",
-  "file_size_bytes": 54557475,
-  "sha256": "ed2919f1f67a0f3d3df6a844a6ce2c837e16a9fa30d256fc00f2f407f4b2995f",
+  "file_size_bytes": 56543920,
+  "sha256": "c73317f704383ee27fc71543f4442210fbd0785a8959c14ab69a8cc10cc916ee",
   "mandatory": false
 }
