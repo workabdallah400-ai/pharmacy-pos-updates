@@ -1,0 +1,11 @@
+{
+  "version": "1.4.4",
+  "build_number": 9,
+  "release_date": "2026-10-29",
+  "title": "تحديث نظام صيدليتي 1.4.4",
+  "release_notes": "• التحديثات تصل تلقائياً — بلا تثبيت يدوي لكل نسخة. البرنامج يفحص\n• مصدر التحديث أصبح مرناً: رابط إنترنت، أو مجلد على الجهاز، أو مجلد\n• زر «اختيار مجلد التحديثات» في الإعدادات، ومفتاح تشغيل/إيقاف التنزيل\n• حفظ التحديث المنزّل في قاعدة الإعدادات: لو أغلق البرنامج قبل التثبيت",
+  "download_url": "https://github.com/workabdallah400-ai/pharmacy-pos-updates/releases/download/v1.4.4/PharmacyPOS-Setup-1.4.4.exe",
+  "file_size_bytes": 52730615,
+  "sha256": "82d862468d4ee7e577c8e8494a6b0f14e63bff693de36ea616d0cea31629d2ca",
+  "mandatory": false
+}
