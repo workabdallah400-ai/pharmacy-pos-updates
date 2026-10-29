@@ -1,11 +1,11 @@
 {
-  "version": "1.4.4",
-  "build_number": 9,
+  "version": "1.4.5",
+  "build_number": 10,
   "release_date": "2026-10-29",
-  "title": "تحديث نظام صيدليتي 1.4.4",
-  "release_notes": "• أيقونة جديدة ثلاثية الأبعاد بتصميم عصري وفخم\n• التحديثات التلقائية أونلاين عبر الإنترنت دون أي تدخل يدوي\n• شريط إخباري متحرك للتواصل وخدمة العملاء\n• التوافق الكامل مع ويندوز 7 وويندوز 10 و 11",
-  "download_url": "https://github.com/workabdallah400-ai/pharmacy-pos-updates/releases/download/v1.4.4/PharmacyPOS-Setup-1.4.4.exe",
-  "file_size_bytes": 54552714,
-  "sha256": "9ca9d3c15828fc5599a7fe31d836394a992c5d997e5fb20fd144c8302df5b07f",
+  "title": "تحديث نظام صيدليتي 1.4.5",
+  "release_notes": "• تصميم جديد كلياً للأيقونة ثلاثية الأبعاد (3D Icon) لسطح المكتب وشريط المهام.\n• التحديث التلقائي أونلاين بضغطة واحدة وإعادة التشغيل الفوري تلقائياً.\n• شريط متحرك علوي للتواصل وخدمة العملاء عبر الواتساب.",
+  "download_url": "https://github.com/workabdallah400-ai/pharmacy-pos-updates/releases/download/v1.4.5/PharmacyPOS-Setup-1.4.5.exe",
+  "file_size_bytes": 54552356,
+  "sha256": "6d2faac9606d4813cccfcbf367deb77d6d1049e3d1b28dbc8884389b0d50927c",
   "mandatory": false
 }
