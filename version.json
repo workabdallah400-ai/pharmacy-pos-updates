@@ -1,11 +1,11 @@
 {
-  "version": "1.4.13",
-  "build_number": 18,
+  "version": "1.4.14",
+  "build_number": 19,
   "release_date": "2026-10-30",
-  "title": "تحديث نظام صيدليتي 1.4.13",
-  "release_notes": "• حل نهائي لرسالة خطأ Windows 7 (GetCurrentThreadStackLimits):\n• البرنامج الآن يفتح ويعمل فورياً ومباشرة على أجهزة Windows 7 القديمة بدون أي رسائل نقص دوال DLL.",
-  "download_url": "https://github.com/workabdallah400-ai/pharmacy-pos-updates/releases/download/v1.4.13/PharmacyPOS-Setup-1.4.13.exe",
-  "file_size_bytes": 61485681,
-  "sha256": "3f3e2398abdbb30f58676827468c7cbd7500b500ed584182b3732c69130d919d",
+  "title": "تحديث نظام صيدليتي 1.4.14",
+  "release_notes": "• حل نهائي وشامل لكافة دوال Windows 7 (GetSystemTimePreciseAsFileTime / CreateFile2 / CopyFile2):",
+  "download_url": "https://github.com/workabdallah400-ai/pharmacy-pos-updates/releases/download/v1.4.14/PharmacyPOS-Setup-1.4.14.exe",
+  "file_size_bytes": 61489961,
+  "sha256": "200ec169374a8ca5ef90839e867be27c786a6b60dfd3046ee52d180e9537f5aa",
   "mandatory": false
 }
