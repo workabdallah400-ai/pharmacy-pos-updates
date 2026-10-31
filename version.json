@@ -1,11 +1,11 @@
 {
-  "version": "1.4.14",
-  "build_number": 19,
-  "release_date": "2026-10-30",
-  "title": "تحديث نظام صيدليتي 1.4.14",
-  "release_notes": "• حل نهائي وشامل لكافة دوال Windows 7 (GetSystemTimePreciseAsFileTime / CreateFile2 / CopyFile2):",
-  "download_url": "https://github.com/workabdallah400-ai/pharmacy-pos-updates/releases/download/v1.4.14/PharmacyPOS-Setup-1.4.14.exe",
-  "file_size_bytes": 61489961,
-  "sha256": "200ec169374a8ca5ef90839e867be27c786a6b60dfd3046ee52d180e9537f5aa",
+  "version": "1.4.15",
+  "build_number": 20,
+  "release_date": "2026-10-31",
+  "title": "تحديث نظام صيدليتي 1.4.15",
+  "release_notes": "• حل مشكلة الإغلاق الصامت عند بدء التشغيل على Windows 7 (Fix Silent Exit / 0xC000007B & Entry Points):\n• فحص وتعديل ترويسات PE لكافة ملفات الـ DLL وحزم Universal CRT وخفض نسخة الـ Subsystem من 10.00 إلى 6.01 لتتوافق مع مُح...",
+  "download_url": "https://github.com/workabdallah400-ai/pharmacy-pos-updates/releases/download/v1.4.15/PharmacyPOS-Setup-1.4.15.exe",
+  "file_size_bytes": 61563937,
+  "sha256": "59b376984d49c4dd19b78e22b2c337b4c7123f897280998137e6540e5d0ee168",
   "mandatory": false
 }
