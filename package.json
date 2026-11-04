@@ -1,0 +1,90 @@
+{
+  "name": "pharmacy-pos-ui",
+  "private": true,
+  "version": "1.0.3",
+  "type": "module",
+  "description": "PharmacyPOS — نظام إدارة صيدليات ونقاط بيع بواجهة عربية مع تقارير ورديات ذكية",
+  "author": "PharmacyPOS",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "report-server": "node server/index.cjs",
+    "tunnel": "node scripts/cloudflare-tunnel.cjs --port 4100 --download",
+    "test:urls": "node scripts/test-url-resolution.mjs",
+    "test:packaged": "node scripts/test-packaged-server.cjs",
+    "test:server": "node scripts/test-report-server.cjs",
+    "test:worker": "node scripts/test-worker.mjs",
+    "worker:core": "node scripts/sync-worker-core.cjs",
+    "dist": "vite build && electron-builder --win nsis && node scripts/build-updates.cjs",
+    "dist:updates": "node scripts/build-updates.cjs",
+    "keygen": "start LicenseGenerator.html"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.11",
+    "lucide-react": "^1.16.0",
+    "qrcode": "^1.5.4",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "sql.js": "^1.15.2",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "autoprefixer": "^10.4.20",
+    "electron": "^45.2.1",
+    "electron-builder": "^26.18.0",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.17",
+    "vite": "^6.0.7"
+  },
+  "build": {
+    "appId": "com.egyptian.pharmacypos",
+    "productName": "PharmacyPOS",
+    "directories": {
+      "output": "dist-installer"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "server/**/*",
+      "!server/updates/**",
+      "scripts/cloudflare-tunnel.cjs",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "pharmacy_pos.db",
+        "to": "pharmacy_pos.db"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "electron/icon.ico",
+      "requestedExecutionLevel": "asInvoker"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "صيدليتي - نقاط البيع والكاشير",
+      "runAfterFinish": true,
+      "artifactName": "PharmacyPOS-Setup-v${version}.exe"
+    },
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "https://updates.pharmacy-pos.local/updates/"
+      }
+    ]
+  }
+}

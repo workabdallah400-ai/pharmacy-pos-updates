@@ -1,0 +1,411 @@
+import React, { useState, useEffect } from 'react';
+import { X, Pill, Sparkles, Wand2, CheckCircle2, AlertCircle } from 'lucide-react';
+
+const CATEGORIES = [
+  'مسكنات وخافض حرارة',
+  'مضادات حيوية',
+  'برد وإنفلونزا',
+  'فيتامينات ومعادن',
+  'جهاز هضمي ومطهر',
+  'دوار وأذن داخلية',
+  'أدوية الضغط والقلب',
+  'أدوية السكر والغدد',
+  'جلدية وتجميل',
+  'مستلزمات طبية',
+  'أخرى'
+];
+
+export function ProductModal({ isOpen = true, onClose, medicine, medicineToEdit, onSave }) {
+  const targetMedicine = medicineToEdit || medicine;
+
+  const [formData, setFormData] = useState({
+    trade_name_ar: '',
+    trade_name: '',
+    generic_name: '',
+    barcode: '',
+    category: 'مسكنات وخافض حرارة',
+    shelf: 'A-01',
+    strips_per_box: 2,
+    price_box: '',
+    price_strip: '',
+    stock_boxes: 0,
+    stock_strips: 0,
+    reorder_level: 3,
+    manufacturer: 'إيبيكو (EIPICO)'
+  });
+
+  const [error, setError] = useState('');
+
+  function generateBarcode() {
+    // 13-digit Egyptian EAN-13 format starting with 622
+    const random10 = Math.floor(1000000000 + Math.random() * 9000000000);
+    return `622${random10}`;
+  }
+
+  useEffect(() => {
+    if (targetMedicine) {
+      setFormData({
+        ...targetMedicine,
+        trade_name_ar: targetMedicine.trade_name_ar || '',
+        trade_name: targetMedicine.trade_name || '',
+        generic_name: targetMedicine.generic_name || '',
+        barcode: targetMedicine.barcode || '',
+        category: targetMedicine.category || 'مسكنات وخافض حرارة',
+        shelf: targetMedicine.shelf || 'A-01',
+        strips_per_box: targetMedicine.strips_per_box || 2,
+        price_box: targetMedicine.price_box != null ? targetMedicine.price_box.toString() : '',
+        price_strip: targetMedicine.price_strip != null ? targetMedicine.price_strip.toString() : '',
+        stock_boxes: targetMedicine.stock_boxes != null ? targetMedicine.stock_boxes : 0,
+        stock_strips: targetMedicine.stock_strips != null ? targetMedicine.stock_strips : 0,
+        reorder_level: targetMedicine.reorder_level != null ? targetMedicine.reorder_level : 3,
+        manufacturer: targetMedicine.manufacturer || 'إيبيكو (EIPICO)'
+      });
+    } else {
+      setFormData({
+        trade_name_ar: '',
+        trade_name: '',
+        generic_name: '',
+        barcode: generateBarcode(),
+        category: 'مسكنات وخافض حرارة',
+        shelf: 'A-01',
+        strips_per_box: 2,
+        price_box: '',
+        price_strip: '',
+        stock_boxes: 0,
+        stock_strips: 0,
+        reorder_level: 3,
+        manufacturer: 'إيبيكو (EIPICO)'
+      });
+    }
+    setError('');
+  }, [targetMedicine, isOpen]);
+
+  if (!isOpen) return null;
+
+  const handlePriceBoxChange = (val) => {
+    const num = parseFloat(val);
+    const strips = parseInt(formData.strips_per_box, 10) || 1;
+    setFormData((prev) => ({
+      ...prev,
+      price_box: val,
+      price_strip: !isNaN(num) && strips > 0 ? (num / strips).toFixed(2) : prev.price_strip
+    }));
+  };
+
+  const handleStripsChange = (val) => {
+    const strips = parseInt(val, 10) || 1;
+    const num = parseFloat(formData.price_box);
+    setFormData((prev) => ({
+      ...prev,
+      strips_per_box: strips,
+      price_strip: !isNaN(num) && strips > 0 ? (num / strips).toFixed(2) : prev.price_strip
+    }));
+  };
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!formData.trade_name_ar.trim()) {
+      setError('يرجى إدخال اسم الدواء باللغة العربية');
+      return;
+    }
+    if (!formData.price_box || parseFloat(formData.price_box) <= 0) {
+      setError('يرجى إدخال سعر بيع العلبة بشكل صحيح');
+      return;
+    }
+
+    const payload = {
+      ...formData,
+      id: targetMedicine ? targetMedicine.id : Date.now(),
+      price_box: parseFloat(formData.price_box) || 0,
+      price_strip: parseFloat(formData.price_strip) || 0,
+      strips_per_box: parseInt(formData.strips_per_box, 10) || 1,
+      stock_boxes: parseInt(formData.stock_boxes, 10) || 0,
+      stock_strips: parseInt(formData.stock_strips, 10) || 0,
+      reorder_level: parseInt(formData.reorder_level, 10) || 3
+    };
+
+    onSave(payload);
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 select-none">
+      <div className="w-full max-w-xl bg-[#111A2B] border border-[#23324D] rounded-3xl shadow-card-dark overflow-hidden flex flex-col max-h-[90vh] animate-in fade-in zoom-in-95 duration-200">
+        
+        {/* Header */}
+        <div className="p-4 sm:p-5 border-b border-[#23324D] flex items-center justify-between bg-[#17233A]/70">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-teal-500/20 border border-teal-500/40 flex items-center justify-center text-teal-400 shadow-glow-teal">
+              <Pill className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="font-bold text-white text-base">
+                {targetMedicine ? 'تعديل بيانات الدواء والمخزون' : 'إضافة دواء جديد للدليل والمخزن'}
+              </h3>
+              <p className="text-xs text-slate-400">
+                {targetMedicine ? `الصنف: ${targetMedicine.trade_name_ar}` : 'تسجيل صنف دوائي جديد بدليل الأدوية المصري'}
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="w-8 h-8 rounded-xl bg-[#17233A] hover:bg-rose-500/20 text-slate-400 hover:text-rose-300 border border-[#23324D] flex items-center justify-center transition-colors"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        {/* Form Body */}
+        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-5 space-y-4">
+          
+          {error && (
+            <div className="p-3 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs font-bold flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>{error}</span>
+            </div>
+          )}
+
+          {/* Names Row */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">
+                الاسم التجاري (بالعربية) *
+              </label>
+              <input
+                type="text"
+                required
+                autoFocus
+                placeholder="مثال: بنادول أدفانس 500 مجم"
+                value={formData.trade_name_ar}
+                onChange={(e) => setFormData({ ...formData, trade_name_ar: e.target.value })}
+                className="w-full h-10 bg-[#17233A] border border-[#23324D] focus:border-teal-400 rounded-xl px-3 text-white text-xs outline-none"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">
+                الاسم التجاري (بالإنجليزية)
+              </label>
+              <input
+                type="text"
+                placeholder="مثال: Panadol Advance 500mg"
+                value={formData.trade_name}
+                onChange={(e) => setFormData({ ...formData, trade_name: e.target.value })}
+                className="w-full h-10 bg-[#17233A] border border-[#23324D] focus:border-teal-400 rounded-xl px-3 text-white text-xs outline-none"
+                dir="ltr"
+              />
+            </div>
+          </div>
+
+          {/* Generic Name (Active Ingredient) */}
+          <div>
+            <label className="block text-xs font-semibold text-slate-300 mb-1 flex items-center justify-between">
+              <span>المادة الفعالة والاسم العلمي (Generic Name) *</span>
+              <span className="text-[10px] text-teal-400 font-normal">ضروري لربط البدائل الذكية (F6)</span>
+            </label>
+            <input
+              type="text"
+              required
+              placeholder="مثال: Paracetamol 500mg"
+              value={formData.generic_name}
+              onChange={(e) => setFormData({ ...formData, generic_name: e.target.value })}
+              className="w-full h-10 bg-[#17233A] border border-[#23324D] focus:border-teal-400 rounded-xl px-3 text-white text-xs outline-none"
+              dir="ltr"
+            />
+          </div>
+
+          {/* Barcode & Shelf */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">
+                الباركود الدولي أو المحلي
+              </label>
+              <div className="flex gap-1.5">
+                <input
+                  type="text"
+                  placeholder="622..."
+                  value={formData.barcode}
+                  onChange={(e) => setFormData({ ...formData, barcode: e.target.value })}
+                  className="flex-1 h-10 bg-[#17233A] border border-[#23324D] focus:border-teal-400 rounded-xl px-3 text-teal-300 font-mono text-xs outline-none"
+                  dir="ltr"
+                />
+                <button
+                  type="button"
+                  onClick={() => setFormData({ ...formData, barcode: generateBarcode() })}
+                  className="px-2.5 h-10 bg-[#17233A] hover:bg-[#202E4C] text-slate-300 hover:text-white border border-[#23324D] rounded-xl text-xs flex items-center gap-1 transition-colors"
+                  title="توليد باركود تلقائي"
+                >
+                  <Wand2 className="w-3.5 h-3.5 text-teal-400" />
+                  <span className="text-[10px]">توليد</span>
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">
+                مكان الرف بالصيدلية (Shelf)
+              </label>
+              <input
+                type="text"
+                placeholder="مثال: A-01 أو R-05"
+                value={formData.shelf}
+                onChange={(e) => setFormData({ ...formData, shelf: e.target.value })}
+                className="w-full h-10 bg-[#17233A] border border-[#23324D] focus:border-teal-400 rounded-xl px-3 text-white text-xs outline-none font-mono"
+              />
+            </div>
+          </div>
+
+          {/* Pricing & Strips */}
+          <div className="p-3.5 rounded-2xl bg-[#17233A]/60 border border-[#23324D] space-y-3">
+            <span className="text-xs font-bold text-teal-300 block">بيانات التسعير والشرائط:</span>
+            
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                  سعر بيع العلبة (ج.م) *
+                </label>
+                <input
+                  type="number"
+                  step="0.5"
+                  required
+                  placeholder="35.00"
+                  value={formData.price_box}
+                  onChange={(e) => handlePriceBoxChange(e.target.value)}
+                  className="w-full h-10 bg-[#111A2B] border border-[#23324D] focus:border-teal-400 rounded-xl px-3 text-emerald-400 font-bold font-mono text-sm outline-none"
+                  dir="ltr"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                  عدد الشرائط بالعلبة
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  max="10"
+                  value={formData.strips_per_box}
+                  onChange={(e) => handleStripsChange(e.target.value)}
+                  className="w-full h-10 bg-[#111A2B] border border-[#23324D] focus:border-teal-400 rounded-xl px-3 text-white font-mono text-xs outline-none"
+                  dir="ltr"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                  سعر بيع الشريط (ج.م)
+                </label>
+                <input
+                  type="number"
+                  step="0.25"
+                  value={formData.price_strip}
+                  onChange={(e) => setFormData({ ...formData, price_strip: e.target.value })}
+                  className="w-full h-10 bg-[#111A2B] border border-[#23324D] focus:border-teal-400 rounded-xl px-3 text-teal-300 font-mono text-xs outline-none"
+                  dir="ltr"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Stock & Reorder Level */}
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">
+                رصيد العلب المتاح
+              </label>
+              <input
+                type="number"
+                min="0"
+                value={formData.stock_boxes}
+                onChange={(e) => setFormData({ ...formData, stock_boxes: e.target.value })}
+                className="w-full h-10 bg-[#17233A] border border-[#23324D] focus:border-teal-400 rounded-xl px-3 text-white font-mono text-xs outline-none"
+                dir="ltr"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">
+                رصيد الشرائط المنفصلة
+              </label>
+              <input
+                type="number"
+                min="0"
+                value={formData.stock_strips}
+                onChange={(e) => setFormData({ ...formData, stock_strips: e.target.value })}
+                className="w-full h-10 bg-[#17233A] border border-[#23324D] focus:border-teal-400 rounded-xl px-3 text-white font-mono text-xs outline-none"
+                dir="ltr"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">
+                حد الطلب (تنبيه النواقص)
+              </label>
+              <input
+                type="number"
+                min="1"
+                value={formData.reorder_level}
+                onChange={(e) => setFormData({ ...formData, reorder_level: e.target.value })}
+                className="w-full h-10 bg-[#17233A] border border-[#23324D] focus:border-teal-400 rounded-xl px-3 text-amber-300 font-mono text-xs outline-none"
+                dir="ltr"
+              />
+            </div>
+          </div>
+
+          {/* Category & Manufacturer Row */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">
+                القسم والتصنيف الطبي
+              </label>
+              <select
+                value={formData.category}
+                onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+                className="w-full h-10 bg-[#17233A] border border-[#23324D] focus:border-teal-400 rounded-xl px-3 text-white text-xs outline-none"
+              >
+                {CATEGORIES.map((cat, idx) => (
+                  <option key={idx} value={cat}>
+                    {cat}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">
+                الشركة المنتجة / المصنعة
+              </label>
+              <input
+                type="text"
+                placeholder="مثال: فاركو / إيبيكو / نوفارتس / GSK"
+                value={formData.manufacturer || ''}
+                onChange={(e) => setFormData({ ...formData, manufacturer: e.target.value })}
+                className="w-full h-10 bg-[#17233A] border border-[#23324D] focus:border-teal-400 rounded-xl px-3 text-white text-xs outline-none"
+              />
+            </div>
+          </div>
+
+          {/* Actions */}
+          <div className="pt-3 border-t border-[#23324D] flex items-center justify-between gap-3">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 py-2.5 rounded-xl bg-[#17233A] hover:bg-[#202E4C] text-white text-xs font-semibold border border-[#23324D]"
+            >
+              إلغاء
+            </button>
+            <button
+              type="submit"
+              className="flex-1 py-2.5 rounded-xl bg-teal-500 hover:bg-teal-400 text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 shadow-glow-teal transition-all active:scale-95"
+            >
+              <CheckCircle2 className="w-4 h-4" />
+              <span>{medicineToEdit ? 'حفظ التعديلات' : 'إضافة الدواء للدليل'}</span>
+            </button>
+          </div>
+
+        </form>
+
+      </div>
+    </div>
+  );
+}

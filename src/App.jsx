@@ -1,0 +1,776 @@
+import React, { useState, useEffect } from 'react';
+import { LoginScreen } from './components/LoginScreen';
+import { TopHeader } from './components/TopHeader';
+import { Sidebar } from './components/Sidebar';
+import { POSView } from './components/POSView';
+import { ProductsView } from './components/ProductsView';
+import { PurchasesView } from './components/PurchasesView';
+import { ShortagesView } from './components/ShortagesView';
+import { ExpiryView } from './components/ExpiryView';
+import { CustomersView } from './components/CustomersView';
+import { ShiftsView } from './components/ShiftsView';
+import { ReportsView } from './components/ReportsView';
+import { SettingsView } from './components/SettingsView';
+import { PlaceholderView } from './components/PlaceholderView';
+import { ActivationScreen } from './components/ActivationScreen';
+import { OpenShiftModal } from './components/OpenShiftModal';
+import { checkLicenseStatus } from './utils/licenseManager';
+import {
+  initReportServer,
+  readSettings,
+  setTunnelUrl,
+  claimCloudIdentity,
+  ensureCloudToken
+} from './utils/reportServer';
+import {
+  getTunnelState,
+  startTunnel,
+  downloadCloudflared,
+  isTunnelSupported,
+  onTunnelUrl
+} from './utils/tunnel';
+import { checkForUpdates, downloadUpdate, installUpdate, onUpdateStatus } from './utils/updater';
+import { sqliteService } from './db/sqliteService';
+import { INITIAL_MEDICINES } from './data/mockMedicines';
+import { INITIAL_SUPPLIERS, INITIAL_PURCHASES } from './data/mockPurchases';
+
+// Deep-link support: `#tab=settings&settingsTab=cloud` opens that screen
+// directly. Handy for support, for bookmarks and for quick access from a
+// browser (the desktop app normally starts on the POS screen).
+const VALID_TABS = [
+  'pos', 'products', 'purchases', 'shortages', 'expiry',
+  'customers', 'shifts', 'reports', 'settings'
+];
+const VALID_SETTINGS_TABS = [
+  'receipt', 'hardware', 'backup', 'license', 'users', 'security', 'cloud'
+];
+
+function resolveDeepLinkTab() {
+  try {
+    const hash = String(window.location.hash || '');
+    const m = /[#&]tab=([a-z]+)/i.exec(hash);
+    if (m && VALID_TABS.includes(m[1].toLowerCase())) return m[1].toLowerCase();
+  } catch (e) {}
+  return '';
+}
+
+function resolveDeepLinkSettingsTab() {
+  try {
+    const hash = String(window.location.hash || '');
+    const m = /[#&]settingsTab=([a-z]+)/i.exec(hash);
+    if (m && VALID_SETTINGS_TABS.includes(m[1].toLowerCase())) return m[1].toLowerCase();
+  } catch (e) {}
+  return '';
+}
+
+export default function App() {
+  const [currentUser, setCurrentUser] = useState(null);
+  const [activeTab, setActiveTab] = useState(() => resolveDeepLinkTab() || 'pos');
+  const [pendingPurchaseData, setPendingPurchaseData] = useState(null);
+  
+  // Shifts State
+  const [currentShift, setCurrentShift] = useState(() => {
+    try {
+      const saved = localStorage.getItem('PHARMACY_ACTIVE_SHIFT');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed) return parsed;
+      }
+    } catch (e) {}
+    return null;
+  });
+  const [showOpenShiftModal, setShowOpenShiftModal] = useState(false);
+
+  // Discover the embedded LAN report server (Electron) as early as possible,
+  // so the sync engine can point at it and shift QRs open the hosted report.
+  useEffect(() => {
+    initReportServer()
+      .then((info) => {
+        if (typeof window !== 'undefined' && info) {
+          window.dispatchEvent(new CustomEvent('pharmacy:report-server-ready', { detail: info }));
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  // --- Cloud identity ------------------------------------------------------
+  // Every installation owns its pharmacy id and its own token on the
+  // permanent cloud host, so two pharmacies never share a report.
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      ensureCloudToken();
+      const res = await claimCloudIdentity().catch(() => null);
+      if (cancelled || !res) return;
+      if (res.ok) {
+        // The cloud copy may be missing (new machine) — push the database.
+        setTimeout(() => {
+          sqliteService.refreshCloudReports().catch(() => {});
+        }, 4000);
+      }
+    };
+    const timer = setTimeout(run, 2500);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, []);
+
+  // --- Auto-start the free public Cloudflare tunnel -----------------------
+  // When the pharmacy chose the public URL for the shift QR code, the tunnel
+  // must be alive as soon as the app starts — otherwise a printed QR code
+  // would point to a dead address. The tunnel URL is re-resolved every time
+  // the main process announces a new public URL.
+  useEffect(() => {
+    let cancelled = false;
+
+    const off = onTunnelUrl((url) => {
+      setTunnelUrl(url);
+      initReportServer(true).catch(() => {});
+    });
+
+    const run = async () => {
+      const settings = readSettings();
+      if (!settings.useCloudflareTunnel) return;
+      if (settings.autoStartTunnel === false) return;
+      if (!isTunnelSupported()) return;
+      // A permanent cloud host (Worker / VPS) is already configured — the
+      // temporary quick tunnel is not needed and would only waste traffic.
+      if (String(settings.reportBaseUrl || '').trim()) return;
+      if (String(settings.permanentReportUrl || '').trim()) return;
+
+      const state = await getTunnelState().catch(() => null);
+      if (cancelled) return;
+      if (state && state.running && state.url) {
+        setTunnelUrl(state.url);
+        await initReportServer(true).catch(() => {});
+        return;
+      }
+
+      // First launch on this machine: fetch the small Cloudflare helper
+      // once (53 MB) so the tunnel can open without any manual step.
+      if (!state || !state.available) {
+        const dl = await downloadCloudflared().catch(() => null);
+        if (cancelled) return;
+        if (!dl || !dl.ok) return;
+      }
+
+      const res = await startTunnel().catch(() => null);
+      if (cancelled || !res || !res.ok) return;
+      setTunnelUrl(res.url);
+      await initReportServer(true).catch(() => {});
+    };
+
+    // Give the embedded report server a moment to boot before the tunnel
+    // points at its port.
+    const timer = setTimeout(run, 1500);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+      if (typeof off === 'function') off();
+    };
+  }, []);
+
+  // --- Silent auto-update check -----------------------------------------
+  const [updateBanner, setUpdateBanner] = useState(null);
+
+  // Keep the hosted reports fresh (every 60 min). Free cloud tiers wipe their
+  // disk when they sleep, so the pharmacy PC periodically re-pushes a full
+  // snapshot — that is what makes the public QR link always work.
+  useEffect(() => {
+    let settings = {};
+    try {
+      settings = JSON.parse(localStorage.getItem('PHARMACY_SETTINGS') || '{}') || {};
+    } catch (e) {}
+    if (settings.enableCloudSync === false) return undefined;
+
+    // A permanent cloud host (the Cloudflare Worker) gets a fresh snapshot
+    // every 15 minutes; the local LAN server can wait an hour.
+    const remoteReport = String(settings.reportBaseUrl || settings.permanentReportUrl || '').trim();
+    sqliteService.startHeartbeat(remoteReport ? 15 * 60 * 1000 : 60 * 60 * 1000);
+    // Also refresh shortly after start-up so a restarted PC restores the
+    // cloud copy without waiting for the next heartbeat.
+    const initial = setTimeout(() => {
+      claimCloudIdentity().catch(() => {});
+      sqliteService.refreshCloudReports().catch(() => {});
+    }, 15000);
+
+    // The internet came back → push everything that was waiting in the
+    // outbox right now, so the owner sees the new numbers immediately.
+    const handleOnline = () => {
+      claimCloudIdentity().catch(() => {});
+      sqliteService.refreshCloudReports().catch(() => {});
+    };
+    window.addEventListener('online', handleOnline);
+
+    return () => {
+      clearTimeout(initial);
+      window.removeEventListener('online', handleOnline);
+      sqliteService.stopHeartbeat();
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    let settings = {};
+    try {
+      settings = JSON.parse(localStorage.getItem('PHARMACY_SETTINGS') || '{}') || {};
+    } catch (e) {}
+    if (settings.autoCheckUpdates === false) return undefined;
+
+    const run = async () => {
+      const info = await initReportServer().catch(() => null);
+      const configured = String(settings.updateFeedUrl || '').trim();
+      const feed = configured || (info && info.autoBase ? `${info.autoBase}/updates/` : '');
+      if (!feed) return;
+      const res = await checkForUpdates(feed);
+      if (!cancelled && res && res.available) {
+        setUpdateBanner({ version: res.version });
+      }
+    };
+    run();
+
+    const off = onUpdateStatus((payload) => {
+      if (payload && payload.status === 'available' && !cancelled) {
+        setUpdateBanner({ version: payload.version });
+      }
+    });
+    return () => {
+      cancelled = true;
+      if (typeof off === 'function') off();
+    };
+  }, []);
+
+  const handleApplyUpdate = async () => {
+    await downloadUpdate();
+    await installUpdate();
+  };
+
+  const updateBannerNode = updateBanner ? (
+    <div className="fixed top-3 left-1/2 -translate-x-1/2 z-[60] bg-gradient-to-l from-teal-600 to-emerald-600 text-white px-4 py-2.5 rounded-xl shadow-2xl border border-teal-300/40 flex items-center gap-3 text-xs font-bold animate-fadeIn">
+      <span>⬆️ يتوفر تحديث جديد للبرنامج {updateBanner.version ? `v${updateBanner.version}` : ''}</span>
+      <button
+        type="button"
+        onClick={handleApplyUpdate}
+        className="px-3 py-1 rounded-lg bg-white/20 hover:bg-white/30 text-[11px] font-bold"
+      >
+        تحميل وتثبيت الآن
+      </button>
+      <button
+        type="button"
+        onClick={() => setUpdateBanner(null)}
+        className="px-2 py-1 rounded-lg hover:bg-white/20 text-[11px]"
+      >
+        ✕
+      </button>
+    </div>
+  ) : null;
+
+  // Sync Shift from SQLite on initial load
+  useEffect(() => {
+    let isCurrent = true;
+    sqliteService.getCurrentShift().then((shift) => {
+      if (isCurrent && shift) {
+        setCurrentShift(shift);
+      }
+    }).catch(() => {});
+    return () => { isCurrent = false; };
+  }, []);
+
+  // Persist Shift to localStorage
+  useEffect(() => {
+    try {
+      if (currentShift) {
+        localStorage.setItem('PHARMACY_ACTIVE_SHIFT', JSON.stringify(currentShift));
+      } else {
+        localStorage.removeItem('PHARMACY_ACTIVE_SHIFT');
+      }
+    } catch (e) {}
+  }, [currentShift]);
+
+  const handleOpenShift = async (newShift) => {
+    try {
+      await sqliteService.openShift(newShift);
+    } catch (e) {
+      console.warn('SQLite open shift error:', e);
+    }
+    setCurrentShift(newShift);
+    localStorage.setItem('PHARMACY_ACTIVE_SHIFT', JSON.stringify(newShift));
+    setShowOpenShiftModal(false);
+  };
+
+  // Startup License & Activation Guard State
+  const [licenseInfo, setLicenseInfo] = useState(null);
+  const [isCheckingLicense, setIsCheckingLicense] = useState(true);
+  const [settingsInitialTab, setSettingsInitialTab] = useState(() => resolveDeepLinkSettingsTab() || 'receipt');
+
+
+
+  // Check License on Application Startup
+  useEffect(() => {
+    let isCurrent = true;
+    const verifyLicense = async () => {
+      try {
+        const info = await checkLicenseStatus();
+        if (isCurrent) {
+          setLicenseInfo(info);
+        }
+      } catch (err) {
+        console.warn('License verification error:', err);
+      } finally {
+        if (isCurrent) setIsCheckingLicense(false);
+      }
+    };
+
+    verifyLicense();
+    return () => { isCurrent = false; };
+  }, []);
+
+  const [pharmacyName, setPharmacyName] = useState(() => {
+    try {
+      const saved = localStorage.getItem('PHARMACY_SETTINGS');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.pharmacyName) return parsed.pharmacyName;
+      }
+    } catch (e) {}
+    return 'صيدلية النخبة الحديثة';
+  });
+
+  // 1. Shared Master Medicines State (Clean 0 items)
+  const [medicines, setMedicines] = useState([]);
+
+  // Load the full medicine catalog from SQLite so shared views
+  // (shortages, purchases, reports) always see the real quantities.
+  const reloadMedicinesFromDb = async () => {
+    try {
+      const rows = await sqliteService.getAllMedicines(100000);
+      if (Array.isArray(rows) && rows.length > 0) {
+        setMedicines(rows);
+      }
+    } catch (e) {
+      console.warn('Failed to load medicines from SQLite:', e);
+    }
+  };
+
+  useEffect(() => {
+    reloadMedicinesFromDb();
+  }, []);
+
+  // 2. Shared Suppliers State
+  const [suppliers, setSuppliers] = useState(() => {
+    try {
+      const saved = localStorage.getItem('PHARMACY_SUPPLIERS_LIST');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (e) {}
+    return [];
+  });
+
+  // 3. Shared Purchases Invoices State
+  const [purchases, setPurchases] = useState(() => {
+    try {
+      const saved = localStorage.getItem('PHARMACY_PURCHASES_LIST');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (e) {}
+    return [];
+  });
+
+  // Sync Suppliers & Purchases from SQLite on startup
+  useEffect(() => {
+    let isCurrent = true;
+    sqliteService.getSuppliers().then((dbSups) => {
+      if (isCurrent && dbSups && dbSups.length > 0) {
+        setSuppliers(dbSups);
+      }
+    }).catch(console.warn);
+
+    sqliteService.getPurchases().then((dbPurchases) => {
+      if (isCurrent && dbPurchases && dbPurchases.length > 0) {
+        setPurchases(dbPurchases);
+      }
+    }).catch(console.warn);
+
+    return () => { isCurrent = false; };
+  }, []);
+
+  useEffect(() => {
+    try {
+      if (suppliers.length > 0) {
+        localStorage.setItem('PHARMACY_SUPPLIERS_LIST', JSON.stringify(suppliers));
+      } else {
+        localStorage.removeItem('PHARMACY_SUPPLIERS_LIST');
+      }
+    } catch (e) {}
+  }, [suppliers]);
+
+  useEffect(() => {
+    try {
+      if (purchases.length > 0) {
+        localStorage.setItem('PHARMACY_PURCHASES_LIST', JSON.stringify(purchases));
+      } else {
+        localStorage.removeItem('PHARMACY_PURCHASES_LIST');
+      }
+    } catch (e) {}
+  }, [purchases]);
+
+  const handleLoginSuccess = (user) => {
+    setCurrentUser(user);
+    // Respect a deep-linked screen (e.g. #tab=settings&settingsTab=cloud).
+    setActiveTab(resolveDeepLinkTab() || 'pos');
+  };
+
+  // Only admins (or users explicitly granted settings access) may open Settings.
+  const canManageSettings =
+    currentUser?.role === 'admin' ||
+    currentUser?.permissions?.canManageSettings === true;
+
+  const handleOpenLicenseSettings = () => {
+    if (!canManageSettings) return;
+    setSettingsInitialTab('license');
+    setActiveTab('settings');
+  };
+
+  const handleLogout = () => {
+    setCurrentUser(null);
+  };
+
+  // Save / Add / Update Medicine from ProductsView
+  const handleSaveMedicine = (savedMedicine) => {
+    setMedicines((prev) => {
+      const index = prev.findIndex((m) => m.id === savedMedicine.id);
+      if (index > -1) {
+        const updated = [...prev];
+        updated[index] = savedMedicine;
+        return updated;
+      } else {
+        return [savedMedicine, ...prev];
+      }
+    });
+  };
+
+  // Delete Medicine from ProductsView
+  const handleDeleteMedicine = (id) => {
+    setMedicines((prev) => prev.filter((m) => m.id !== id));
+  };
+
+  // Save New Purchase Supply Invoice & Augment Stock in Real-time!
+  const handleSavePurchase = async (newInvoice) => {
+    // 1. Persist to SQLite first (source of truth). Abort UI updates on failure.
+    await sqliteService.savePurchase(newInvoice);
+
+    // 2. Add to purchases list (refresh from DB so aliases/items are consistent)
+    try {
+      const dbPurchases = await sqliteService.getPurchases();
+      setPurchases(dbPurchases && dbPurchases.length > 0 ? dbPurchases : [newInvoice]);
+    } catch (e) {
+      setPurchases((prev) => [newInvoice, ...prev]);
+    }
+
+    // 3. Augment Stock in Medicines Catalog
+    setMedicines((prevMeds) => {
+      const copy = [...prevMeds];
+      newInvoice.items.forEach((item) => {
+        const idx = copy.findIndex((m) => m.id === item.medicine_id);
+        if (idx > -1) {
+          const med = { ...copy[idx] };
+          const addedBoxes = item.quantity + (item.bonus || 0);
+          med.stock_boxes = (med.stock_boxes || 0) + addedBoxes;
+          if (item.price_box > 0) med.price_box = item.price_box;
+          copy[idx] = med;
+        }
+      });
+      return copy;
+    });
+
+    // 4. Ensure supplier in state & increase debt balance if credit
+    setSuppliers((prevSups) => {
+      const exists = prevSups.some((s) => s.id === newInvoice.supplier_id || s.name === newInvoice.supplier_name);
+      if (exists) {
+        if (newInvoice.payment_method === 'آجل') {
+          return prevSups.map((s) => {
+            if (s.id === newInvoice.supplier_id || s.name === newInvoice.supplier_name) {
+              return { ...s, balance: (s.balance || 0) + newInvoice.net_total };
+            }
+            return s;
+          });
+        }
+        return prevSups;
+      } else {
+        const newSup = {
+          id: newInvoice.supplier_id || Date.now(),
+          name: newInvoice.supplier_name,
+          contact_person: 'مسؤول التوريد',
+          phone: '',
+          balance: newInvoice.payment_method === 'آجل' ? newInvoice.net_total : 0
+        };
+        return [...prevSups, newSup];
+      }
+    });
+  };
+
+  // Pay Supplier Debt
+  const handlePaySupplier = (supplierId, amount) => {
+    const target = suppliers.find((s) => s.id === supplierId);
+    if (target?.name) {
+      sqliteService.adjustSupplierBalanceByName(target.name, -Math.abs(amount)).catch(console.warn);
+    }
+    setSuppliers((prevSups) =>
+      prevSups.map((s) => {
+        if (s.id === supplierId) {
+          const newBal = Math.max(0, s.balance - amount);
+          return { ...s, balance: newBal };
+        }
+        return s;
+      })
+    );
+  };
+
+  // Convert Shortage items directly to a new Purchase invoice!
+  const handleConvertToPurchase = (shortageItems, companyFilter) => {
+    // Determine supplier id
+    let matchedSupplier = suppliers[0];
+    if (companyFilter && companyFilter !== 'ALL') {
+      const found = suppliers.find((s) => s.name.includes(companyFilter));
+      if (found) matchedSupplier = found;
+    } else if (shortageItems[0]?.preferred_supplier) {
+      const found = suppliers.find((s) => s.name.includes(shortageItems[0].preferred_supplier));
+      if (found) matchedSupplier = found;
+    }
+
+    // Convert shortage items into purchase line items
+    const purchaseLines = shortageItems.map((item) => {
+      const unitPrice = item.price_box || 40;
+      const discount = 25.0; // standard 25% pharmacist margin
+      const netUnit = unitPrice * (1 - discount / 100);
+      const qty = item.order_quantity || 5;
+
+      return {
+        medicine_id: typeof item.id === 'number' ? item.id : null,
+        trade_name_ar: item.trade_name_ar || item.trade_name,
+        trade_name: item.trade_name,
+        quantity: qty,
+        bonus: 0,
+        price_box: unitPrice,
+        discount_pct: discount,
+        net_box_price: parseFloat(netUnit.toFixed(2)),
+        total_net: parseFloat((qty * netUnit).toFixed(2)),
+        batch_no: `BCH-${Math.floor(1000 + Math.random() * 9000)}`,
+        expiry: '12/2028'
+      };
+    });
+
+    setPendingPurchaseData({
+      supplierId: matchedSupplier.id,
+      items: purchaseLines
+    });
+
+    setActiveTab('purchases');
+  };
+
+  // Supplier return deduction (reduces supplier debt balance)
+  const handleReturnToSupplier = async (supplierName, amount) => {
+    try {
+      await sqliteService.adjustSupplierBalanceByName(supplierName, -Math.abs(amount));
+    } catch (e) {
+      console.warn('Failed to persist supplier return balance:', e);
+    }
+    setSuppliers((prevSups) =>
+      prevSups.map((s) => {
+        if (s.name.includes(supplierName) || supplierName.includes(s.name)) {
+          const newBal = Math.max(0, s.balance - amount);
+          return { ...s, balance: newBal };
+        }
+        return s;
+      })
+    );
+  };
+
+  // Deduct stock for expired / disposed medicines
+  const handleDeductMedicineStock = (medicineId, boxes) => {
+    if (!medicineId) return;
+    sqliteService.adjustMedicineStock(medicineId, -Math.abs(boxes)).catch(console.warn);
+    setMedicines((prevMeds) =>
+      prevMeds.map((m) => {
+        if (m.id === medicineId) {
+          return { ...m, stock_boxes: Math.max(0, m.stock_boxes - boxes) };
+        }
+        return m;
+      })
+    );
+  };
+
+  // --- STARTUP ACTIVATION GUARD CHECKS ---
+
+  // 1. Loading splash while verifying license
+  if (isCheckingLicense) {
+    return (
+      <div className="h-screen w-screen bg-[#0B1220] flex flex-col items-center justify-center font-cairo select-none text-slate-200">
+        <div className="w-14 h-14 rounded-2xl bg-teal-500/20 border border-teal-500/40 flex items-center justify-center text-3xl shadow-glow-teal mb-4 animate-pulse">
+          💊
+        </div>
+        <div className="text-base font-bold text-white mb-1">صيدليتي - نقاط البيع الذكية</div>
+        <div className="text-xs text-teal-400 font-medium">جارٍ فحص ترخيص وحماية النظام...</div>
+      </div>
+    );
+  }
+
+  // 2. Strict Full-Screen Activation Screen (Locks the app completely if unlicensed)
+  if (!licenseInfo || !licenseInfo.isLicensed || licenseInfo.isExpired) {
+    return (
+      <ActivationScreen
+        machineId={licenseInfo?.machineId || 'EGYP-B009-4237-53D2'}
+        initialStatus={licenseInfo?.status || 'UNLICENSED'}
+        expiresDate={licenseInfo?.expiresAt || ''}
+        onActivationSuccess={async (status) => {
+          // Re-read the real persisted license so expiry/days remaining are accurate
+          try {
+            const fresh = await checkLicenseStatus();
+            setLicenseInfo(fresh);
+          } catch (e) {
+            setLicenseInfo((prev) => ({
+              ...prev,
+              isLicensed: true,
+              isTrial: false,
+              isExpired: false,
+              status
+            }));
+          }
+        }}
+        onRevoke={() => {
+          setLicenseInfo((prev) => ({
+            ...prev,
+            isLicensed: false,
+            isExpired: true,
+            status: 'REVOKED'
+          }));
+        }}
+      />
+    );
+  }
+
+  // 3. User Authentication Login Screen
+  if (!currentUser) {
+    return (
+      <>
+        {updateBannerNode}
+        <LoginScreen onLoginSuccess={handleLoginSuccess} />
+      </>
+    );
+  }
+
+  // 4. Master Shell & Workspace
+  return (
+    <div className="h-screen w-screen flex flex-col bg-[#0B1220] text-slate-100 overflow-hidden font-cairo">
+      {updateBannerNode}
+      {/* Top Header Bar with Live License Status Badge */}
+      <TopHeader
+        pharmacyName={pharmacyName}
+        shiftNumber={currentShift?.shift_number || 1}
+        isShiftOpen={!!currentShift}
+        licenseInfo={licenseInfo}
+        onOpenActivation={canManageSettings ? handleOpenLicenseSettings : null}
+      />
+
+      {/* Main Workspace with Sidebar on Right (RTL) */}
+      <div className="flex-1 flex flex-row overflow-hidden">
+        {/* Right Sidebar */}
+        <Sidebar
+          activeTab={activeTab}
+          onSelectTab={setActiveTab}
+          currentUser={currentUser}
+          onLogout={handleLogout}
+        />
+
+        {/* Center Main Content Area */}
+        <main className="flex-1 flex flex-col overflow-hidden bg-[#0B1220] relative">
+          {activeTab === 'pos' ? (
+            <POSView
+              currentUser={currentUser}
+              medicines={medicines}
+              onUpdateMedicines={setMedicines}
+              currentShift={currentShift}
+              isShiftOpen={!!currentShift}
+              onOpenShiftModal={() => setShowOpenShiftModal(true)}
+              onSaleCompleted={async () => {
+                await reloadMedicinesFromDb();
+                try {
+                  const freshShift = await sqliteService.getCurrentShift();
+                  if (freshShift) setCurrentShift(freshShift);
+                } catch (e) {}
+              }}
+            />
+          ) : activeTab === 'products' ? (
+            <ProductsView
+              medicines={medicines}
+              onSaveMedicine={handleSaveMedicine}
+              onDeleteMedicine={handleDeleteMedicine}
+            />
+          ) : activeTab === 'purchases' ? (
+            <PurchasesView
+              purchases={purchases}
+              suppliers={suppliers}
+              medicines={medicines}
+              onSavePurchase={handleSavePurchase}
+              onPaySupplier={handlePaySupplier}
+              initialPurchaseData={pendingPurchaseData}
+              onClearInitialPurchaseData={() => setPendingPurchaseData(null)}
+            />
+          ) : activeTab === 'shortages' ? (
+            <ShortagesView
+              medicines={medicines}
+              suppliers={suppliers}
+              onConvertToPurchase={handleConvertToPurchase}
+            />
+          ) : activeTab === 'expiry' ? (
+            <ExpiryView
+              suppliers={suppliers}
+              onReturnToSupplier={handleReturnToSupplier}
+              onDeductMedicineStock={handleDeductMedicineStock}
+            />
+          ) : activeTab === 'customers' ? (
+            <CustomersView />
+          ) : activeTab === 'shifts' ? (
+            <ShiftsView
+              currentShift={currentShift}
+              onUpdateCurrentShift={setCurrentShift}
+            />
+          ) : activeTab === 'reports' ? (
+            <ReportsView />
+          ) : activeTab === 'settings' && canManageSettings ? (
+            <SettingsView
+              currentUser={currentUser}
+              initialTab={settingsInitialTab}
+              onUpdatePharmacyName={setPharmacyName}
+              onRevokeDevice={() => {
+                setCurrentUser(null);
+                setLicenseInfo((prev) => ({
+                  ...prev,
+                  isLicensed: false,
+                  isExpired: true,
+                  status: 'REVOKED'
+                }));
+              }}
+            />
+          ) : (
+            <PlaceholderView activeTabId={activeTab} />
+          )}
+        </main>
+      </div>
+
+      {/* Global Open Shift Modal triggered from POS or Header */}
+      {showOpenShiftModal && (
+        <OpenShiftModal
+          isOpen={true}
+          onClose={() => setShowOpenShiftModal(false)}
+          onOpenShift={handleOpenShift}
+        />
+      )}
+    </div>
+  );
+}
