@@ -222,72 +222,89 @@ export function CloseShiftModal({
           }
         }
 
-        // Resolve the local LAN report URL and daily summary URL.
-        // Pure Offline: QR points directly to the local server via LAN IP.
-        let hostedReportUrl = '';
-        let localReportUrl = '';
-        let dailyUrl = '';
-        let previewBase = '';
-        try {
-          await initReportServer();
-          const pharmacyId = readSettings().cloudPharmacyId || 'PHARMACY-LOCAL';
-          localReportUrl = await resolveLocalReportUrl(activeShift.id, pharmacyId);
-          const localBase = getLocalReportBaseUrl();
-          dailyUrl = localBase ? `${localBase}/d/${localDateKey(activeShift.closed_at || activeShift.opened_at || new Date())}` : '';
-          hostedReportUrl = dailyUrl || localReportUrl;
-          previewBase = localBase;
+        // Self-contained Offline QR Report Payload (NO WI-FI, NO INTERNET, NO LOCAL NETWORK)
+        // Works anywhere simply by pointing any mobile camera or scanner at the screen.
+        const outOfStockItems = fullAudit.outOfStock || [];
+        const qrReportLines = [
+          `📊 ملخص تقفيل الوردية - ${pharmacyName}`,
+          `الوردية: #${activeShift.id} | الكاشير: ${activeShift.cashier_name || 'الكاشير'}`,
+          `فتح: ${openedTime} | قفل: ${closedTime} (${dateStr})`,
+          `────────────────────────`,
+          `💰 [ المبيعات والتحصيل ]`,
+          `• كاش: ${cashSales.toFixed(2)} ج.م`,
+          `• فيزا: ${visaSales.toFixed(2)} | إنستاباي: ${instapaySales.toFixed(2)}`,
+          `• آجل: ${creditSales.toFixed(2)} | ديون: ${debtCollections.toFixed(2)}`,
+          `• الإجمالي: ${totalSales.toFixed(2)} ج.م (فواتير: ${(fullAudit.invoices || []).length})`,
+          `────────────────────────`,
+          `💵 [ جرد درج النقدية ]`,
+          `• عهدة البداية: ${openingCash.toFixed(2)} ج.م`,
+          `• المتوقع بالدرج: ${calculatedExpected.toFixed(2)} ج.م`,
+          `• الفعلي المسلّم: ${calculatedActual.toFixed(2)} ج.م`,
+          `• الفرق: ${calculatedDiff >= 0 ? '+' : ''}${calculatedDiff.toFixed(2)} ج.م (${calculatedDiff === 0 ? 'مطابق' : calculatedDiff > 0 ? 'زيادة' : 'عجز'})`,
+          `• مصروفات نثريات: ${pettyExpenses.toFixed(2)} ج.م`,
+          `────────────────────────`,
+          `📦 [ التوريد والمرتجعات ]`,
+          `• فواتير توريد: ${(fullAudit.purchases || []).length} (${purchasesTotal.toFixed(2)} ج.م)`,
+          `• مرتجع موردين: ${supplierReturns.length} (${supplierReturnsTotal.toFixed(2)} ج.م)`,
+          `• توالف وإتلاف: ${disposals.length} (${disposalsTotal.toFixed(2)} ج.م)`
+        ];
 
-          // Push local snapshot to embedded report server immediately
-          try {
-            await sqliteService.backfillReportSnapshot().catch(() => {});
-            await sqliteService.resendShiftToReportServer(activeShift.id).catch(() => {});
-          } catch (e) {}
-        } catch (e) {
-          hostedReportUrl = '';
+        // Top Sold Items (compact)
+        if (fullAudit.soldItems && fullAudit.soldItems.length > 0) {
+          qrReportLines.push(`────────────────────────`, `💊 [ أهم الأصناف المباعة (${fullAudit.soldItems.length}) ]`);
+          fullAudit.soldItems.slice(0, 10).forEach((item) => {
+            qrReportLines.push(`• ${shortName(item.trade_name_ar || item.trade_name)} × ${item.total_qty} = ${Number(item.total_amount || 0).toFixed(0)}`);
+          });
+          if (fullAudit.soldItems.length > 10) {
+            qrReportLines.push(`+ ${fullAudit.soldItems.length - 10} صنف آخر`);
+          }
         }
+
+        // Out of Stock (Shortages Alert)
+        if (outOfStockItems.length > 0) {
+          qrReportLines.push(`────────────────────────`, `🚨 [ نواقص - أصناف رصيدها صفر (${outOfStockItems.length}) ]`);
+          outOfStockItems.slice(0, 8).forEach((item) => {
+            qrReportLines.push(`• ${shortName(item.trade_name_ar || item.trade_name)} (0 ع)`);
+          });
+          if (outOfStockItems.length > 8) {
+            qrReportLines.push(`+ ${outOfStockItems.length - 8} صنف ناقص آخر`);
+          }
+        }
+
+        qrReportLines.push(`────────────────────────`, `تم اعتماد وتقفيل الوردية.`);
+
+        const qrTextPayload = qrReportLines.join('\n');
+        setReportText(completeReport);
+
         if (isCurrent) {
-          setReportUrl(hostedReportUrl);
-          setLocalReportUrl(localReportUrl);
-          setDailyUrl(dailyUrl);
-          setReportBase(previewBase || '');
-          setQrMode(hostedReportUrl ? 'URL' : 'TEXT');
+          setQrMode('TEXT');
         }
 
         const qrOptions = {
-          width: 520,
+          width: 540,
           margin: 2,
           color: { dark: '#0B1220', light: '#FFFFFF' },
-          errorCorrectionLevel: 'M'
+          errorCorrectionLevel: 'L' // Maximum data capacity for high density text
         };
-        let qrPayload = hostedReportUrl;
-        if (!qrPayload) {
-          qrPayload = qrLines.join('\n');
-          if (qrPayload.length > 900) qrPayload = qrPayload.slice(0, 900);
-        }
+
         let url = '';
         try {
-          url = await QRCode.toDataURL(qrPayload, qrOptions);
+          url = await QRCode.toDataURL(qrTextPayload, qrOptions);
         } catch (qrErr) {
-          console.warn('QR payload too large, generating minimal QR:', qrErr);
-          const compact = [
-            `وردية #${activeShift.id} - ${activeShift.cashier_name || 'الكاشير'}`,
+          console.warn('Full text QR too large, generating compact summary:', qrErr);
+          const compactSummary = [
+            `تقرير وردية - ${pharmacyName}`,
+            `#${activeShift.id} - ${activeShift.cashier_name || 'الكاشير'}`,
             `مبيعات: ${totalSales.toFixed(2)} (كاش ${cashSales.toFixed(2)} / آجل ${creditSales.toFixed(2)})`,
-            `متوقع: ${calculatedExpected.toFixed(2)} | فعلي: ${calculatedActual.toFixed(2)} | فرق: ${calculatedDiff.toFixed(2)}`,
-            `توريد: ${(fullAudit.purchases || []).length} (${purchasesTotal.toFixed(2)})`,
-            `مرتجع: ${supplierReturns.length} (${supplierReturnsTotal.toFixed(2)})`,
-            `إتلاف: ${disposals.length} | مصروفات: ${expensesTotal.toFixed(2)}`
+            `فواتير: ${(fullAudit.invoices || []).length} | مصروفات: ${pettyExpenses.toFixed(2)}`,
+            `عهدة: ${openingCash.toFixed(2)} | متوقع: ${calculatedExpected.toFixed(2)} | فعلي: ${calculatedActual.toFixed(2)}`,
+            `فرق الدرج: ${calculatedDiff >= 0 ? '+' : ''}${calculatedDiff.toFixed(2)} (${calculatedDiff === 0 ? 'مطابق' : calculatedDiff > 0 ? 'زيادة' : 'عجز'})`,
+            `توريد: ${(fullAudit.purchases || []).length} (${purchasesTotal.toFixed(2)}) | مرتجع: ${supplierReturns.length}`,
+            `توالف: ${disposals.length} | نواقص: ${outOfStockItems.length} صنف`
           ].join('\n');
-          url = await QRCode.toDataURL(compact, qrOptions);
+          url = await QRCode.toDataURL(compactSummary, qrOptions);
         }
         if (isCurrent) setQrDataUrl(url);
-
-        // A second QR for the on-site address (same Wi-Fi, no internet needed).
-        if (localReportUrl) {
-          try {
-            const localQr = await QRCode.toDataURL(localReportUrl, { ...qrOptions, width: 320 });
-            if (isCurrent) setLocalQrDataUrl(localQr);
-          } catch (e) {}
-        }
       } catch (err) {
         console.warn('Error generating shift audit QR:', err);
       }
@@ -545,46 +562,27 @@ export function CloseShiftModal({
           {activeTab === 'QR' && (
             <div className="flex flex-col md:flex-row items-center gap-6 justify-center">
               
-              {/* QR Boxes: permanent cloud QR + on-site LAN QR */}
-              <div className="flex flex-col sm:flex-row items-stretch gap-4 shrink-0">
-              <div className="bg-white p-5 rounded-3xl shadow-2xl text-center border-4 border-emerald-500/80 flex flex-col items-center shrink-0">
-                {qrDataUrl ? (
-                  <img
-                    src={qrDataUrl}
-                    alt="Shift Barcode QR"
-                    className="w-60 h-60 object-contain rounded-xl"
-                  />
-                ) : (
-                  <div className="w-60 h-60 flex items-center justify-center text-slate-400 font-bold">
-                    جاري توليد الباركود...
+              {/* QR Box: Fully Self-Contained Offline Data QR */}
+              <div className="flex flex-col items-center gap-4 shrink-0">
+                <div className="bg-white p-5 rounded-3xl shadow-2xl text-center border-4 border-emerald-500/80 flex flex-col items-center shrink-0">
+                  {qrDataUrl ? (
+                    <img
+                      src={qrDataUrl}
+                      alt="Shift Barcode QR"
+                      className="w-72 h-72 object-contain rounded-xl"
+                    />
+                  ) : (
+                    <div className="w-72 h-72 flex items-center justify-center text-slate-400 font-bold">
+                      جاري توليد الباركود...
+                    </div>
+                  )}
+                  <div className="mt-3 text-slate-900 font-mono font-bold text-xs bg-slate-100 px-3 py-1.5 rounded-xl border border-slate-300 w-full">
+                    وردية #{id} • مبيعات: {totalSales.toFixed(0)} ج.م • فعلي: {actualCash.toFixed(0)} ج.م
                   </div>
-                )}
-                <div className="mt-3 text-slate-900 font-mono font-bold text-xs bg-slate-100 px-3 py-1.5 rounded-xl border border-slate-300 w-full">
-                  ملخص اليوم • وردية #{id} • مبيعات: {totalSales.toFixed(0)} ج.م • فعلي: {actualCash.toFixed(0)} ج.م
-                </div>
-                <div className={`mt-2 w-full px-3 py-1.5 rounded-xl text-[10px] font-bold border ${qrMode === 'URL' ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-amber-50 text-amber-800 border-amber-200'}`}>
-                  {qrMode === 'URL'
-                    ? '📶 باركود ملخص اليوم — يُفتح من كاميرا الموبايل على نفس شبكة الصيدلية (بدون إنترنت)'
-                    : '📄 كود نصي — تقرير الوردية المباشر'}
-                </div>
-              </div>
-
-              {/* Second QR: the on-site address (same Wi-Fi, no internet) */}
-              {localQrDataUrl && (
-                <div className="bg-white p-4 rounded-3xl shadow-2xl text-center border-4 border-sky-400/80 flex flex-col items-center shrink-0">
-                  <img
-                    src={localQrDataUrl}
-                    alt="On-site LAN QR"
-                    className="w-36 h-36 object-contain rounded-xl"
-                  />
-                  <div className="mt-2 text-slate-900 font-bold text-[11px] bg-sky-50 px-3 py-1.5 rounded-xl border border-sky-200 w-full">
-                    📶 QR داخل المحل (نفس الواي فاي)
-                  </div>
-                  <div className="mt-1 text-[9px] text-slate-500 text-center leading-4">
-                    بدون إنترنت — للأجهزة الموجودة داخل الصيدلية فقط
+                  <div className="mt-2 w-full px-3 py-1.5 rounded-xl text-[10px] font-bold border bg-emerald-50 text-emerald-800 border-emerald-200">
+                    📷 مسح فوري بكاميرا الموبايل — بدون إنترنت وبدون واي فاي نهائياً
                   </div>
                 </div>
-              )}
               </div>
 
               {/* Actions & Summary Box */}
@@ -592,52 +590,21 @@ export function CloseShiftModal({
                 <div className="bg-[#17233A] border border-[#23324D] p-4 rounded-2xl space-y-3">
                   <div className="flex items-center gap-2 text-emerald-400 font-bold text-sm">
                     <Smartphone className="w-5 h-5" />
-                    <span>{qrMode === 'URL' ? 'امسح الباركود لفتح ملخص اليوم الشامل' : 'مسح مباشر بكاميرا الموبايل أو قارئ الباركود'}</span>
+                    <span>مسح مباشر بكاميرا الموبايل (أوفلاين 100%)</span>
                   </div>
                   <p className="text-xs text-slate-300 leading-relaxed">
-                    {qrMode === 'URL'
-                      ? 'امسح الباركود بكاميرا الموبايل (وأنت متصل بشبكة الواي فاي للصيدلية) ليفتح لك صفحة كاملة تشمل: كل المبيعات، عهدة ودرج النقدية والعجز والزيادة، الأصناف المباعة، فواتير التوريد، وقائمة النواقص (الأصناف التي نفدت).'
-                      : 'امسح هذا الباركود بأي هاتف ذكي ليظهر ملخص الوردية كاملاً.'}
+                    وجّه كاميرا أي هاتف على الباركود وسيظهر لك التقرير الشامل مباشرة على شاشة الموبايل بدون اتصال بالإنترنت أو راوتر أو واي فاي نهائياً.
                   </p>
 
-                  {qrMode === 'URL' && (dailyUrl || reportUrl) && (
-                    <div className="bg-[#0B1220] border border-emerald-500/30 rounded-xl p-2.5 space-y-1.5">
-                      <div className="flex items-center justify-between">
-                        <div className="text-[10px] text-slate-400 font-bold">رابط التقرير عبر الشبكة الداخلية:</div>
-                        <button
-                          type="button"
-                          onClick={handleCopyReport}
-                          className="px-2 py-0.5 rounded-lg bg-[#17233A] hover:bg-[#202E4C] border border-[#23324D] text-[10px] font-bold text-teal-300 cursor-pointer"
-                        >
-                          {copied ? 'تم النسخ ✓' : 'نسخ'}
-                        </button>
-                      </div>
-                      <div dir="ltr" className="text-[10px] text-emerald-300 font-mono break-all text-left select-text">
-                        {dailyUrl || reportUrl}
-                      </div>
+                  <div className="p-3 bg-[#0B1220] rounded-xl border border-[#23324D] text-xs text-slate-300 space-y-1.5 font-mono">
+                    <div className="text-emerald-400 font-bold flex items-center gap-1.5 font-cairo text-xs mb-1">
+                      <span>✓ يشمل الباركود:</span>
                     </div>
-                  )}
-
-                  {dailyUrl && (
-                    <div className="bg-[#0B1220] border border-amber-500/30 rounded-xl p-2.5 space-y-1.5">
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="text-[10px] text-amber-300 font-bold">📅 رابط ملخص اليوم الدائم (يحفظه المالك):</div>
-                        <button
-                          type="button"
-                          onClick={handleCopyDaily}
-                          className="px-2 py-1 rounded-lg bg-[#17233A] hover:bg-[#202E4C] border border-[#23324D] text-[10px] font-bold text-slate-200 cursor-pointer shrink-0"
-                        >
-                          {copiedDaily ? 'تم النسخ ✓' : 'نسخ'}
-                        </button>
-                      </div>
-                      <div dir="ltr" className="text-[10px] text-amber-200 font-mono break-all text-left select-text">
-                        {dailyUrl}
-                      </div>
-                      <div className="text-[10px] text-slate-500 leading-4">
-                        صفحة يوم كامل (مبيعات، آجل، توريد، مرتجعات، إتلاف، مصروفات، جرد الدرج) — وتعرض آخر مزامنة متاحة حتى لو الصيدلية بدون إنترنت.
-                      </div>
-                    </div>
-                  )}
+                    <div>• مبيعات كاش وفيزا وآجل وفواتير البيع</div>
+                    <div>• جرد الدرج: عهدة، متوقع، فعلي، عجز/زيادة</div>
+                    <div>• فواتير التوريد، المرتجع، التوالف، والمصروفات</div>
+                    <div>• قائمة أهم الأصناف المباعة والنواقص</div>
+                  </div>
 
                   <div className="grid grid-cols-2 gap-2 text-xs pt-2 border-t border-[#23324D]">
                     <div className="bg-[#111A2B] p-2.5 rounded-xl border border-[#23324D]">
