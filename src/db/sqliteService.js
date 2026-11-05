@@ -649,14 +649,17 @@ class SQLiteService {
       return this._formatRows(res);
     }
 
+    // Escape before ANY interpolation: sql.js exec() runs multiple statements,
+    // so a crafted barcode containing a quote could otherwise run arbitrary SQL.
+    const safeQ = String(q).replace(/'/g, "''");
+
     // Exact barcode match (Indexed lookup in 0.1ms)
-    const exactBarcode = this.db.exec(`SELECT * FROM medicines WHERE barcode = '${q}' LIMIT 1`);
+    const exactBarcode = this.db.exec(`SELECT * FROM medicines WHERE barcode = '${safeQ}' LIMIT 1`);
     if (exactBarcode.length > 0 && exactBarcode[0].values.length > 0) {
       return this._formatRows(exactBarcode);
     }
 
     // Substring search in name, arabic name, generic, shelf
-    const safeQ = q.replace(/'/g, "''");
     const sql = `
       SELECT * FROM medicines 
       WHERE barcode LIKE '${safeQ}%'
@@ -682,6 +685,15 @@ class SQLiteService {
     await this.init();
     const safeBarcode = String(barcode).trim().replace(/'/g, "''");
     const res = this.db.exec(`SELECT * FROM medicines WHERE barcode = '${safeBarcode}' LIMIT 1`);
+    const rows = this._formatRows(res);
+    return rows[0] || null;
+  }
+
+  async getMedicineById(id) {
+    await this.init();
+    const safeId = Number(id);
+    if (!Number.isFinite(safeId) || safeId <= 0) return null;
+    const res = this.db.exec(`SELECT * FROM medicines WHERE id = ${safeId} LIMIT 1`);
     const rows = this._formatRows(res);
     return rows[0] || null;
   }
@@ -833,10 +845,12 @@ class SQLiteService {
     const items = Array.isArray(invoiceData.items) ? invoiceData.items : [];
     if (items.length === 0) throw new Error('لا يمكن حفظ فاتورة بدون أصناف');
 
-    // Always attach the sale to the currently open shift.
+    // Always attach the sale to the currently OPEN shift from the database.
+    // Never trust a caller-supplied shift_id: it may belong to a shift that
+    // was already closed (a stale UI), which would corrupt a closed Z-report.
     // STRICT REQUIREMENT: No sales allowed without an open shift.
     const currentShift = await this.getCurrentShift();
-    const shiftId = invoiceData.shift_id || currentShift?.id || '';
+    const shiftId = currentShift?.id || '';
     if (!shiftId) {
       throw new Error('لا توجد وردية مفتوحة! يرجى فتح وردية أولاً لتسجيل الفواتير.');
     }
@@ -898,33 +912,45 @@ class SQLiteService {
       }
       itemStmt.free();
 
-      // 3. Deduct stock atomically (boxes and strips handled correctly)
+      // 3. Deduct stock atomically. Stock is validated per MEDICINE (not per
+      // cart line) so 1 box + 1 strip of the same medicine cannot each pass a
+      // separate check and oversell the shelf. Any shortage rolls the whole
+      // sale back instead of silently clamping stock to zero.
       const stockStmt = this.db.prepare('UPDATE medicines SET stock_boxes = ?, stock_strips = ? WHERE id = ?');
+      const requiredStrips = new Map();
+      const medicineInfo = new Map();
       for (const item of items) {
         const medicineId = Number(item.medicine_id);
         const qty = Number(item.quantity) || 0;
         if (!medicineId || qty <= 0) continue;
 
         const medRows = this._formatRows(
-          this.db.exec(`SELECT stock_boxes, stock_strips, strips_per_box FROM medicines WHERE id = ${medicineId} LIMIT 1`)
+          this.db.exec(`SELECT stock_boxes, stock_strips, strips_per_box, trade_name, trade_name_ar FROM medicines WHERE id = ${medicineId} LIMIT 1`)
         );
         if (medRows.length === 0) continue;
 
         const spb = Math.max(1, parseInt(medRows[0].strips_per_box, 10) || 1);
-        let boxes = Math.max(0, parseInt(medRows[0].stock_boxes, 10) || 0);
-        let strips = Math.max(0, parseInt(medRows[0].stock_strips, 10) || 0);
+        medicineInfo.set(medicineId, { med: medRows[0], spb });
+        const needed = item.is_strip ? qty : qty * spb;
+        requiredStrips.set(medicineId, (requiredStrips.get(medicineId) || 0) + needed);
+      }
 
-        if (item.is_strip) {
-          // Convert everything to strips, subtract, then split back into boxes/strips
-          let totalStrips = (boxes * spb) + strips - qty;
-          if (totalStrips < 0) totalStrips = 0;
-          boxes = Math.floor(totalStrips / spb);
-          strips = totalStrips % spb;
-        } else {
-          boxes = Math.max(0, boxes - qty);
+      for (const [medicineId, needed] of requiredStrips) {
+        const { med, spb } = medicineInfo.get(medicineId);
+        const available = (Math.max(0, parseInt(med.stock_boxes, 10) || 0) * spb)
+          + Math.max(0, parseInt(med.stock_strips, 10) || 0);
+        if (needed > available) {
+          const name = med.trade_name_ar || med.trade_name || `#${medicineId}`;
+          throw new Error(`الكمية المطلوبة من [${name}] غير متوفرة بالمخزن (المطلوب يعادل ${needed} شريط، المتاح ${available} شريط).`);
         }
+      }
 
-        stockStmt.run([boxes, strips, medicineId]);
+      for (const [medicineId, needed] of requiredStrips) {
+        const { med, spb } = medicineInfo.get(medicineId);
+        const boxes = Math.max(0, parseInt(med.stock_boxes, 10) || 0);
+        const strips = Math.max(0, parseInt(med.stock_strips, 10) || 0);
+        const remaining = (boxes * spb) + strips - needed;
+        stockStmt.run([Math.floor(remaining / spb), remaining % spb, medicineId]);
       }
       stockStmt.free();
 
@@ -1134,6 +1160,12 @@ class SQLiteService {
   async recordExpense(amount, reason, shiftId, cashierName = '') {
     await this.init();
     const parsedAmount = parseFloat(amount) || 0;
+    if (!shiftId) {
+      throw new Error('لا توجد وردية مفتوحة! لا يمكن خصم مصروف من الدرج بدون وردية.');
+    }
+    if (parsedAmount <= 0) {
+      throw new Error('قيمة المصروف يجب أن تكون أكبر من صفر.');
+    }
 
     this.db.run('BEGIN TRANSACTION;');
     try {
@@ -1144,16 +1176,16 @@ class SQLiteService {
       stmt.run([shiftId, new Date().toISOString(), parsedAmount, reason, cashierName]);
       stmt.free();
 
-      // Deduct from shift expected cash!
-      this.db.run(`
-        UPDATE shifts SET
-          petty_expenses = petty_expenses + ${parsedAmount}
-        WHERE id = '${shiftId}' OR status = 'OPEN';
-
-        UPDATE shifts SET
-          expected_cash = opening_cash + cash_sales + debt_collections - petty_expenses
-        WHERE id = '${shiftId}' OR status = 'OPEN';
-      `);
+      // Deduct from the drawer of THIS shift only — never touch another
+      // shift that happens to be OPEN, and never a closed Z-report.
+      this.db.run(
+        'UPDATE shifts SET petty_expenses = petty_expenses + ? WHERE id = ?',
+        [parsedAmount, shiftId]
+      );
+      this.db.run(
+        'UPDATE shifts SET expected_cash = opening_cash + cash_sales + debt_collections - petty_expenses WHERE id = ?',
+        [shiftId]
+      );
 
       this.db.run('COMMIT;');
       this.saveToDisk();
@@ -1265,6 +1297,21 @@ class SQLiteService {
       discrepancy
     }, shiftId);
     console.log(`🔒 Shift ${shiftId} closed: Expected=${expected}, Counted=${counted}, Discrepancy=${discrepancy}`);
+
+    // Automatic SQLite Database Backup to offline backups folder
+    try {
+      if (typeof window !== 'undefined' && window.require) {
+        const { ipcRenderer } = window.require('electron');
+        if (ipcRenderer && ipcRenderer.invoke) {
+          ipcRenderer.invoke('db:backup', `shift_${shiftId}`).catch((e) => {
+            console.warn('Shift auto-backup error:', e);
+          });
+        }
+      }
+    } catch (bkErr) {
+      console.warn('Backup trigger error:', bkErr);
+    }
+
     return {
       ...shift,
       closed_at: closedAt,
@@ -1863,6 +1910,7 @@ class SQLiteService {
     // This keeps the free cloud quota (1 000 writes / day) comfortable even
     // with the periodic heartbeat. Every endpoint has its own fingerprint.
     const snapshotHash = this._hashSnapshot(snapshot);
+    const localEndpoint = getLocalSnapshotEndpoint();
     const results = [];
     let anySuccess = false;
     let allSkipped = true;
@@ -1873,7 +1921,10 @@ class SQLiteService {
       try {
         lastHash = String(localStorage.getItem(hashKey) || '');
       } catch (e) {}
-      if (lastHash && lastHash === snapshotHash) {
+      // Only the on-site server may skip an unchanged snapshot. A free cloud
+      // host can wipe its disk when it sleeps, so the periodic heartbeat MUST
+      // re-push the full data even when the local database did not change.
+      if (endpoint === localEndpoint && lastHash && lastHash === snapshotHash) {
         results.push({ endpoint, success: true, skipped: true });
         continue;
       }

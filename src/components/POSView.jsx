@@ -78,8 +78,11 @@ export function POSView({
   // Search input ref for persistent auto-focus
   const searchInputRef = useRef(null);
 
-  // A missing shift must NEVER block selling, returns, disposals or invoices.
-  // It only produces a one-time warning per shift state.
+  // Prevents a double-click / key-repeat on F1 from saving the same cart twice.
+  const submittingRef = useRef(false);
+
+  // Selling is blocked while no shift is open (enforced by requireShift);
+  // this ref only avoids repeating the same warning in a single state.
   const noShiftWarnedRef = useRef(false);
 
   // 1. Crash Recovery: Load saved cart on initial mount
@@ -111,6 +114,29 @@ export function POSView({
   useEffect(() => {
     searchInputRef.current?.focus();
   }, []);
+
+  // Initialise the footer shift counters from the real shift, so switching
+  // tabs (which remounts POSView) no longer resets "shift sales" to zero.
+  useEffect(() => {
+    let alive = true;
+    const loadShiftStats = async () => {
+      if (!currentShift?.id) {
+        setShiftSalesTotal(0);
+        setShiftInvoicesCount(0);
+        return;
+      }
+      const total = Number(currentShift.total_sales)
+        || ['cash_sales', 'visa_sales', 'instapay_sales', 'credit_sales']
+          .reduce((sum, key) => sum + (Number(currentShift[key]) || 0), 0);
+      setShiftSalesTotal(total);
+      try {
+        const audit = await sqliteService.getShiftFullAudit(currentShift.id);
+        if (alive) setShiftInvoicesCount(audit?.invoices?.length || 0);
+      } catch (e) {}
+    };
+    loadShiftStats();
+    return () => { alive = false; };
+  }, [currentShift?.id]);
 
   const showToast = (msg, type = 'success') => {
     setToastMessage(msg);
@@ -167,7 +193,7 @@ export function POSView({
         handleKickCashDrawer();
       } else if (e.key === 'F8') {
         e.preventDefault();
-        setShowExpenseModal(true);
+        if (requireShift()) setShowExpenseModal(true);
       } else if (e.key === 'F12') {
         e.preventDefault();
         setShowQRModal(true);
@@ -462,20 +488,40 @@ export function POSView({
       return;
     }
 
-    // 2. Strict Zero-Stock and Over-Stock Verification
+    // 2. Strict Zero-Stock and Over-Stock Verification.
+    // Re-read stock from SQLite (the cart may hold a stale snapshot) and
+    // aggregate demand per medicine so a box line + a strip line of the same
+    // medicine cannot each pass against the full stock.
+    const demandByMedicine = new Map();
     for (const item of cart) {
-      const stockBoxes = parseInt(item.stock_boxes, 10) || 0;
-      const stockStrips = parseInt(item.stock_strips, 10) || 0;
-      const stripsPerBox = parseInt(item.strips_per_box, 10) || 1;
-      const totalStrips = (stockBoxes * stripsPerBox) + stockStrips;
-      const maxStock = item.unitType === 'box' ? stockBoxes : totalStrips;
+      const medicineId = Number(item.id);
+      const qty = Number(item.quantity) || 0;
+      if (!medicineId || qty <= 0) continue;
 
-      if (maxStock <= 0) {
-        showToast(`❌ الصنف [${item.trade_name_ar || item.trade_name}] نفد من المخزن تماماً (رصيد 0). يرجى حذفه لإتمام البيع!`, 'error');
+      let med = item;
+      try {
+        const fresh = await sqliteService.getMedicineById(medicineId);
+        if (fresh) med = fresh;
+      } catch (e) {}
+
+      const stripsPerBox = Math.max(1, parseInt(med.strips_per_box, 10) || 1);
+      const existing = demandByMedicine.get(medicineId) || { med, stripsPerBox, needed: 0 };
+      existing.needed += item.unitType === 'strip' ? qty : qty * stripsPerBox;
+      demandByMedicine.set(medicineId, existing);
+    }
+
+    for (const { med, stripsPerBox, needed } of demandByMedicine.values()) {
+      const stockBoxes = parseInt(med.stock_boxes, 10) || 0;
+      const stockStrips = parseInt(med.stock_strips, 10) || 0;
+      const available = (stockBoxes * stripsPerBox) + stockStrips;
+      const name = med.trade_name_ar || med.trade_name;
+
+      if (available <= 0) {
+        showToast(`❌ الصنف [${name}] نفد من المخزن تماماً (رصيد 0). يرجى حذفه لإتمام البيع!`, 'error');
         return;
       }
-      if (item.quantity > maxStock) {
-        showToast(`❌ كمية [${item.trade_name_ar || item.trade_name}] في السلة (${item.quantity}) تتجاوز رصيد المخزن (${maxStock})!`, 'error');
+      if (needed > available) {
+        showToast(`❌ الكمية المطلوبة من [${name}] تتجاوز رصيد المخزن (المتاح ${available} شريط فقط)!`, 'error');
         return;
       }
     }
@@ -504,6 +550,11 @@ export function POSView({
         showToast(`⚠️ إجمالي مديونية العميل سيتجاوز سقف الائتمان (${limit} ج.م).`, 'warning');
       }
     }
+
+    // Block re-entry while the invoice is being written (double-click / F1
+    // key-repeat would otherwise save two invoices and deduct stock twice).
+    if (submittingRef.current) return;
+    submittingRef.current = true;
 
     const invoiceNum = await sqliteService.generateInvoiceId();
 
@@ -550,6 +601,7 @@ export function POSView({
       console.log('✅ Invoice recorded in SQLite with strict cash drawer rules.');
     } catch (dbErr) {
       console.error('Invoice save failed:', dbErr);
+      submittingRef.current = false;
       showToast(`❌ تعذر حفظ الفاتورة في قاعدة البيانات: ${dbErr?.message || 'خطأ غير معروف'}`, 'warning');
       return;
     }
@@ -589,6 +641,7 @@ export function POSView({
     setDiscount(0);
     setPaidAmount('');
     localStorage.removeItem('PHARMACY_ACTIVE_CART');
+    submittingRef.current = false;
   };
 
   const handleOpenAlternatives = (medicine) => {
@@ -815,8 +868,8 @@ export function POSView({
               </div>
             </div>
 
-            {/* Customer Dropdown Selector & Clear */}
-            <div className="flex items-center gap-2">
+            {/* Customer Dropdown Selector, Quick Park & Clear */}
+            <div className="flex items-center gap-1.5 flex-wrap">
               <select
                 value={selectedCustomerId}
                 onChange={(e) => setSelectedCustomerId(Number(e.target.value))}
@@ -829,6 +882,29 @@ export function POSView({
                   </option>
                 ))}
               </select>
+
+              {/* Quick Park Bill Touch Button */}
+              <button
+                type="button"
+                onClick={handleParkCurrentBill}
+                disabled={cart.length === 0}
+                className="h-8 px-2.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-xs font-bold flex items-center gap-1 transition-all disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                title="تعليق الفاتورة الحالية لخدمة عميل آخر (F2)"
+              >
+                <span>تعليق F2</span>
+              </button>
+
+              {/* Parked Bills Modal Button */}
+              {parkedBills.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setShowParkedModal(true)}
+                  className="h-8 px-2.5 rounded-lg bg-teal-500/20 hover:bg-teal-500/30 text-teal-300 border border-teal-500/40 text-xs font-bold flex items-center gap-1 transition-all cursor-pointer animate-pulse"
+                  title="استرجاع الفواتير المعلقة (F3)"
+                >
+                  <span>المعلقة ({parkedBills.length}) F3</span>
+                </button>
+              )}
 
               <button
                 type="button"
@@ -871,6 +947,30 @@ export function POSView({
                       <div className="text-[10px] text-slate-400 truncate">
                         {item.trade_name}
                       </div>
+
+                      {/* Expiry Warning: if expiry is within 6 months or expired */}
+                      {item.expiry_date && (() => {
+                        try {
+                          const expDate = new Date(item.expiry_date);
+                          const now = new Date();
+                          const diffMonths = (expDate.getFullYear() - now.getFullYear()) * 12 + (expDate.getMonth() - now.getMonth());
+                          if (diffMonths <= 0) {
+                            return (
+                              <span className="inline-block mt-0.5 text-[9px] font-bold px-1.5 py-0.2 rounded bg-rose-500/20 text-rose-300 border border-rose-500/40">
+                                ⚠️ منتهي الصلاحية ({item.expiry_date})
+                              </span>
+                            );
+                          }
+                          if (diffMonths <= 6) {
+                            return (
+                              <span className="inline-block mt-0.5 text-[9px] font-bold px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                                ⏳ ينتهي خلال {diffMonths} شهر ({item.expiry_date})
+                              </span>
+                            );
+                          }
+                        } catch (e) {}
+                        return null;
+                      })()}
                       
                       {/* Unit Price indicator */}
                       <div className="text-[11px] font-mono text-teal-400 mt-1" dir="ltr">
@@ -1179,10 +1279,14 @@ export function POSView({
           try {
             await sqliteService.recordExpense(expense.amount, expense.title, currentShift?.id || '', currentUser?.full_name || currentUser?.name || 'الكاشير');
             console.log('✅ Expense saved to SQLite and deducted from drawer expected cash.');
+            showToast(`تم تسجيل منصرف [${expense.title}] بقيمة ${expense.amount} ج.م وخصمها من الدرج (F8)`, 'info');
           } catch (e) {
             console.warn('Expense record error:', e);
+            showToast(`❌ تعذر تسجيل المصروف: ${e?.message || 'خطأ غير معروف'}`, 'error');
+            // Rethrow so QuickExpenseModal keeps the form open instead of
+            // telling the cashier the drawer was reduced when it was not.
+            throw e;
           }
-          showToast(`تم تسجيل منصرف [${expense.title}] بقيمة ${expense.amount} ج.م وخصمها من الدرج (F8)`, 'info');
         }}
       />
 

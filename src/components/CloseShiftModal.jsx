@@ -451,16 +451,22 @@ export function CloseShiftModal({
     }
     setIsClosing(true);
     playCashDrawerSound();
-    setTimeout(() => {
-      onConfirmAction({
-        ...activeShift,
-        actual_cash: actualCash,
-        expected_cash: expectedCash,
-        discrepancy: currentDiscrepancy,
-        closed_at: new Date().toISOString()
-      });
-      setIsClosing(false);
-      onClose();
+    setTimeout(async () => {
+      try {
+        await onConfirmAction({
+          ...activeShift,
+          actual_cash: actualCash,
+          expected_cash: expectedCash,
+          discrepancy: currentDiscrepancy,
+          closed_at: new Date().toISOString()
+        });
+        // Only close the modal after the shift was really persisted.
+        onClose();
+      } catch (e) {
+        // The parent shows the error toast; keep the modal open for a retry.
+      } finally {
+        setIsClosing(false);
+      }
     }, 500);
   };
 
@@ -630,33 +636,23 @@ export function CloseShiftModal({
 
                 {/* Instant Share Buttons */}
                 <div className="space-y-2">
-                  {reportUrl && (
-                    <button
-                      type="button"
-                      onClick={handleOpenReport}
-                      className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-500 hover:to-emerald-500 text-white text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer shadow-lg"
-                    >
-                      <ExternalLink className="w-4 h-4" />
-                      <span>فتح صفحة التقرير الكاملة ومعاينتها</span>
-                    </button>
-                  )}
                   <div className="flex gap-2">
                     <button
                       type="button"
                       onClick={handleCopyReport}
-                      className="flex-1 py-3 px-4 rounded-xl bg-[#17233A] hover:bg-[#202E4C] border border-[#23324D] text-slate-200 text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer"
+                      className="flex-1 py-3 px-4 rounded-xl bg-[#17233A] hover:bg-[#202E4C] border border-[#23324D] text-slate-200 text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer active:scale-95 shadow-md"
                     >
                       <Copy className="w-4 h-4 text-teal-400" />
-                      <span>{copied ? 'تم النسخ للحافظة ✓' : (reportUrl ? 'نسخ رابط التقرير' : 'نسخ نص التقرير')}</span>
+                      <span>{copied ? 'تم نسخ التقرير كاملاً ✓' : '📋 نسخ نص التقرير'}</span>
                     </button>
 
                     <button
                       type="button"
                       onClick={handleWhatsAppShare}
-                      className="flex-1 py-3 px-4 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-300 text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer"
+                      className="flex-1 py-3 px-4 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer active:scale-95 shadow-lg shadow-emerald-900/30"
                     >
-                      <Share2 className="w-4 h-4 text-emerald-400" />
-                      <span>إرسال عبر واتساب 💬</span>
+                      <Share2 className="w-4 h-4 text-white" />
+                      <span>إرسال واتساب للمالك 💬</span>
                     </button>
                   </div>
                 </div>

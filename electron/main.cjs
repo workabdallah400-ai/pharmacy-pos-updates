@@ -547,6 +547,50 @@ ipcMain.handle('db:write', async (event, buffer) => {
   }
 });
 
+// Automatic Offline Snapshot Backup on Shift Close or Manual Trigger
+ipcMain.handle('db:backup', async (event, label = 'shift-close') => {
+  try {
+    const targetPath = getDatabasePath();
+    if (!fs.existsSync(targetPath)) return { success: false, error: 'Database file not found' };
+
+    const backupDir = path.join(path.dirname(targetPath), 'backups');
+    if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true });
+
+    const now = new Date();
+    const dateStr = now.toISOString().slice(0, 10);
+    const timeStr = `${String(now.getHours()).padStart(2, '0')}-${String(now.getMinutes()).padStart(2, '0')}-${String(now.getSeconds()).padStart(2, '0')}`;
+    const cleanLabel = String(label || 'shift').replace(/[^a-zA-Z0-9_\-]/g, '_');
+    const backupFileName = `pharmacy_backup_${dateStr}_${timeStr}_${cleanLabel}.db`;
+    const backupFilePath = path.join(backupDir, backupFileName);
+
+    fs.copyFileSync(targetPath, backupFilePath);
+    console.log(`🛡️ Automatic SQLite backup created: ${backupFilePath}`);
+
+    // Keep the latest 60 backups, delete older ones to save disk space
+    try {
+      const files = fs.readdirSync(backupDir)
+        .filter((f) => f.startsWith('pharmacy_backup_') && f.endsWith('.db'))
+        .map((f) => ({
+          name: f,
+          path: path.join(backupDir, f),
+          time: fs.statSync(path.join(backupDir, f)).mtimeMs
+        }))
+        .sort((a, b) => b.time - a.time);
+
+      if (files.length > 60) {
+        files.slice(60).forEach((oldFile) => {
+          try { fs.unlinkSync(oldFile.path); } catch (e) {}
+        });
+      }
+    } catch (cleanErr) {}
+
+    return { success: true, path: backupFilePath, fileName: backupFileName };
+  } catch (e) {
+    console.error('db:backup error:', e);
+    return { success: false, error: e.message };
+  }
+});
+
 app.whenReady().then(() => {
   startEmbeddedReportServer();
   stageBundledUpdateFeed();
