@@ -1,18 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { X, Smartphone, Wifi, ShieldCheck, RefreshCw, ExternalLink, Copy, Link2 } from 'lucide-react';
+import { X, ShieldCheck, RefreshCw, ExternalLink, Copy, Link2 } from 'lucide-react';
 import QRCode from 'qrcode';
 import { sqliteService } from '../db/sqliteService';
-import { initReportServer, resolveShiftReportUrl, resolveLocalReportUrl, buildDailySummaryUrl, getPermanentReportBaseUrl, getReportBaseUrl, getReportPreviewBaseUrl, localDateKey, readSettings } from '../utils/reportServer';
+import { resolveShiftReportUrl, resolveLocalReportUrl, buildDailySummaryUrl, getReportBaseUrl, localDateKey, readSettings, ensureCloudToken } from '../utils/reportServer';
 
 export function MobileQRModal({ isOpen, onClose, shiftTotal = 0, itemsCount = 0 }) {
   const [qrDataUrl, setQrDataUrl] = useState('');
   const [summary, setSummary] = useState(null);
   const [reportUrl, setReportUrl] = useState('');
   const [reportBase, setReportBase] = useState('');
-  const [qrMode, setQrMode] = useState('TEXT');
   const [copied, setCopied] = useState(false);
-  const [localQrDataUrl, setLocalQrDataUrl] = useState('');
-  const [localReportUrl, setLocalReportUrl] = useState('');
   const [dailyUrl, setDailyUrl] = useState('');
   const [copiedDaily, setCopiedDaily] = useState(false);
 
@@ -25,37 +22,51 @@ export function MobileQRModal({ isOpen, onClose, shiftTotal = 0, itemsCount = 0 
         const shift = await sqliteService.getCurrentShift();
         const audit = shift ? await sqliteService.getShiftFullAudit(shift.id) : null;
         const s = audit?.summary || null;
+        const shiftInvoices = Array.isArray(audit?.invoices) ? audit.invoices : [];
+        const shiftPurchases = Array.isArray(audit?.purchases) ? audit.purchases : [];
+        const shiftExpenses = Array.isArray(audit?.expenses) ? audit.expenses : [];
         if (cancelled) return;
         setSummary(s);
 
-        const lines = [
-          `متابعة وردية - صيدلية النخبة الحديثة`,
-          `الوردية: #${s?.id || shift?.id || '-'}`,
-          `الكاشير: ${s?.cashier_name || shift?.cashier_name || '-'}`,
-          `إجمالي المبيعات: ${Number(s?.total_sales ?? shiftTotal ?? 0).toFixed(2)} ج.م`,
-          `كاش: ${Number(s?.cash_sales || 0).toFixed(2)} | فيزا: ${Number(s?.visa_sales || 0).toFixed(2)} | إنستاباي: ${Number(s?.instapay_sales || 0).toFixed(2)} | آجل: ${Number(s?.credit_sales || 0).toFixed(2)}`,
-          `الفواتير: ${audit?.invoices?.length ?? itemsCount}`,
-          `توريد الموردين: ${audit?.purchases?.length || 0} فاتورة`,
-          `مرتجعات/إتلاف: ${audit?.returns?.length || 0}`,
-          `المتوقع بالدرج: ${Number(s?.expected_cash || 0).toFixed(2)} ج.م`
-        ];
+        // Make sure the report token exists before building the links, so the
+        // daily/permanent URLs are not rejected with 401.
+        ensureCloudToken();
+        const settings = readSettings() || {};
+        const pharmacyName = settings.pharmacyName || 'صيدلية النخبة الحديثة';
+        const pharmacyId = settings.cloudPharmacyId || 'PHARMACY-LOCAL';
+        const shiftId = shift?.id || s?.id || '';
 
         // Self-Contained Offline Text QR: No Wi-Fi, No Internet, No Network needed
         const qrText = [
-          `📊 تقرير وردية لحظي (F12)`,
-          `الوردية: #${shift?.id || '—'} - ${shift?.cashier_name || 'الكاشير'}`,
-          `المبيعات: ${Number(shift?.total_sales ?? shiftTotal ?? 0).toFixed(2)} ج.م`,
-          `• كاش: ${Number(shift?.cash_sales || 0).toFixed(2)} | فيزا: ${Number(shift?.visa_sales || 0).toFixed(2)}`,
-          `• آجل: ${Number(shift?.credit_sales || 0).toFixed(2)} | إنستاباي: ${Number(shift?.instapay_sales || 0).toFixed(2)}`,
+          `📊 تقرير وردية لحظي (F12) - ${pharmacyName}`,
+          `الوردية: #${shiftId || '—'} - ${s?.cashier_name || shift?.cashier_name || 'الكاشير'}`,
+          `المبيعات: ${Number(s?.total_sales ?? shift?.total_sales ?? shiftTotal ?? 0).toFixed(2)} ج.م`,
+          `• كاش: ${Number(s?.cash_sales ?? shift?.cash_sales ?? 0).toFixed(2)} | فيزا: ${Number(s?.visa_sales ?? shift?.visa_sales ?? 0).toFixed(2)}`,
+          `• آجل: ${Number(s?.credit_sales ?? shift?.credit_sales ?? 0).toFixed(2)} | إنستاباي: ${Number(s?.instapay_sales ?? shift?.instapay_sales ?? 0).toFixed(2)}`,
           `فواتير البيع: ${shiftInvoices.length || itemsCount}`,
-          `عهدة البداية: ${Number(shift?.opening_cash || 0).toFixed(2)} ج.م`,
-          `المتوقع بالدرج: ${Number(shift?.expected_cash || 0).toFixed(2)} ج.م`,
+          `عهدة البداية: ${Number(s?.opening_cash ?? shift?.opening_cash ?? 0).toFixed(2)} ج.م`,
+          `المتوقع بالدرج: ${Number(s?.expected_cash ?? shift?.expected_cash ?? 0).toFixed(2)} ج.م`,
           `فواتير التوريد: ${shiftPurchases.length}`,
-          `مصروفات نثريات: ${shiftExpenses.reduce((s, e) => s + (Number(e.amount) || 0), 0).toFixed(2)} ج.م`
+          `مصروفات نثريات: ${shiftExpenses.reduce((sum, e) => sum + (Number(e.amount) || 0), 0).toFixed(2)} ج.م`
         ].join('\n');
 
+        // Hosted / LAN links for the report and the permanent daily summary.
+        // These are optional extras: the QR above already works completely
+        // offline, so a missing URL must never break the modal.
+        if (shiftId) {
+          const [shiftUrl, localUrl] = await Promise.all([
+            resolveShiftReportUrl(shiftId, pharmacyId).catch(() => ''),
+            resolveLocalReportUrl(shiftId, pharmacyId).catch(() => '')
+          ]);
+          if (!cancelled) {
+            // Prefer the permanent host; fall back to the LAN address so a
+            // phone inside the pharmacy can still open the full report.
+            setReportUrl(shiftUrl || localUrl || '');
+            setReportBase(getReportBaseUrl() || '');
+          }
+        }
         if (!cancelled) {
-          setQrMode('TEXT');
+          setDailyUrl(buildDailySummaryUrl(pharmacyId, localDateKey()) || '');
         }
 
         const url = await QRCode.toDataURL(qrText, {
@@ -155,7 +166,7 @@ export function MobileQRModal({ isOpen, onClose, shiftTotal = 0, itemsCount = 0 
           📷 مسح فوري بكاميرا الموبايل — بدون إنترنت وبدون واي فاي نهائياً
         </div>
 
-        {qrMode === 'URL' && reportUrl && (
+        {reportUrl && (
           <div className="w-full bg-[#0B1220] border border-teal-500/30 rounded-xl p-2.5 mb-3 text-right space-y-1">
             <div className="text-[10px] text-slate-400 font-bold flex items-center gap-1">
               <Link2 className="w-3 h-3" />
@@ -213,9 +224,8 @@ export function MobileQRModal({ isOpen, onClose, shiftTotal = 0, itemsCount = 0 
         <p className="text-xs text-slate-400 leading-relaxed mb-4 flex items-start gap-1.5">
           <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
           <span>
-            {qrMode === 'URL'
-              ? 'امسح الكود بكاميرا أي هاتف من أي مكان — الرابط دائم. لو كانت الصيدلية بدون إنترنت تظهر آخر بيانات مرفوعة مع وقت آخر مزامنة، وتتحدث الصفحة تلقائياً عند عودة الاتصال.'
-              : 'امسح هذا الباركود بكاميرا أي هاتف ذكي ليعرض ملخص الوردية الكامل لحظياً (مبيعات، آجل، توريد، مرتجعات ونقدية الدرج).'}
+            امسح هذا الباركود بكاميرا أي هاتف ذكي ليعرض ملخص الوردية الكامل لحظياً بدون إنترنت.
+            {reportUrl ? ' ويمكنك أيضاً فتح التقرير التفصيلي من الرابط أدناه.' : ''}
           </span>
         </p>
 

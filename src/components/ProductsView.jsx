@@ -612,6 +612,31 @@ export function ProductsView({ medicines = [], onSaveMedicine, onDeleteMedicine 
                 <Plus className="w-4 h-4" />
                 <span>إضافة دواء جديد</span>
               </button>
+
+              {/* Instant Stock Take / Audit Button */}
+              <button
+                type="button"
+                onClick={async () => {
+                  const title = prompt('أدخل عنوان جرد المخزون:', `جرد دوري - ${new Date().toLocaleDateString('ar-EG')}`);
+                  if (!title) return;
+                  try {
+                    const result = await sqliteService.saveStockTake({
+                      title,
+                      items: sqliteItems,
+                      auditor_name: 'مدير الصيدلية',
+                      notes: 'تسوية ومطابقة الجرد الفعلي'
+                    });
+                    showToast(`تم حفظ جلسة جرد المخزون الفعلي بنجاح! فروقات: ${result.discrepancyCount} صنف`);
+                  } catch (e) {
+                    alert('خطأ أثناء حفظ الجرد: ' + (e.message || e));
+                  }
+                }}
+                className="h-11 px-3.5 rounded-xl bg-purple-500/20 hover:bg-purple-500/30 border border-purple-500/40 text-purple-300 text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                title="جرد المخزون الفعلي ومطابقة الأرصدة والتسويات"
+              >
+                <Layers className="w-4 h-4 text-purple-400" />
+                <span>جرد المخزون الفعلي</span>
+              </button>
             </div>
           </div>
 

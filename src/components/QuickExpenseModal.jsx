@@ -5,25 +5,34 @@ export function QuickExpenseModal({ isOpen, onClose, onAddExpense }) {
   const [amount, setAmount] = useState('');
   const [title, setTitle] = useState('');
   const [category, setCategory] = useState('نثريات');
+  const [submitting, setSubmitting] = useState(false);
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     const numAmount = parseFloat(amount);
-    if (!numAmount || numAmount <= 0) return;
+    if (!numAmount || numAmount <= 0 || submitting) return;
 
-    onAddExpense({
-      id: Date.now(),
-      title: title.trim() || 'مصروف نثريات سريع',
-      amount: numAmount,
-      category,
-      time: new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })
-    });
-
-    setAmount('');
-    setTitle('');
-    onClose();
+    setSubmitting(true);
+    try {
+      // Wait for the database write: only close/clear on real success, so a
+      // failed expense never looks like it was deducted from the drawer.
+      await onAddExpense({
+        id: Date.now(),
+        title: title.trim() || 'مصروف نثريات سريع',
+        amount: numAmount,
+        category,
+        time: new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })
+      });
+      setAmount('');
+      setTitle('');
+      onClose();
+    } catch (err) {
+      // The parent already surfaced the error toast; keep the form open.
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -112,10 +121,11 @@ export function QuickExpenseModal({ isOpen, onClose, onAddExpense }) {
             </button>
             <button
               type="submit"
-              className="flex-1 py-2.5 rounded-xl bg-rose-500 hover:bg-rose-400 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-sm transition-all"
+              disabled={submitting}
+              className="flex-1 py-2.5 rounded-xl bg-rose-500 hover:bg-rose-400 disabled:opacity-60 disabled:cursor-not-allowed text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-sm transition-all"
             >
               <CheckCircle2 className="w-4 h-4" />
-              <span>تأكيد الخصم من الدرج</span>
+              <span>{submitting ? 'جارٍ التسجيل...' : 'تأكيد الخصم من الدرج'}</span>
             </button>
           </div>
         </form>

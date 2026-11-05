@@ -457,7 +457,63 @@ class SQLiteService {
         date_time TEXT,
         cashier_name TEXT
       );
+
+      -- 1. Customer Sales Returns / Refunds
+      CREATE TABLE IF NOT EXISTS sale_refunds (
+        id TEXT PRIMARY KEY,
+        invoice_id TEXT,
+        shift_id TEXT,
+        cashier_name TEXT,
+        date_time TEXT,
+        refund_amount REAL DEFAULT 0,
+        reason TEXT,
+        items_json TEXT
+      );
+
+      -- 2. Audit Trail Log
+      CREATE TABLE IF NOT EXISTS audit_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_name TEXT,
+        action TEXT,
+        entity TEXT,
+        entity_id TEXT,
+        details TEXT,
+        date_time TEXT
+      );
+
+      -- 3. Stock Take / Inventory Audits
+      CREATE TABLE IF NOT EXISTS stock_takes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT,
+        created_at TEXT,
+        status TEXT DEFAULT 'COMPLETED',
+        total_items INTEGER DEFAULT 0,
+        discrepancy_count INTEGER DEFAULT 0,
+        net_difference_value REAL DEFAULT 0,
+        auditor_name TEXT,
+        notes TEXT
+      );
     `);
+
+    // Migration for customer loyalty points and partial payments
+    try {
+      this.db.run("ALTER TABLE customers ADD COLUMN loyalty_points INTEGER DEFAULT 0;");
+    } catch (e) {}
+    try {
+      this.db.run("ALTER TABLE invoices ADD COLUMN paid_cash REAL DEFAULT 0;");
+    } catch (e) {}
+    try {
+      this.db.run("ALTER TABLE invoices ADD COLUMN paid_credit REAL DEFAULT 0;");
+    } catch (e) {}
+    try {
+      this.db.run("ALTER TABLE invoices ADD COLUMN paid_card REAL DEFAULT 0;");
+    } catch (e) {}
+    try {
+      this.db.run("ALTER TABLE invoices ADD COLUMN discount_type TEXT DEFAULT 'FIXED';");
+    } catch (e) {}
+    try {
+      this.db.run("ALTER TABLE invoices ADD COLUMN coupon_code TEXT;");
+    } catch (e) {}
 
     // Migration safe check for shift_id in purchases
     try {
@@ -1199,6 +1255,168 @@ class SQLiteService {
     }
   }
 
+  // --- 4.b CUSTOMER SALE REFUND & AUDIT LOG ---
+
+  async refundInvoice(refundData) {
+    await this.init();
+    const invoiceId = String(refundData.invoice_id || '').trim();
+    const itemsToRefund = Array.isArray(refundData.items) ? refundData.items : [];
+    const refundAmount = parseFloat(refundData.refund_amount) || 0;
+    const reason = String(refundData.reason || 'طلب العميل').trim();
+    const cashierName = String(refundData.cashier_name || 'الكاشير').trim();
+
+    const currentShift = await this.getCurrentShift();
+    const shiftId = refundData.shift_id || currentShift?.id || '';
+    if (!shiftId) {
+      throw new Error('لا يمكن تسجيل مرتجع بيع بدون وجود وردية مفتوحة!');
+    }
+    if (refundAmount <= 0) {
+      throw new Error('مبلغ المرتجع يجب أن يكون أكبر من صفر');
+    }
+
+    const refundId = `REF-${Date.now()}`;
+    const nowIso = new Date().toISOString();
+
+    this.db.run('BEGIN TRANSACTION;');
+    try {
+      // 1. Insert Refund Record
+      const stmt = this.db.prepare(`
+        INSERT INTO sale_refunds (id, invoice_id, shift_id, cashier_name, date_time, refund_amount, reason, items_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      stmt.run([refundId, invoiceId, shiftId, cashierName, nowIso, refundAmount, reason, JSON.stringify(itemsToRefund)]);
+      stmt.free();
+
+      // 2. Restock medicines in inventory
+      const stockStmt = this.db.prepare('UPDATE medicines SET stock_boxes = ?, stock_strips = ? WHERE id = ?');
+      for (const item of itemsToRefund) {
+        const medId = Number(item.medicine_id);
+        const qty = Number(item.quantity) || 0;
+        if (!medId || qty <= 0) continue;
+
+        const medRows = this._formatRows(this.db.exec(`SELECT stock_boxes, stock_strips, strips_per_box FROM medicines WHERE id = ${medId} LIMIT 1`));
+        if (medRows.length === 0) continue;
+
+        const spb = Math.max(1, parseInt(medRows[0].strips_per_box, 10) || 1);
+        let boxes = Math.max(0, parseInt(medRows[0].stock_boxes, 10) || 0);
+        let strips = Math.max(0, parseInt(medRows[0].stock_strips, 10) || 0);
+
+        if (item.is_strip) {
+          let totalStrips = (boxes * spb) + strips + qty;
+          boxes = Math.floor(totalStrips / spb);
+          strips = totalStrips % spb;
+        } else {
+          boxes += qty;
+        }
+        stockStmt.run([boxes, strips, medId]);
+      }
+      stockStmt.free();
+
+      // 3. Deduct from shift cash sales & expected cash
+      this.db.run(`
+        UPDATE shifts 
+        SET cash_sales = CASE WHEN cash_sales >= ${refundAmount} THEN cash_sales - ${refundAmount} ELSE 0 END,
+            total_sales = CASE WHEN total_sales >= ${refundAmount} THEN total_sales - ${refundAmount} ELSE 0 END,
+            expected_cash = opening_cash + cash_sales + debt_collections - petty_expenses
+        WHERE id = '${shiftId}'
+      `);
+
+      // 4. Record Audit Log
+      this._recordAuditLogInternal(cashierName, 'REFUND', 'invoice', invoiceId, `استرجاع مبيعات بقيمة ${refundAmount} ج.م - السبب: ${reason}`);
+
+      this.db.run('COMMIT;');
+      this.saveToDisk();
+      this._enqueueSync('sale_refund', refundId, 'CREATE', {
+        id: refundId, invoiceId, shiftId, refundAmount, reason, cashierName, date_time: nowIso
+      }, shiftId);
+
+      return { success: true, refundId, refundAmount };
+    } catch (err) {
+      this.db.run('ROLLBACK;');
+      throw err;
+    }
+  }
+
+  // Record Audit Trail
+  _recordAuditLogInternal(userName, action, entity, entityId, details) {
+    try {
+      const stmt = this.db.prepare(`
+        INSERT INTO audit_logs (user_name, action, entity, entity_id, details, date_time)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `);
+      stmt.run([userName, action, entity, entityId, details, new Date().toISOString()]);
+      stmt.free();
+    } catch (e) {
+      console.warn('Audit log write error:', e);
+    }
+  }
+
+  async recordAudit(action, entity, entityId, details, userName = '') {
+    await this.init();
+    this._recordAuditLogInternal(userName || 'المستخدم', action, entity, entityId, details);
+    this.saveToDisk();
+  }
+
+  async getAuditLogs(limit = 100) {
+    await this.init();
+    const res = this.db.exec(`SELECT * FROM audit_logs ORDER BY id DESC LIMIT ${Number(limit) || 100}`);
+    return this._formatRows(res);
+  }
+
+  // Stock Take / Physical Inventory Audits
+  async saveStockTake(stockTakeData) {
+    await this.init();
+    const title = stockTakeData.title || `جرد مخزون - ${new Date().toLocaleDateString('ar-EG')}`;
+    const items = Array.isArray(stockTakeData.items) ? stockTakeData.items : [];
+    const auditor = stockTakeData.auditor_name || 'مدير الصيدلية';
+    const notes = stockTakeData.notes || '';
+
+    this.db.run('BEGIN TRANSACTION;');
+    try {
+      let discrepancyCount = 0;
+      let netDiffValue = 0;
+
+      const updateMedStmt = this.db.prepare('UPDATE medicines SET stock_boxes = ?, stock_strips = ? WHERE id = ?');
+
+      for (const item of items) {
+        const medId = Number(item.id);
+        const actualBoxes = Number(item.actual_boxes);
+        const actualStrips = Number(item.actual_strips || 0);
+        const currentBoxes = Number(item.stock_boxes || 0);
+
+        if (actualBoxes !== currentBoxes) {
+          discrepancyCount++;
+          const diffBoxes = actualBoxes - currentBoxes;
+          netDiffValue += diffBoxes * (Number(item.price_box) || 0);
+          updateMedStmt.run([actualBoxes, actualStrips, medId]);
+        }
+      }
+      updateMedStmt.free();
+
+      const stmt = this.db.prepare(`
+        INSERT INTO stock_takes (title, created_at, total_items, discrepancy_count, net_difference_value, auditor_name, notes)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `);
+      stmt.run([title, new Date().toISOString(), items.length, discrepancyCount, netDiffValue, auditor, notes]);
+      stmt.free();
+
+      this._recordAuditLogInternal(auditor, 'STOCK_TAKE', 'inventory', `${items.length} items`, `إجراء جرد مخزون فعلي: فروقات في ${discrepancyCount} صنف بقيمة ${netDiffValue.toFixed(2)} ج.م`);
+
+      this.db.run('COMMIT;');
+      this.saveToDisk();
+      return { success: true, discrepancyCount, netDiffValue };
+    } catch (e) {
+      this.db.run('ROLLBACK;');
+      throw e;
+    }
+  }
+
+  async getStockTakes(limit = 30) {
+    await this.init();
+    const res = this.db.exec(`SELECT * FROM stock_takes ORDER BY id DESC LIMIT ${Number(limit) || 30}`);
+    return this._formatRows(res);
+  }
+
   // --- 5. SHIFT MANAGEMENT & Z-REPORT ---
 
   async getCurrentShift() {
@@ -1415,6 +1633,15 @@ class SQLiteService {
       .filter((r) => r.kind === 'DISPOSAL')
       .reduce((sum, r) => sum + (Number(r.amount) || 0), 0);
 
+    // 5.b-2 Customer sale refunds during this shift
+    const refundsRes = this.db.exec(`
+      SELECT * FROM sale_refunds
+      WHERE shift_id = '${safeId}' OR (date_time >= '${shift.opened_at}' AND (date_time <= '${shift.closed_at || new Date().toISOString()}'))
+      ORDER BY date_time ASC
+    `);
+    const saleRefunds = this._formatRows(refundsRes);
+    const customer_refunds_total = saleRefunds.reduce((sum, r) => sum + (Number(r.refund_amount) || 0), 0);
+
     // 5.c Out of stock items at shift close
     const outOfStockRes = this.db.exec(`
       SELECT id, barcode, trade_name, trade_name_ar, stock_boxes, stock_strips, price_box, price_strip
@@ -1433,7 +1660,7 @@ class SQLiteService {
     const total_sales = shift.total_sales || (cash_sales + visa_sales + instapay_sales + credit_sales);
     const debt_collections = shift.debt_collections || 0;
     const petty_expenses = shift.petty_expenses || 0;
-    const expected_cash = shift.expected_cash || (opening_cash + cash_sales + debt_collections - petty_expenses);
+    const expected_cash = shift.expected_cash || (opening_cash + cash_sales + debt_collections - petty_expenses - customer_refunds_total);
     const actual_cash = shift.actual_cash !== undefined ? shift.actual_cash : expected_cash;
     const discrepancy = actual_cash - expected_cash;
 
@@ -1452,6 +1679,7 @@ class SQLiteService {
         total_sales,
         debt_collections,
         petty_expenses,
+        customer_refunds_total,
         expected_cash,
         actual_cash,
         discrepancy,
@@ -1461,6 +1689,7 @@ class SQLiteService {
         purchases_count: purchases.length,
         expenses_count: expenses.length,
         returns_count: returns.length,
+        refunds_count: saleRefunds.length,
         status: shift.status
       },
       soldItems,
@@ -1468,6 +1697,7 @@ class SQLiteService {
       purchases,
       expenses,
       returns,
+      saleRefunds,
       outOfStock
     };
   }

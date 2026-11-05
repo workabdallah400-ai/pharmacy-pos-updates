@@ -90,6 +90,11 @@ export function ShiftsView({ currentShift: propCurrentShift, onUpdateCurrentShif
             (dbShift.debt_collections || 0) -
             (dbShift.petty_expenses || 0);
           setActualCashInput(String(exp));
+        } else if (isCurrent && !dbShift) {
+          // No OPEN shift in SQLite: clear any stale shift restored from
+          // localStorage so the POS cannot sell against a nonexistent shift.
+          setCurrentShift(null);
+          if (onUpdateCurrentShift) onUpdateCurrentShift(null);
         }
 
         const dbHistory = await sqliteService.getShiftsHistory(30);
@@ -158,8 +163,9 @@ export function ShiftsView({ currentShift: propCurrentShift, onUpdateCurrentShif
       closed = await sqliteService.closeShift(closingData);
     } catch (err) {
       console.warn('SQLite close shift failed:', err);
-      showToast('تعذر تقفيل الوردية في قاعدة البيانات');
-      return;
+      showToast(`تعذر تقفيل الوردية في قاعدة البيانات: ${err?.message || ''}`.trim());
+      // Rethrow so CloseShiftModal stays open instead of pretending success.
+      throw err;
     }
 
     const finalShift = { ...closingData, ...(closed || {}), status: 'CLOSED' };

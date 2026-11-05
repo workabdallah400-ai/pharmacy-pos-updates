@@ -1039,7 +1039,7 @@ export function POSView({
           {/* Bill Calculation & Checkout Footer */}
           <div className="p-3 bg-[#141E30] border-t border-[#23324D] shadow-inner space-y-2.5">
             
-            {/* Subtotal & Discount Row */}
+            {/* Subtotal & Discount & Coupon Row */}
             <div className="flex items-center justify-between text-xs text-slate-300">
               <div className="flex items-center gap-1.5">
                 <span>المجموع:</span>
@@ -1057,14 +1057,39 @@ export function POSView({
                     step="0.5"
                     min="0"
                     placeholder="0"
+                    disabled={currentUser?.role === 'cashier' && !currentUser?.canDiscount}
                     value={discount || ''}
                     onChange={(e) => setDiscount(e.target.value)}
-                    className="w-16 h-7 bg-[#17233A] border border-[#23324D] text-center text-rose-300 text-xs font-bold rounded-lg outline-none font-mono"
+                    className="w-16 h-7 bg-[#17233A] border border-[#23324D] text-center text-rose-300 text-xs font-bold rounded-lg outline-none font-mono disabled:opacity-50"
                   />
                   <span className="text-[10px] text-slate-500 mr-1">ج.م</span>
                 </div>
               </div>
             </div>
+
+            {/* Split / Partial Payment Indicator */}
+            {paymentMethod === 'مختلط' && (
+              <div className="p-2 bg-[#17233A] border border-amber-500/30 rounded-xl space-y-1 text-xs">
+                <div className="text-amber-300 font-bold text-[11px] mb-1">توزيع الدفع المختلط (كاش + آجل):</div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-400">المدفوع كاش:</span>
+                  <input
+                    type="number"
+                    value={paidAmount}
+                    onChange={(e) => setPaidAmount(e.target.value)}
+                    placeholder="0"
+                    className="w-20 bg-[#0B1220] border border-[#23324D] text-emerald-400 px-2 py-0.5 rounded text-xs font-mono font-bold text-left"
+                    dir="ltr"
+                  />
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-400">المتبقي على حساب العميل (آجل):</span>
+                  <span className="text-amber-400 font-mono font-bold" dir="ltr">
+                    {Math.max(0, currentTotal - (parseFloat(paidAmount) || 0)).toFixed(2)} EGP
+                  </span>
+                </div>
+              </div>
+            )}
 
             {/* Grand Total Box */}
             <div className="bg-[#111A2B] border border-teal-500/40 rounded-2xl p-2.5 px-3.5 flex items-center justify-between shadow-glow-teal">
@@ -1099,13 +1124,14 @@ export function POSView({
               </div>
             </div>
 
-            {/* Payment Method Selector */}
-            <div className="grid grid-cols-4 gap-1.5">
+            {/* Payment Method Selector (Includes Split / Partial payment) */}
+            <div className="grid grid-cols-5 gap-1">
               {[
                 { id: 'كاش', icon: DollarSign, label: 'كاش' },
                 { id: 'فيزا', icon: CreditCard, label: 'فيزا' },
                 { id: 'إنستاباي', icon: Smartphone, label: 'إنستاباي' },
-                { id: 'آجل', icon: BookUser, label: 'آجل' }
+                { id: 'آجل', icon: BookUser, label: 'آجل' },
+                { id: 'مختلط', icon: Coins, label: 'مختلط' }
               ].map((m) => {
                 const Icon = m.icon;
                 const isSelected = paymentMethod === m.id;

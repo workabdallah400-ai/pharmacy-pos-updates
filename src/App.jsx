@@ -270,9 +270,9 @@ export default function App() {
   useEffect(() => {
     let isCurrent = true;
     sqliteService.getCurrentShift().then((shift) => {
-      if (isCurrent && shift) {
-        setCurrentShift(shift);
-      }
+      // The database is the source of truth: a shift restored from
+      // localStorage must not keep the POS "open" after a DB reset/restore.
+      if (isCurrent) setCurrentShift(shift || null);
     }).catch(() => {});
     return () => { isCurrent = false; };
   }, []);

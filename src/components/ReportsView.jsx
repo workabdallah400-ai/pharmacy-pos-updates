@@ -380,8 +380,36 @@ export function ReportsView() {
                 className="flex-1 py-2.5 rounded-xl bg-teal-500 hover:bg-teal-400 text-slate-950 text-xs font-black flex items-center justify-center gap-2 cursor-pointer shadow-glow-teal"
               >
                 <Printer className="w-4 h-4" />
-                <span>إعادة طباعة الفاتورة</span>
+                <span>إعادة طباعة</span>
               </button>
+
+              <button
+                type="button"
+                onClick={async () => {
+                  if (!window.confirm(`هل أنت متأكد من استرجاع كامل الفاتورة #${selectedInvoiceForModal.invoice_number || selectedInvoiceForModal.id} ورد البضاعة للمخزن والمبلغ للعميل؟`)) return;
+                  try {
+                    const items = await sqliteService.getInvoiceItems(selectedInvoiceForModal.id);
+                    await sqliteService.refundInvoice({
+                      invoice_id: selectedInvoiceForModal.id,
+                      items,
+                      refund_amount: getInvoiceTotal(selectedInvoiceForModal),
+                      reason: 'استرجاع كامل الفاتورة من شاشة التقارير',
+                      cashier_name: selectedInvoiceForModal.cashier_name || 'الكاشير'
+                    });
+                    showToast('تم استرجاع الفاتورة ورد الأصناف للمخزن وخصم القيمة من الدرج بنجاح 🔄');
+                    setSelectedInvoiceForModal(null);
+                    const freshInvoices = await sqliteService.getInvoices(100);
+                    setInvoices(freshInvoices);
+                  } catch (e) {
+                    alert('خطأ في إتمام المرتجع: ' + (e.message || e));
+                  }
+                }}
+                className="py-2.5 px-3 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 text-xs font-bold flex items-center justify-center gap-1 cursor-pointer"
+                title="استرجاع الفاتورة ورد المخزون والفلوس"
+              >
+                <span>🔄 مرتجع بيع</span>
+              </button>
+
               <button
                 type="button"
                 onClick={() => setSelectedInvoiceForModal(null)}
