@@ -540,6 +540,22 @@ class SQLiteService {
       if (!existing || existing.length === 0 || existing[0].values.length === 0) {
         // Hash = sha256-like simple hash stored as hex (we use a simple deterministic hash for offline use)
         const adminHash = this._hashPassword('admin123');
+        const defaultAdminPerms = {
+          canViewReports: true,
+          canManageUsers: true,
+          canCloseShift: true,
+          canManageStock: true,
+          canViewProfits: true,
+          canManageSettings: true,
+          canDeleteInvoices: true,
+          canGiveDiscount: true,
+          canDiscount: true,
+          canEditPrice: true,
+          canDeleteItem: true,
+          canRefund: true,
+          canStockTake: true,
+          canViewAuditLog: true
+        };
         const stmt = this.db.prepare(`
           INSERT OR IGNORE INTO app_users (username, password_hash, full_name, role, is_active, created_at, created_by, permissions)
           VALUES (?, ?, ?, ?, 1, ?, ?, ?)
@@ -551,7 +567,7 @@ class SQLiteService {
           'admin',
           new Date().toISOString(),
           'SYSTEM',
-          JSON.stringify({ canViewReports: true, canManageUsers: true, canCloseShift: true, canManageStock: true, canViewProfits: true, canManageSettings: true })
+          JSON.stringify(defaultAdminPerms)
         ]);
         stmt.free();
         console.log('✅ Default admin user seeded: username=admin, password=admin123');
@@ -638,8 +654,57 @@ class SQLiteService {
     }
 
     const defaultPermissions = role === 'admin'
-      ? { canViewReports: true, canManageUsers: true, canCloseShift: true, canManageStock: true, canViewProfits: true, canManageSettings: true }
-      : { canViewReports: false, canManageUsers: false, canCloseShift: true, canManageStock: false, canViewProfits: false, canManageSettings: false, ...permissions };
+      ? {
+          canViewReports: true,
+          canManageUsers: true,
+          canCloseShift: true,
+          canManageStock: true,
+          canViewProfits: true,
+          canManageSettings: true,
+          canDeleteInvoices: true,
+          canGiveDiscount: true,
+          canDiscount: true,
+          canEditPrice: true,
+          canDeleteItem: true,
+          canRefund: true,
+          canStockTake: true,
+          canViewAuditLog: true
+        }
+      : role === 'pharmacist'
+      ? {
+          canViewReports: true,
+          canManageUsers: false,
+          canCloseShift: true,
+          canManageStock: true,
+          canViewProfits: true,
+          canManageSettings: false,
+          canDeleteInvoices: false,
+          canGiveDiscount: true,
+          canDiscount: true,
+          canEditPrice: false,
+          canDeleteItem: false,
+          canRefund: true,
+          canStockTake: true,
+          canViewAuditLog: false,
+          ...permissions
+        }
+      : {
+          canViewReports: false,
+          canManageUsers: false,
+          canCloseShift: true,
+          canManageStock: false,
+          canViewProfits: false,
+          canManageSettings: false,
+          canDeleteInvoices: false,
+          canGiveDiscount: false,
+          canDiscount: false,
+          canEditPrice: false,
+          canDeleteItem: false,
+          canRefund: false,
+          canStockTake: false,
+          canViewAuditLog: false,
+          ...permissions
+        };
 
     const stmt = this.db.prepare(`
       INSERT INTO app_users (username, password_hash, full_name, role, is_active, created_at, created_by, permissions)
@@ -934,17 +999,33 @@ class SQLiteService {
 
     try {
       // 1. Insert Invoice Header
+      let paidCash = 0;
+      let paidCredit = 0;
+      let paidCard = 0;
+
+      if (paymentMethod === 'كاش') {
+        paidCash = totalRetail;
+      } else if (paymentMethod === 'فيزا' || paymentMethod === 'إنستاباي') {
+        paidCard = totalRetail;
+      } else if (paymentMethod === 'آجل') {
+        paidCredit = totalRetail;
+      } else if (paymentMethod === 'مختلط') {
+        paidCash = Number(invoiceData.paid_cash) || 0;
+        paidCredit = Number(invoiceData.paid_credit) || Math.max(0, totalRetail - paidCash);
+        paidCard = Number(invoiceData.paid_card) || 0;
+      }
+
       const invStmt = this.db.prepare(`
         INSERT INTO invoices (
           id, shift_id, cashier_name, date_time, time_str, customer_name,
           customer_phone, payment_method, total_retail, total_cost, total_profit,
-          discount, items_count, status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          discount, items_count, status, paid_cash, paid_credit, paid_card
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       invStmt.run([
         invoiceId, shiftId, cashierName, dateTime, timeStr, customerName,
         customerPhone, paymentMethod, totalRetail, totalCost, totalProfit,
-        discount, items.length, 'COMPLETED'
+        discount, items.length, 'COMPLETED', paidCash, paidCredit, paidCard
       ]);
       invStmt.free();
 
@@ -1049,6 +1130,28 @@ class SQLiteService {
             `UPDATE customers SET balance = balance + ? WHERE name = ?`,
             [totalRetail, customerName]
           );
+        } else if (paymentMethod === 'مختلط') {
+          this.db.run(
+            `UPDATE shifts SET cash_sales = cash_sales + ?, credit_sales = credit_sales + ?, total_sales = total_sales + ? WHERE id = ?`,
+            [paidCash, paidCredit, totalRetail, shiftId]
+          );
+
+          if (paidCredit > 0) {
+            const safeName = String(customerName).replace(/'/g, "''");
+            const existingCustomer = this._formatRows(
+              this.db.exec(`SELECT id FROM customers WHERE name = '${safeName}' LIMIT 1`)
+            );
+            if (existingCustomer.length === 0) {
+              this.db.run(
+                `INSERT INTO customers (name, phone, address, credit_limit, balance, notes) VALUES (?, ?, ?, ?, 0, ?)`,
+                [customerName, customerPhone, '', 2000, 'عميل آجل']
+              );
+            }
+            this.db.run(
+              `UPDATE customers SET balance = balance + ? WHERE name = ?`,
+              [paidCredit, customerName]
+            );
+          }
         }
 
         // Recalculate expected cash from the drawer equation
@@ -1257,6 +1360,13 @@ class SQLiteService {
 
   // --- 4.b CUSTOMER SALE REFUND & AUDIT LOG ---
 
+  async getInvoiceRefunds(invoiceId) {
+    await this.init();
+    const safeId = String(invoiceId).replace(/'/g, "''");
+    const res = this.db.exec(`SELECT * FROM sale_refunds WHERE invoice_id = '${safeId}' ORDER BY date_time ASC`);
+    return this._formatRows(res);
+  }
+
   async refundInvoice(refundData) {
     await this.init();
     const invoiceId = String(refundData.invoice_id || '').trim();
@@ -1272,6 +1382,24 @@ class SQLiteService {
     }
     if (refundAmount <= 0) {
       throw new Error('مبلغ المرتجع يجب أن يكون أكبر من صفر');
+    }
+
+    const safeInvId = invoiceId.replace(/'/g, "''");
+    const invRows = this._formatRows(this.db.exec(`SELECT * FROM invoices WHERE id = '${safeInvId}' LIMIT 1`));
+    if (invRows.length === 0) {
+      throw new Error(`الفاتورة رقم #${invoiceId} غير موجودة في قاعدة البيانات.`);
+    }
+    const origInvoice = invRows[0];
+    const origTotal = Number(origInvoice.total_retail) || 0;
+    const paymentMethod = origInvoice.payment_method || 'كاش';
+
+    // Verify previously refunded amount
+    const prevRefundsRes = this.db.exec(`SELECT SUM(refund_amount) as total_refunded FROM sale_refunds WHERE invoice_id = '${safeInvId}'`);
+    const prevRefunded = Number(this._formatRows(prevRefundsRes)[0]?.total_refunded) || 0;
+    const remainingEligible = Math.max(0, origTotal - prevRefunded);
+
+    if (refundAmount > (remainingEligible + 0.01)) {
+      throw new Error(`مبلغ المرتجع المطلوب (${refundAmount.toFixed(2)}) يتجاوز المتبقي القابل للاسترجاع للفاتورة (${remainingEligible.toFixed(2)} ج.م)`);
     }
 
     const refundId = `REF-${Date.now()}`;
@@ -1312,17 +1440,74 @@ class SQLiteService {
       }
       stockStmt.free();
 
-      // 3. Deduct from shift cash sales & expected cash
-      this.db.run(`
-        UPDATE shifts 
-        SET cash_sales = CASE WHEN cash_sales >= ${refundAmount} THEN cash_sales - ${refundAmount} ELSE 0 END,
-            total_sales = CASE WHEN total_sales >= ${refundAmount} THEN total_sales - ${refundAmount} ELSE 0 END,
-            expected_cash = opening_cash + cash_sales + debt_collections - petty_expenses
-        WHERE id = '${shiftId}'
-      `);
+      // 3. Deduct from Shift and/or Customer Balance according to original payment method
+      if (paymentMethod === 'كاش') {
+        this.db.run(`
+          UPDATE shifts 
+          SET cash_sales = CASE WHEN cash_sales >= ${refundAmount} THEN cash_sales - ${refundAmount} ELSE 0 END,
+              total_sales = CASE WHEN total_sales >= ${refundAmount} THEN total_sales - ${refundAmount} ELSE 0 END,
+              expected_cash = opening_cash + cash_sales + debt_collections - petty_expenses
+          WHERE id = '${shiftId}'
+        `);
+      } else if (paymentMethod === 'فيزا') {
+        this.db.run(`
+          UPDATE shifts 
+          SET visa_sales = CASE WHEN visa_sales >= ${refundAmount} THEN visa_sales - ${refundAmount} ELSE 0 END,
+              total_sales = CASE WHEN total_sales >= ${refundAmount} THEN total_sales - ${refundAmount} ELSE 0 END
+          WHERE id = '${shiftId}'
+        `);
+      } else if (paymentMethod === 'إنستاباي') {
+        this.db.run(`
+          UPDATE shifts 
+          SET instapay_sales = CASE WHEN instapay_sales >= ${refundAmount} THEN instapay_sales - ${refundAmount} ELSE 0 END,
+              total_sales = CASE WHEN total_sales >= ${refundAmount} THEN total_sales - ${refundAmount} ELSE 0 END
+          WHERE id = '${shiftId}'
+        `);
+      } else if (paymentMethod === 'آجل') {
+        this.db.run(`
+          UPDATE shifts 
+          SET credit_sales = CASE WHEN credit_sales >= ${refundAmount} THEN credit_sales - ${refundAmount} ELSE 0 END,
+              total_sales = CASE WHEN total_sales >= ${refundAmount} THEN total_sales - ${refundAmount} ELSE 0 END
+          WHERE id = '${shiftId}'
+        `);
+        if (origInvoice.customer_name) {
+          this.db.run(
+            `UPDATE customers SET balance = CASE WHEN balance >= ? THEN balance - ? ELSE 0 END WHERE name = ?`,
+            [refundAmount, refundAmount, origInvoice.customer_name]
+          );
+        }
+      } else if (paymentMethod === 'مختلط') {
+        // Proportionate or direct split based on paid_cash and paid_credit
+        const invPaidCash = Number(origInvoice.paid_cash) || 0;
+        const invPaidCredit = Number(origInvoice.paid_credit) || 0;
+        const cashRatio = origTotal > 0 ? (invPaidCash / origTotal) : 1;
+        const refundCash = Math.min(invPaidCash, Math.round(refundAmount * cashRatio * 100) / 100);
+        const refundCredit = Math.max(0, Math.round((refundAmount - refundCash) * 100) / 100);
 
-      // 4. Record Audit Log
-      this._recordAuditLogInternal(cashierName, 'REFUND', 'invoice', invoiceId, `استرجاع مبيعات بقيمة ${refundAmount} ج.م - السبب: ${reason}`);
+        this.db.run(`
+          UPDATE shifts 
+          SET cash_sales = CASE WHEN cash_sales >= ${refundCash} THEN cash_sales - ${refundCash} ELSE 0 END,
+              credit_sales = CASE WHEN credit_sales >= ${refundCredit} THEN credit_sales - ${refundCredit} ELSE 0 END,
+              total_sales = CASE WHEN total_sales >= ${refundAmount} THEN total_sales - ${refundAmount} ELSE 0 END,
+              expected_cash = opening_cash + cash_sales + debt_collections - petty_expenses
+          WHERE id = '${shiftId}'
+        `);
+
+        if (refundCredit > 0 && origInvoice.customer_name) {
+          this.db.run(
+            `UPDATE customers SET balance = CASE WHEN balance >= ? THEN balance - ? ELSE 0 END WHERE name = ?`,
+            [refundCredit, refundCredit, origInvoice.customer_name]
+          );
+        }
+      }
+
+      // 4. Update Invoice Status if fully refunded
+      if (prevRefunded + refundAmount >= (origTotal - 0.01)) {
+        this.db.run(`UPDATE invoices SET status = 'REFUNDED' WHERE id = '${safeInvId}'`);
+      }
+
+      // 5. Record Audit Log
+      this._recordAuditLogInternal(cashierName, 'REFUND', 'invoice', invoiceId, `استرجاع مبيعات بقيمة ${refundAmount} ج.م [طريقة الدفع: ${paymentMethod}] - السبب: ${reason}`);
 
       this.db.run('COMMIT;');
       this.saveToDisk();

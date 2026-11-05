@@ -15,12 +15,26 @@ async function run() {
 
   // 2. Barcode exact match
   const b0 = Date.now();
-  const bRes = db.exec("SELECT * FROM medicines WHERE barcode = '622100000001' LIMIT 1");
+  const sample = db.exec("SELECT barcode FROM medicines WHERE barcode IS NOT NULL AND barcode <> '' LIMIT 1");
+  const sampleBarcode = sample[0] && sample[0].values[0] && sample[0].values[0][0];
+  const bRes = sampleBarcode
+    ? db.exec(`SELECT * FROM medicines WHERE barcode = '${String(sampleBarcode).replace(/'/g, "''")}' LIMIT 1`)
+    : [];
   const b1 = Date.now();
-  console.log(`✅ Indexed Barcode Lookup in ${b1 - b0}ms:`, bRes[0].values[0][1]);
+  console.log(
+    `✅ Indexed Barcode Lookup in ${b1 - b0}ms:`,
+    bRes[0]?.values?.[0]?.[1] || '(no barcode in database)'
+  );
 
-  // 3. Shift Initial State
-  const shiftRes = db.exec("SELECT id, shift_number, opening_cash, cash_sales, total_sales, debt_collections, petty_expenses, expected_cash FROM shifts WHERE status = 'OPEN'");
+  // 3. Shift Initial State (create a throw-away OPEN shift if none exists)
+  let shiftRes = db.exec("SELECT id, shift_number, opening_cash, cash_sales, total_sales, debt_collections, petty_expenses, expected_cash FROM shifts WHERE status = 'OPEN'");
+  if (!shiftRes[0]?.values?.length) {
+    db.run(`
+      INSERT INTO shifts (id, shift_number, cashier_name, opened_at, opening_cash, cash_sales, visa_sales, instapay_sales, credit_sales, total_sales, debt_collections, petty_expenses, expected_cash, actual_cash, discrepancy, status)
+      VALUES ('SH-TEST-OPEN', 9001, 'اختبار', '2026-01-01T00:00:00', 500, 0, 0, 0, 0, 0, 0, 0, 500, 0, 0, 'OPEN')
+    `);
+    shiftRes = db.exec("SELECT id, shift_number, opening_cash, cash_sales, total_sales, debt_collections, petty_expenses, expected_cash FROM shifts WHERE status = 'OPEN'");
+  }
   console.log('✅ Active Shift:', shiftRes[0].values[0]);
 
   // 4. Test Cash Invoice Transaction

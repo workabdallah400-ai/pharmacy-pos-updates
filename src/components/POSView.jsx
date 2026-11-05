@@ -19,7 +19,8 @@ import {
   AlertTriangle,
   Layers,
   Inbox,
-  Volume2
+  Volume2,
+  Coins
 } from 'lucide-react';
 import { playBarcodeBeep, playCashDrawerSound } from '../utils/sound';
 import { AlternativesModal } from './AlternativesModal';
@@ -538,15 +539,27 @@ export function POSView({
 
     const customer = dbCustomers.find((c) => Number(c.id) === Number(selectedCustomerId));
 
-    if (paymentMethod === 'آجل' && !customer) {
-      showToast('⚠️ اختر عميلاً مسجلاً أولاً لإتمام البيع الآجل.', 'warning');
+    if ((paymentMethod === 'آجل' || paymentMethod === 'مختلط') && !customer) {
+      showToast('⚠️ اختر عميلاً مسجلاً أولاً لإتمام البيع بالآجل أو الدفع المختلط.', 'warning');
       return;
     }
 
-    if (paymentMethod === 'آجل' && customer) {
+    let splitPaidCash = 0;
+    let splitPaidCredit = 0;
+    if (paymentMethod === 'مختلط') {
+      splitPaidCash = parseFloat(paidAmount) || 0;
+      if (splitPaidCash <= 0 || splitPaidCash >= currentTotal) {
+        showToast('⚠️ في الدفع المختلط، يجب أن يكون المبلغ المدفوع كاش أكبر من صفر وأقل من إجمالي الفاتورة.', 'warning');
+        return;
+      }
+      splitPaidCredit = Math.round((currentTotal - splitPaidCash) * 100) / 100;
+    }
+
+    if ((paymentMethod === 'آجل' || paymentMethod === 'مختلط') && customer) {
       const limit = Number(customer.credit_limit) || 0;
       const balance = Number(customer.balance) || 0;
-      if (limit > 0 && balance + currentTotal > limit) {
+      const addedDebt = paymentMethod === 'مختلط' ? splitPaidCredit : currentTotal;
+      if (limit > 0 && balance + addedDebt > limit) {
         showToast(`⚠️ إجمالي مديونية العميل سيتجاوز سقف الائتمان (${limit} ج.م).`, 'warning');
       }
     }
@@ -587,8 +600,11 @@ export function POSView({
       subtotal: currentSubtotal,
       discount: parseFloat(discount) || 0,
       total: currentTotal,
-      paidAmount: currentPaid,
-      changeAmount,
+      paidAmount: paymentMethod === 'مختلط' ? splitPaidCash : currentPaid,
+      paid_cash: paymentMethod === 'مختلط' ? splitPaidCash : (paymentMethod === 'كاش' ? currentTotal : 0),
+      paid_credit: paymentMethod === 'مختلط' ? splitPaidCredit : (paymentMethod === 'آجل' ? currentTotal : 0),
+      paid_card: (paymentMethod === 'فيزا' || paymentMethod === 'إنستاباي') ? currentTotal : 0,
+      changeAmount: paymentMethod === 'مختلط' ? 0 : changeAmount,
       date: new Date().toISOString()
     };
 
@@ -1057,7 +1073,10 @@ export function POSView({
                     step="0.5"
                     min="0"
                     placeholder="0"
-                    disabled={currentUser?.role === 'cashier' && !currentUser?.canDiscount}
+                    disabled={
+                      (currentUser?.role === 'cashier' || currentUser?.role === 'pharmacist') &&
+                      !(currentUser?.permissions?.canDiscount ?? currentUser?.permissions?.canGiveDiscount ?? currentUser?.canDiscount)
+                    }
                     value={discount || ''}
                     onChange={(e) => setDiscount(e.target.value)}
                     className="w-16 h-7 bg-[#17233A] border border-[#23324D] text-center text-rose-300 text-xs font-bold rounded-lg outline-none font-mono disabled:opacity-50"

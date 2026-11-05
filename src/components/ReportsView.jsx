@@ -19,13 +19,16 @@ import {
 } from 'lucide-react';
 import { sqliteService } from '../db/sqliteService';
 
-export function ReportsView() {
+export function ReportsView({ currentUser }) {
   const [invoices, setInvoices] = useState([]);
   const [topSellers, setTopSellers] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [paymentFilter, setPaymentFilter] = useState('ALL');
   const [selectedInvoiceForModal, setSelectedInvoiceForModal] = useState(null);
+  const [modalInvoiceRefunds, setModalInvoiceRefunds] = useState([]);
   const [toastMessage, setToastMessage] = useState('');
+
+  const canRefund = currentUser?.role === 'admin' || currentUser?.permissions?.canRefund === true;
 
   const showToast = (msg) => {
     setToastMessage(msg);
@@ -67,10 +70,18 @@ export function ReportsView() {
   const invoicesCount = invoices.length;
   const avgInvoiceValue = invoicesCount > 0 ? totalSales / invoicesCount : 0;
 
-  const cashSales = invoices.filter((i) => i.payment_method === 'كاش').reduce((acc, i) => acc + getInvoiceTotal(i), 0);
+  const cashSales = invoices.reduce((acc, i) => {
+    if (i.payment_method === 'كاش') return acc + getInvoiceTotal(i);
+    if (i.payment_method === 'مختلط') return acc + (Number(i.paid_cash) || 0);
+    return acc;
+  }, 0);
   const visaSales = invoices.filter((i) => i.payment_method === 'فيزا').reduce((acc, i) => acc + getInvoiceTotal(i), 0);
   const instapaySales = invoices.filter((i) => i.payment_method === 'إنستاباي').reduce((acc, i) => acc + getInvoiceTotal(i), 0);
-  const creditSales = invoices.filter((i) => i.payment_method === 'آجل').reduce((acc, i) => acc + getInvoiceTotal(i), 0);
+  const creditSales = invoices.reduce((acc, i) => {
+    if (i.payment_method === 'آجل') return acc + getInvoiceTotal(i);
+    if (i.payment_method === 'مختلط') return acc + (Number(i.paid_credit) || 0);
+    return acc;
+  }, 0);
 
   // Filtered invoices
   const filteredInvoices = invoices.filter((inv) => {
@@ -237,7 +248,7 @@ export function ReportsView() {
 
           <div className="flex items-center gap-1.5 text-xs">
             <span className="text-slate-400 text-[11px] ml-1">تصفية:</span>
-            {['ALL', 'كاش', 'فيزا', 'إنستاباي', 'آجل'].map((method) => (
+            {['ALL', 'كاش', 'فيزا', 'إنستاباي', 'آجل', 'مختلط'].map((method) => (
               <button
                 key={method}
                 type="button"
@@ -297,17 +308,26 @@ export function ReportsView() {
                       <td className="p-3 text-white font-bold">{inv.cashier_name || 'الكاشير'}</td>
                       <td className="p-3 text-slate-300">{inv.customer_name || 'عميل نقدي'}</td>
                       <td className="p-3">
-                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                          inv.payment_method === 'كاش'
-                            ? 'bg-emerald-500/20 text-emerald-300'
-                            : inv.payment_method === 'فيزا'
-                            ? 'bg-blue-500/20 text-blue-300'
-                            : inv.payment_method === 'إنستاباي'
-                            ? 'bg-purple-500/20 text-purple-300'
-                            : 'bg-amber-500/20 text-amber-300'
-                        }`}>
-                          {inv.payment_method || 'كاش'}
-                        </span>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                            inv.payment_method === 'كاش'
+                              ? 'bg-emerald-500/20 text-emerald-300'
+                              : inv.payment_method === 'فيزا'
+                              ? 'bg-blue-500/20 text-blue-300'
+                              : inv.payment_method === 'إنستاباي'
+                              ? 'bg-purple-500/20 text-purple-300'
+                              : inv.payment_method === 'مختلط'
+                              ? 'bg-teal-500/20 text-teal-300 border border-teal-500/30'
+                              : 'bg-amber-500/20 text-amber-300'
+                          }`}>
+                            {inv.payment_method || 'كاش'}
+                          </span>
+                          {inv.status === 'REFUNDED' && (
+                            <span className="px-1.5 py-0.5 rounded text-[9px] font-extrabold bg-rose-500/25 text-rose-300 border border-rose-500/40">
+                              مرتجع
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="p-3 font-mono text-slate-300">{inv.items_count ?? (inv.items ? inv.items.length : 0)} صنف</td>
                       <td className="p-3 font-mono font-bold text-emerald-400" dir="ltr">
@@ -316,7 +336,15 @@ export function ReportsView() {
                       <td className="p-3 text-center">
                         <button
                           type="button"
-                          onClick={() => setSelectedInvoiceForModal(inv)}
+                          onClick={async () => {
+                            setSelectedInvoiceForModal(inv);
+                            try {
+                              const refs = await sqliteService.getInvoiceRefunds(inv.id);
+                              setModalInvoiceRefunds(refs || []);
+                            } catch (e) {
+                              setModalInvoiceRefunds([]);
+                            }
+                          }}
                           className="px-2.5 py-1 rounded-lg bg-[#17233A] hover:bg-teal-500/20 text-teal-300 hover:text-white border border-[#23324D] text-[11px] font-bold flex items-center gap-1 mx-auto transition-colors cursor-pointer"
                         >
                           <Eye className="w-3.5 h-3.5" />
@@ -364,6 +392,29 @@ export function ReportsView() {
                 <span className="text-slate-400">طريقة الدفع:</span>
                 <span className="text-teal-300 font-bold">{selectedInvoiceForModal.payment_method || 'كاش'}</span>
               </div>
+              {selectedInvoiceForModal.payment_method === 'مختلط' && (
+                <div className="flex justify-between text-[11px] bg-[#111A2B] px-2 py-1 rounded border border-teal-500/20">
+                  <span className="text-slate-400">تفصيل المختلط:</span>
+                  <span className="text-teal-300">
+                    كاش: {Number(selectedInvoiceForModal.paid_cash || 0).toFixed(2)} | آجل: {Number(selectedInvoiceForModal.paid_credit || 0).toFixed(2)}
+                  </span>
+                </div>
+              )}
+              {modalInvoiceRefunds.length > 0 && (
+                <div className="p-2 bg-rose-500/10 border border-rose-500/30 rounded-xl space-y-1 text-[11px]">
+                  <div className="text-rose-400 font-bold">مرتجعات مسجلة لهذه الفاتورة:</div>
+                  {modalInvoiceRefunds.map((ref, idx) => (
+                    <div key={ref.id || idx} className="flex justify-between text-slate-300">
+                      <span>{new Date(ref.date_time).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })} ({ref.reason})</span>
+                      <span className="font-bold text-rose-300">-{Number(ref.refund_amount).toFixed(2)} ج.م</span>
+                    </div>
+                  ))}
+                  <div className="border-t border-rose-500/20 pt-1 flex justify-between font-bold text-rose-400">
+                    <span>إجمالي المرتجع:</span>
+                    <span>-{modalInvoiceRefunds.reduce((s, r) => s + (Number(r.refund_amount) || 0), 0).toFixed(2)} ج.م</span>
+                  </div>
+                </div>
+              )}
               <div className="flex justify-between border-t border-[#23324D] pt-2">
                 <span className="text-emerald-400 font-bold text-sm">صافي القيمة:</span>
                 <span className="text-emerald-400 font-bold text-sm">{getInvoiceTotal(selectedInvoiceForModal).toFixed(2)} ج.م</span>
@@ -383,32 +434,40 @@ export function ReportsView() {
                 <span>إعادة طباعة</span>
               </button>
 
-              <button
-                type="button"
-                onClick={async () => {
-                  if (!window.confirm(`هل أنت متأكد من استرجاع كامل الفاتورة #${selectedInvoiceForModal.invoice_number || selectedInvoiceForModal.id} ورد البضاعة للمخزن والمبلغ للعميل؟`)) return;
-                  try {
-                    const items = await sqliteService.getInvoiceItems(selectedInvoiceForModal.id);
-                    await sqliteService.refundInvoice({
-                      invoice_id: selectedInvoiceForModal.id,
-                      items,
-                      refund_amount: getInvoiceTotal(selectedInvoiceForModal),
-                      reason: 'استرجاع كامل الفاتورة من شاشة التقارير',
-                      cashier_name: selectedInvoiceForModal.cashier_name || 'الكاشير'
-                    });
-                    showToast('تم استرجاع الفاتورة ورد الأصناف للمخزن وخصم القيمة من الدرج بنجاح 🔄');
-                    setSelectedInvoiceForModal(null);
-                    const freshInvoices = await sqliteService.getInvoices(100);
-                    setInvoices(freshInvoices);
-                  } catch (e) {
-                    alert('خطأ في إتمام المرتجع: ' + (e.message || e));
-                  }
-                }}
-                className="py-2.5 px-3 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 text-xs font-bold flex items-center justify-center gap-1 cursor-pointer"
-                title="استرجاع الفاتورة ورد المخزون والفلوس"
-              >
-                <span>🔄 مرتجع بيع</span>
-              </button>
+              {canRefund && selectedInvoiceForModal.status !== 'REFUNDED' && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const alreadyRefunded = modalInvoiceRefunds.reduce((s, r) => s + (Number(r.refund_amount) || 0), 0);
+                    const remainingToRefund = Math.max(0, getInvoiceTotal(selectedInvoiceForModal) - alreadyRefunded);
+                    if (remainingToRefund <= 0) {
+                      alert('تم استرجاع هذه الفاتورة بالكامل مسبقاً.');
+                      return;
+                    }
+                    if (!window.confirm(`هل أنت متأكد من استرجاع الفاتورة #${selectedInvoiceForModal.invoice_number || selectedInvoiceForModal.id} بقيمة ${remainingToRefund.toFixed(2)} ج.م ورد البضاعة للمخزن والمبلغ للعميل؟`)) return;
+                    try {
+                      const items = await sqliteService.getInvoiceItems(selectedInvoiceForModal.id);
+                      await sqliteService.refundInvoice({
+                        invoice_id: selectedInvoiceForModal.id,
+                        items,
+                        refund_amount: remainingToRefund,
+                        reason: 'استرجاع الفاتورة من شاشة التقارير',
+                        cashier_name: currentUser?.full_name || selectedInvoiceForModal.cashier_name || 'الكاشير'
+                      });
+                      showToast('تم استرجاع الفاتورة ورد الأصناف للمخزن وخصم القيمة بنجاح 🔄');
+                      setSelectedInvoiceForModal(null);
+                      const freshInvoices = await sqliteService.getInvoices(100);
+                      setInvoices(freshInvoices);
+                    } catch (e) {
+                      alert('خطأ في إتمام المرتجع: ' + (e.message || e));
+                    }
+                  }}
+                  className="py-2.5 px-3 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 text-xs font-bold flex items-center justify-center gap-1 cursor-pointer"
+                  title="استرجاع الفاتورة ورد المخزون والفلوس"
+                >
+                  <span>🔄 مرتجع بيع</span>
+                </button>
+              )}
 
               <button
                 type="button"

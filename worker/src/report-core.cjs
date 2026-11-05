@@ -573,6 +573,7 @@ ${refreshTag}
 function renderShiftPage(pharmacyId, shiftId, data, meta = {}) {
   const s = data.shift || {};
   const t = data.totals || {};
+  const linkQuery = meta.linkQuery || '';
   const lastSyncAt = meta.lastSyncAt || null;
   const isPending = data.hasData === false;
   const isStale = !isPending
@@ -683,7 +684,7 @@ function renderShiftPage(pharmacyId, shiftId, data, meta = {}) {
 
   <div class="actions">
     <button class="btn" onclick="window.print()">طباعة / حفظ PDF</button>
-    <a class="btn secondary" href="/">كل الورديات</a>
+    <a class="btn secondary" href="/${linkQuery}">كل الورديات</a>
   </div>
   `;
 
@@ -691,6 +692,7 @@ function renderShiftPage(pharmacyId, shiftId, data, meta = {}) {
 }
 
 function renderIndex(pharmacyId, store, meta = {}) {
+  const linkQuery = meta.linkQuery || '';
   const ids = allShiftIds(store);
   const todayKey = dateKey(new Date());
   const today = buildDaily(store, todayKey);
@@ -699,7 +701,7 @@ function renderIndex(pharmacyId, store, meta = {}) {
   const rows = ids.length
     ? ids.map((id) => {
         const data = buildShift(store, id);
-        return `<tr><td class="num">#${esc(id)}</td><td>${esc(data.shift.cashier_name || '—')}</td><td class="num green">${money(data.totals.salesTotal)}</td><td><a href="/r/${encodeURIComponent(id)}" style="color:#2dd4bf">فتح التقرير</a></td></tr>`;
+        return `<tr><td class="num">#${esc(id)}</td><td>${esc(data.shift.cashier_name || '—')}</td><td class="num green">${money(data.totals.salesTotal)}</td><td><a href="/r/${encodeURIComponent(id)}${linkQuery}" style="color:#2dd4bf">فتح التقرير</a></td></tr>`;
       }).join('')
     : '<tr><td colspan="4" class="empty">لا توجد ورديات مرفوعة بعد</td></tr>';
   const body = `
@@ -718,8 +720,8 @@ function renderIndex(pharmacyId, store, meta = {}) {
     </div>
 
     <div class="actions">
-      <a class="btn" href="/d/${encodeURIComponent(todayKey)}">ملخص اليوم الكامل</a>
-      <a class="btn secondary" href="/m/${encodeURIComponent(monthKeyNow)}">ملخص الشهر</a>
+      <a class="btn" href="/d/${encodeURIComponent(todayKey)}${linkQuery}">ملخص اليوم الكامل</a>
+      <a class="btn secondary" href="/m/${encodeURIComponent(monthKeyNow)}${linkQuery}">ملخص الشهر</a>
     </div>
 
     <div class="card"><table><thead><tr><th>الوردية</th><th>الكاشير</th><th>المبيعات</th><th>التقرير</th></tr></thead><tbody>${rows}</tbody></table></div>
@@ -730,11 +732,12 @@ function renderIndex(pharmacyId, store, meta = {}) {
 
 function renderDailyPage(pharmacyId, data, meta = {}) {
   const t = data.totals || {};
+  const linkQuery = meta.linkQuery || '';
   const lastSyncAt = meta.lastSyncAt || null;
   const diffClass = Number(t.discrepancy || 0) === 0 ? 'green' : Number(t.discrepancy) > 0 ? 'amber' : 'red';
   const isPending = !data.shifts.length && !data.invoices.length;
   const shiftsRows = data.shifts.length
-    ? data.shifts.map((s) => `<tr><td class="num">#${esc(s.id)}</td><td>${esc(s.cashier_name || '—')}</td><td class="num green">${money(s.total_sales)}</td><td class="num">${money(s.expected_cash)}</td><td class="num ${Number(s.discrepancy) === 0 ? 'green' : Number(s.discrepancy) > 0 ? 'amber' : 'red'}">${money(s.discrepancy)}</td><td><a href="/r/${encodeURIComponent(s.id)}" style="color:#2dd4bf">تقرير الوردية</a></td></tr>`).join('')
+    ? data.shifts.map((s) => `<tr><td class="num">#${esc(s.id)}</td><td>${esc(s.cashier_name || '—')}</td><td class="num green">${money(s.total_sales)}</td><td class="num">${money(s.expected_cash)}</td><td class="num ${Number(s.discrepancy) === 0 ? 'green' : Number(s.discrepancy) > 0 ? 'amber' : 'red'}">${money(s.discrepancy)}</td><td><a href="/r/${encodeURIComponent(s.id)}${linkQuery}" style="color:#2dd4bf">تقرير الوردية</a></td></tr>`).join('')
     : '<tr><td colspan="6" class="empty">لا توجد ورديات في هذا اليوم</td></tr>';
   const itemsRows = data.items.length
     ? data.items.slice(0, 50).map((i) => `<tr><td>${esc(i.name)}</td><td>${i.isStrip ? 'شريط' : 'علبة'}</td><td class="num">${i.qty}</td><td class="num green">${money(i.amount)}</td></tr>`).join('')
@@ -807,7 +810,7 @@ function renderDailyPage(pharmacyId, data, meta = {}) {
 
     <div class="actions">
       <button class="btn" onclick="window.print()">طباعة / حفظ PDF</button>
-      <a class="btn secondary" href="/">فهرس التقارير</a>
+      <a class="btn secondary" href="/${linkQuery}">فهرس التقارير</a>
     </div>
   `;
   // The daily link is the page the owner keeps bookmarked, so it always
@@ -818,6 +821,7 @@ function renderDailyPage(pharmacyId, data, meta = {}) {
 
 function renderMonthlyPage(pharmacyId, data, meta = {}) {
   const t = data.totals || {};
+  const linkQuery = meta.linkQuery || '';
   const lastSyncAt = meta.lastSyncAt || null;
   const daysRows = data.days.length
     ? data.days.map((d) => `<tr><td class="num">${esc(d.date)}</td><td class="num green">${money(d.totals.salesTotal)}</td><td class="num">${money(d.totals.cash)}</td><td class="num">${money(d.totals.visa)}</td><td class="num">${money(d.totals.instapay)}</td><td class="num amber">${money(d.totals.credit)}</td><td class="num">${d.totals.invoiceCount}</td><td class="num">${d.totals.shiftCount}</td><td class="num red">${money(d.totals.expensesTotal)}</td></tr>`).join('')
@@ -849,7 +853,7 @@ function renderMonthlyPage(pharmacyId, data, meta = {}) {
 
     <div class="actions">
       <button class="btn" onclick="window.print()">طباعة / حفظ PDF</button>
-      <a class="btn secondary" href="/">كل التقارير</a>
+      <a class="btn secondary" href="/${linkQuery}">كل التقارير</a>
     </div>
   `;
   return pageShell(`ملخص شهر ${data.month} — ${pharmacyId}`, body, { refreshSeconds: 60 });

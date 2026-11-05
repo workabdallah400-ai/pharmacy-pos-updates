@@ -120,6 +120,7 @@ function mergeSnapshot(dataDir, pharmacyId, snapshot, pharmacyName) {
     purchases: Array.isArray(snapshot.purchases) ? snapshot.purchases : [],
     expenses: Array.isArray(snapshot.expenses) ? snapshot.expenses : [],
     returns: Array.isArray(snapshot.returns) ? snapshot.returns : [],
+    outOfStock: Array.isArray(snapshot.outOfStock) ? snapshot.outOfStock : [],
     capturedAt: new Date().toISOString()
   };
   saveStore(dataDir, pharmacyId, store);
@@ -211,8 +212,17 @@ function startReportServer({ port = DEFAULT_PORT, dataDir, token = TOKEN, host =
       return;
     }
 
-    const url = new URL(req.url, 'http://localhost');
-    const pathname = decodeURIComponent(url.pathname);
+    // Malformed paths (e.g. "/%") must answer 400, never crash the process.
+    let url;
+    let pathname;
+    try {
+      url = new URL(req.url, 'http://localhost');
+      pathname = decodeURIComponent(url.pathname);
+    } catch (e) {
+      res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ ok: false, error: 'Bad request' }));
+      return;
+    }
 
     const providedToken = req.headers['x-report-token'] || url.searchParams.get('token') || '';
     if (token && providedToken !== token) {
@@ -295,7 +305,8 @@ function startReportServer({ port = DEFAULT_PORT, dataDir, token = TOKEN, host =
         const store = loadStore(resolvedDataDir, pharmacyId);
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
         res.end(renderIndex(store.name || pharmacyId, store, {
-          lastSyncAt: store.updatedAt || (store.snapshot && store.snapshot.capturedAt) || null
+          lastSyncAt: store.updatedAt || (store.snapshot && store.snapshot.capturedAt) || null,
+          linkQuery: url.search
         }));
         return;
       }
@@ -307,7 +318,8 @@ function startReportServer({ port = DEFAULT_PORT, dataDir, token = TOKEN, host =
         const data = buildDaily(store, date);
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
         res.end(renderDailyPage(store.name || pharmacyId, data, {
-          lastSyncAt: store.updatedAt || (store.snapshot && store.snapshot.capturedAt) || null
+          lastSyncAt: store.updatedAt || (store.snapshot && store.snapshot.capturedAt) || null,
+          linkQuery: url.search
         }));
         return;
       }
@@ -319,7 +331,8 @@ function startReportServer({ port = DEFAULT_PORT, dataDir, token = TOKEN, host =
         const data = buildMonthly(store, month);
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
         res.end(renderMonthlyPage(store.name || pharmacyId, data, {
-          lastSyncAt: store.updatedAt || (store.snapshot && store.snapshot.capturedAt) || null
+          lastSyncAt: store.updatedAt || (store.snapshot && store.snapshot.capturedAt) || null,
+          linkQuery: url.search
         }));
         return;
       }
@@ -331,7 +344,8 @@ function startReportServer({ port = DEFAULT_PORT, dataDir, token = TOKEN, host =
         const data = buildShift(store, shiftId);
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
         res.end(renderShiftPage(store.name || pharmacyId, shiftId, data, {
-          lastSyncAt: store.updatedAt || (store.snapshot && store.snapshot.capturedAt) || null
+          lastSyncAt: store.updatedAt || (store.snapshot && store.snapshot.capturedAt) || null,
+          linkQuery: url.search
         }));
         return;
       }

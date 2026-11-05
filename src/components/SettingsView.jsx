@@ -476,12 +476,26 @@ export function SettingsView({ onUpdatePharmacyName, onRevokeDevice, currentUser
     reader.readAsText(file);
   };
 
+  const [auditLogsList, setAuditLogsList] = useState([]);
+  const [loadingAuditLogs, setLoadingAuditLogs] = useState(false);
+
+  useEffect(() => {
+    if (activeTab === 'users' || activeTab === 'audit') {
+      setLoadingAuditLogs(true);
+      sqliteService.getAuditLogs(100)
+        .then((logs) => setAuditLogsList(logs || []))
+        .catch(() => {})
+        .finally(() => setLoadingAuditLogs(false));
+    }
+  }, [activeTab]);
+
   const navTabs = [
     { id: 'receipt', label: 'هوية الصيدلية والفاتورة', icon: Store },
     { id: 'hardware', label: 'الأجهزة والطباعة والدرج', icon: Printer },
     { id: 'backup', label: 'النسخ الاحتياطي والأمان', icon: HardDrive },
     { id: 'license', label: 'التراخيص وبوابة المطور', icon: Key },
     { id: 'users', label: 'إدارة المستخدمين والحسابات', icon: Shield },
+    { id: 'audit', label: 'سجل العمليات والتدقيق (Audit Log)', icon: Eye },
     { id: 'security', label: 'صلاحيات PIN التقليدية', icon: Lock },
     { id: 'cloud', label: 'المزامنة وبوابة الموبايل', icon: Cloud }
   ];
@@ -1139,6 +1153,96 @@ export function SettingsView({ onUpdatePharmacyName, onRevokeDevice, currentUser
                 </button>
               </div>
 
+            </div>
+          )}
+
+          {/* TAB 4.b: Users Management */}
+          {activeTab === 'users' && (
+            <div className="max-w-4xl space-y-6">
+              <UsersManagementView currentUser={currentUser} />
+            </div>
+          )}
+
+          {/* TAB 4.c: Audit Logs Trail */}
+          {activeTab === 'audit' && (
+            <div className="max-w-4xl space-y-4 font-cairo">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-sm font-black text-white flex items-center gap-2">
+                    <Shield className="w-4 h-4 text-teal-400" />
+                    <span>سجل الرقابة وتدقيق العمليات الحساسة (Audit Log)</span>
+                  </h4>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    توثيق لكافة العمليات المالية، المرتجعات، الجرد، والتعديلات مع اسم المستخدم والتوقيت
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setLoadingAuditLogs(true);
+                    try {
+                      const logs = await sqliteService.getAuditLogs(100);
+                      setAuditLogsList(logs || []);
+                      showToast('تم تحديث سجل التدقيق ✓');
+                    } finally {
+                      setLoadingAuditLogs(false);
+                    }
+                  }}
+                  className="px-3 py-1.5 rounded-xl bg-[#0B1220] border border-[#23324D] hover:border-teal-400 text-teal-300 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>تحديث السجل</span>
+                </button>
+              </div>
+
+              <div className="bg-[#0B1220] border border-[#23324D] rounded-2xl overflow-hidden shadow-lg">
+                <table className="w-full text-right text-xs">
+                  <thead className="bg-[#141E30] text-slate-300 border-b border-[#23324D] font-bold">
+                    <tr>
+                      <th className="p-3">#</th>
+                      <th className="p-3">المستخدم</th>
+                      <th className="p-3">نوع العملية</th>
+                      <th className="p-3">العنصر</th>
+                      <th className="p-3">التفاصيل</th>
+                      <th className="p-3">التوقيت والتاريخ</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[#23324D]/60 font-medium">
+                    {auditLogsList.length === 0 ? (
+                      <tr>
+                        <td colSpan="6" className="text-center py-12 text-slate-400">
+                          {loadingAuditLogs ? 'جاري تحميل سجل التدقيق...' : 'لا توجد سجلات تدقيق مسجلة حالياً.'}
+                        </td>
+                      </tr>
+                    ) : (
+                      auditLogsList.map((log) => (
+                        <tr key={log.id} className="hover:bg-[#17233A]/60 transition-colors">
+                          <td className="p-3 font-mono text-slate-400 text-[11px]">#{log.id}</td>
+                          <td className="p-3 text-white font-bold">{log.user_name || 'النظام'}</td>
+                          <td className="p-3">
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                              log.action === 'REFUND'
+                                ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                                : log.action === 'STOCK_TAKE'
+                                ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30'
+                                : log.action === 'PRICE_CHANGE'
+                                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                                : 'bg-teal-500/20 text-teal-300 border border-teal-500/30'
+                            }`}>
+                              {log.action}
+                            </span>
+                          </td>
+                          <td className="p-3 font-mono text-slate-300 text-[11px]">{log.entity} #{log.entity_id}</td>
+                          <td className="p-3 text-slate-200">{log.details}</td>
+                          <td className="p-3 font-mono text-slate-400 text-[11px]">
+                            {log.date_time ? new Date(log.date_time).toLocaleString('ar-EG') : '-'}
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
 

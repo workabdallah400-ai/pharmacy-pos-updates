@@ -27,9 +27,10 @@ import {
 } from 'lucide-react';
 import { ProductModal } from './ProductModal';
 import { BarcodeStickerModal } from './BarcodeStickerModal';
+import { StockTakeModal } from './StockTakeModal';
 import { sqliteService } from '../db/sqliteService';
 
-export function ProductsView({ medicines = [], onSaveMedicine, onDeleteMedicine }) {
+export function ProductsView({ currentUser, medicines = [], onSaveMedicine, onDeleteMedicine }) {
   // Search & Filter State
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState('ALL'); // 'ALL', 'AVAILABLE', 'NEAR_EMPTY', 'OUT_OF_STOCK'
@@ -47,6 +48,7 @@ export function ProductsView({ medicines = [], onSaveMedicine, onDeleteMedicine 
 
   // Modals State
   const [showProductModal, setShowProductModal] = useState(false);
+  const [showStockTakeModal, setShowStockTakeModal] = useState(false);
   const [medicineToEdit, setMedicineToEdit] = useState(null);
   const [barcodeMedicine, setBarcodeMedicine] = useState(null);
   const fileInputRef = useRef(null);
@@ -389,6 +391,11 @@ export function ProductsView({ medicines = [], onSaveMedicine, onDeleteMedicine 
   // Start Quick Inline Edit
   const startQuickEdit = (med) => {
     if (!med) return;
+    const canEdit = !currentUser || currentUser?.role === 'admin' || currentUser?.permissions?.canEditPrice !== false;
+    if (!canEdit) {
+      showToast('ليس لديك صلاحية لتعديل أسعار الأدوية ⚠️', 'warning');
+      return;
+    }
     setQuickEditingId(med.id);
     setQuickPrice(med.price_box != null ? med.price_box.toString() : '0');
     setQuickStock(med.stock_boxes != null ? med.stock_boxes.toString() : '0');
@@ -613,30 +620,18 @@ export function ProductsView({ medicines = [], onSaveMedicine, onDeleteMedicine 
                 <span>إضافة دواء جديد</span>
               </button>
 
-              {/* Instant Stock Take / Audit Button */}
-              <button
-                type="button"
-                onClick={async () => {
-                  const title = prompt('أدخل عنوان جرد المخزون:', `جرد دوري - ${new Date().toLocaleDateString('ar-EG')}`);
-                  if (!title) return;
-                  try {
-                    const result = await sqliteService.saveStockTake({
-                      title,
-                      items: sqliteItems,
-                      auditor_name: 'مدير الصيدلية',
-                      notes: 'تسوية ومطابقة الجرد الفعلي'
-                    });
-                    showToast(`تم حفظ جلسة جرد المخزون الفعلي بنجاح! فروقات: ${result.discrepancyCount} صنف`);
-                  } catch (e) {
-                    alert('خطأ أثناء حفظ الجرد: ' + (e.message || e));
-                  }
-                }}
-                className="h-11 px-3.5 rounded-xl bg-purple-500/20 hover:bg-purple-500/30 border border-purple-500/40 text-purple-300 text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-                title="جرد المخزون الفعلي ومطابقة الأرصدة والتسويات"
-              >
-                <Layers className="w-4 h-4 text-purple-400" />
-                <span>جرد المخزون الفعلي</span>
-              </button>
+              {/* Physical Stock Take / Audit Button */}
+              {(!currentUser || currentUser?.role === 'admin' || currentUser?.permissions?.canStockTake !== false) && (
+                <button
+                  type="button"
+                  onClick={() => setShowStockTakeModal(true)}
+                  className="h-11 px-3.5 rounded-xl bg-purple-500/20 hover:bg-purple-500/30 border border-purple-500/40 text-purple-300 text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                  title="جرد المخزون الفعلي ومطابقة الأرصدة والتسويات"
+                >
+                  <Layers className="w-4 h-4 text-purple-400" />
+                  <span>جرد المخزون الفعلي</span>
+                </button>
+              )}
             </div>
           </div>
 
@@ -883,29 +878,31 @@ export function ProductsView({ medicines = [], onSaveMedicine, onDeleteMedicine 
                               </button>
 
                               {/* Delete */}
-                              <button
-                                type="button"
-                                onClick={async () => {
-                                  if (window.confirm(`هل أنت متأكد من حذف الصنف [${med.trade_name_ar || med.trade_name}] نهائياً؟`)) {
-                                    try {
-                                      await sqliteService.deleteMedicine(med.id);
-                                      if (onDeleteMedicine) onDeleteMedicine(med.id);
-                                      setSqliteItems((prev) => prev.filter((m) => m.id !== med.id));
-                                      setSqliteTotal((prev) => Math.max(0, (prev || 1) - 1));
-                                      const freshStats = await sqliteService.getInventoryStats();
-                                      if (freshStats) setSqliteStats(freshStats);
-                                      showToast('تم حذف الصنف من المخزن ✓');
-                                    } catch (err) {
-                                      console.warn('Delete medicine error:', err);
-                                      showToast('تعذر حذف الصنف من قاعدة البيانات.', 'warning');
+                              {(!currentUser || currentUser?.role === 'admin' || currentUser?.permissions?.canDeleteItem !== false) && (
+                                <button
+                                  type="button"
+                                  onClick={async () => {
+                                    if (window.confirm(`هل أنت متأكد من حذف الصنف [${med.trade_name_ar || med.trade_name}] نهائياً؟`)) {
+                                      try {
+                                        await sqliteService.deleteMedicine(med.id);
+                                        if (onDeleteMedicine) onDeleteMedicine(med.id);
+                                        setSqliteItems((prev) => prev.filter((m) => m.id !== med.id));
+                                        setSqliteTotal((prev) => Math.max(0, (prev || 1) - 1));
+                                        const freshStats = await sqliteService.getInventoryStats();
+                                        if (freshStats) setSqliteStats(freshStats);
+                                        showToast('تم حذف الصنف من المخزن ✓');
+                                      } catch (err) {
+                                        console.warn('Delete medicine error:', err);
+                                        showToast('تعذر حذف الصنف من قاعدة البيانات.', 'warning');
+                                      }
                                     }
-                                  }
-                                }}
-                                className="w-7 h-7 rounded-lg bg-[#17233A] hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 border border-[#23324D] flex items-center justify-center transition-colors cursor-pointer"
-                                title="حذف الصنف"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
+                                  }}
+                                  className="w-7 h-7 rounded-lg bg-[#17233A] hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 border border-[#23324D] flex items-center justify-center transition-colors cursor-pointer"
+                                  title="حذف الصنف"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
                             </div>
                           )}
                         </td>
@@ -997,6 +994,30 @@ export function ProductsView({ medicines = [], onSaveMedicine, onDeleteMedicine 
         <BarcodeStickerModal
           medicine={barcodeMedicine}
           onClose={() => setBarcodeMedicine(null)}
+        />
+      )}
+
+      {/* Physical Stock Take Modal */}
+      {showStockTakeModal && (
+        <StockTakeModal
+          isOpen={showStockTakeModal}
+          currentUser={currentUser}
+          onClose={() => setShowStockTakeModal(false)}
+          onComplete={async () => {
+            const freshStats = await sqliteService.getInventoryStats();
+            if (freshStats) setSqliteStats(freshStats);
+            const refreshed = await sqliteService.getPaginatedMedicines({
+              page: currentPage,
+              pageSize: 50,
+              search: searchQuery,
+              category: selectedCategory,
+              filter: activeFilter
+            });
+            if (refreshed && refreshed.items) {
+              setSqliteItems(refreshed.items);
+              setSqliteTotal(refreshed.total);
+            }
+          }}
         />
       )}
 

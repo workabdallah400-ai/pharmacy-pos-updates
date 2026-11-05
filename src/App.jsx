@@ -707,6 +707,7 @@ export default function App() {
             />
           ) : activeTab === 'products' ? (
             <ProductsView
+              currentUser={currentUser}
               medicines={medicines}
               onSaveMedicine={handleSaveMedicine}
               onDeleteMedicine={handleDeleteMedicine}
@@ -741,7 +742,7 @@ export default function App() {
               onUpdateCurrentShift={setCurrentShift}
             />
           ) : activeTab === 'reports' ? (
-            <ReportsView />
+            <ReportsView currentUser={currentUser} />
           ) : activeTab === 'settings' && canManageSettings ? (
             <SettingsView
               currentUser={currentUser}

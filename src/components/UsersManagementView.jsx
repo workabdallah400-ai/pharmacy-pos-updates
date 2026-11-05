@@ -22,6 +22,12 @@ const DEFAULT_PERMISSIONS_BY_ROLE = {
     canManageSettings: true,
     canDeleteInvoices: true,
     canGiveDiscount: true,
+    canDiscount: true,
+    canEditPrice: true,
+    canDeleteItem: true,
+    canRefund: true,
+    canStockTake: true,
+    canViewAuditLog: true,
   },
   pharmacist: {
     canViewReports: true,
@@ -32,6 +38,12 @@ const DEFAULT_PERMISSIONS_BY_ROLE = {
     canManageSettings: false,
     canDeleteInvoices: false,
     canGiveDiscount: true,
+    canDiscount: true,
+    canEditPrice: false,
+    canDeleteItem: false,
+    canRefund: true,
+    canStockTake: true,
+    canViewAuditLog: false,
   },
   cashier: {
     canViewReports: false,
@@ -42,6 +54,12 @@ const DEFAULT_PERMISSIONS_BY_ROLE = {
     canManageSettings: false,
     canDeleteInvoices: false,
     canGiveDiscount: false,
+    canDiscount: false,
+    canEditPrice: false,
+    canDeleteItem: false,
+    canRefund: false,
+    canStockTake: false,
+    canViewAuditLog: false,
   },
 };
 
@@ -54,6 +72,11 @@ const PERMISSION_LABELS = {
   canManageSettings: { label: 'تعديل الإعدادات العامة', icon: '⚙️' },
   canDeleteInvoices: { label: 'حذف وإلغاء الفواتير', icon: '🗑️' },
   canGiveDiscount: { label: 'منح خصومات على البيع', icon: '🏷️' },
+  canEditPrice: { label: 'تعديل أسعار الأدوية', icon: '💲' },
+  canDeleteItem: { label: 'حذف أصناف من المخزن', icon: '❌' },
+  canRefund: { label: 'تسجيل مرتجعات بيع للعملاء', icon: '🔄' },
+  canStockTake: { label: 'إجراء جرد المخزون الفعلي', icon: '📋' },
+  canViewAuditLog: { label: 'عرض سجل العمليات والتدقيق (Audit Log)', icon: '🛡️' },
 };
 
 function UserForm({ existingUser = null, currentUser, onSave, onCancel }) {

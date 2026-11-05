@@ -195,6 +195,28 @@ const INVOICE = {
     check('a shift-less invoice counts in the day', Number(looseJson.totals?.salesTotal) === 250,
       String(looseJson.totals?.salesTotal));
     check('the shift-less invoice is listed', looseDay.body.includes('أبسترال'));
+
+    // A malformed path must answer 400 and must not kill the process.
+    const malformed = await get('/%');
+    check('malformed URL → 400', malformed.status === 400, `status ${malformed.status}`);
+    const stillAlive = await get('/health');
+    check('server survives a malformed URL', stillAlive.status === 200, `status ${stillAlive.status}`);
+
+    // The daily page reads outOfStock from the uploaded snapshot.
+    const withStock = await post('/api/pharmacy/snapshot', {
+      pharmacyId: 'PH-STOCK-01',
+      snapshot: {
+        shifts: [],
+        invoices: [],
+        purchases: [],
+        expenses: [],
+        returns: [],
+        outOfStock: [{ trade_name_ar: 'صنف ناقص للاختبار', barcode: '0001', price_box: 12 }]
+      }
+    });
+    check('snapshot with outOfStock', withStock.status === 200, `status ${withStock.status}`);
+    const stockDay = await get('/d/1999-01-01?pharmacyId=PH-STOCK-01');
+    check('outOfStock reaches the daily report', stockDay.body.includes('صنف ناقص للاختبار'));
   } finally {
     try { instance.server.close(); } catch (e) {}
     try { fs.rmSync(dataDir, { recursive: true, force: true }); } catch (e) {}

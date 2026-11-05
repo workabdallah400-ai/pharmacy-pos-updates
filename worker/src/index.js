@@ -112,6 +112,7 @@ async function mergeSnapshot(env, pharmacyId, snapshot, pharmacyName) {
     purchases: Array.isArray(snapshot.purchases) ? snapshot.purchases : [],
     expenses: Array.isArray(snapshot.expenses) ? snapshot.expenses : [],
     returns: Array.isArray(snapshot.returns) ? snapshot.returns : [],
+    outOfStock: Array.isArray(snapshot.outOfStock) ? snapshot.outOfStock : [],
     capturedAt: new Date().toISOString()
   };
   await saveStore(env, pharmacyId, store);
@@ -177,8 +178,14 @@ async function readJson(request, limitBytes = 24 * 1024 * 1024) {
 
 export default {
   async fetch(request, env, ctx) {
-    const url = new URL(request.url);
-    const pathname = decodeURIComponent(url.pathname);
+    let url;
+    let pathname;
+    try {
+      url = new URL(request.url);
+      pathname = decodeURIComponent(url.pathname);
+    } catch (e) {
+      return json({ ok: false, error: 'Bad request' }, 400);
+    }
 
     if (request.method === 'OPTIONS') {
       return new Response(null, { status: 204, headers: CORS });
@@ -295,22 +302,22 @@ export default {
       }
 
       if (pathname === '/' || pathname === '/reports') {
-        return html(renderIndex(name, store, { lastSyncAt }));
+        return html(renderIndex(name, store, { lastSyncAt, linkQuery: url.search }));
       }
 
       if (pathname.startsWith('/d/')) {
         const date = pathname.slice('/d/'.length);
-        return html(renderDailyPage(name, buildDaily(store, date), { lastSyncAt }));
+        return html(renderDailyPage(name, buildDaily(store, date), { lastSyncAt, linkQuery: url.search }));
       }
 
       if (pathname.startsWith('/m/')) {
         const month = pathname.slice('/m/'.length);
-        return html(renderMonthlyPage(name, buildMonthly(store, month), { lastSyncAt }));
+        return html(renderMonthlyPage(name, buildMonthly(store, month), { lastSyncAt, linkQuery: url.search }));
       }
 
       if (pathname.startsWith('/r/')) {
         const shiftId = pathname.slice('/r/'.length);
-        return html(renderShiftPage(name, shiftId, buildShift(store, shiftId), { lastSyncAt }));
+        return html(renderShiftPage(name, shiftId, buildShift(store, shiftId), { lastSyncAt, linkQuery: url.search }));
       }
 
       return html(notFoundPage(), 404);
