@@ -40,64 +40,31 @@ export function MobileQRModal({ isOpen, onClose, shiftTotal = 0, itemsCount = 0 
           `المتوقع بالدرج: ${Number(s?.expected_cash || 0).toFixed(2)} ج.م`
         ];
 
-        // Prefer a short hosted-report link so the phone shows a polished page.
-        // The address is ALWAYS the permanent cloud host (it never changes and
-        // stays reachable from anywhere, even while the pharmacy is offline);
-        // the LAN address is offered as a second, on-site QR code.
-        let hostedReportUrl = '';
-        let localReportUrl = '';
-        let dailyUrl = '';
-        let previewBase = '';
-        try {
-          await initReportServer();
-          const pharmacyId = readSettings().cloudPharmacyId || 'PHARMACY-LOCAL';
-          if (shift?.id) {
-            hostedReportUrl = await resolveShiftReportUrl(shift.id, pharmacyId);
-            localReportUrl = await resolveLocalReportUrl(shift.id, pharmacyId);
-          }
-          dailyUrl = buildDailySummaryUrl(pharmacyId, localDateKey(shift?.opened_at || new Date()));
-          previewBase = getPermanentReportBaseUrl() || getReportBaseUrl() || getReportPreviewBaseUrl();
-          if (hostedReportUrl) {
-            await Promise.race([
-              (async () => {
-                await sqliteService.backfillReportSnapshot().catch(() => {});
-                await sqliteService.resendShiftToReportServer(shift.id).catch(() => {});
-              })(),
-              new Promise((resolve) => setTimeout(resolve, 5000))
-            ]);
-          }
-        } catch (e) {
-          hostedReportUrl = '';
-        }
+        // Self-Contained Offline Text QR: No Wi-Fi, No Internet, No Network needed
+        const qrText = [
+          `📊 تقرير وردية لحظي (F12)`,
+          `الوردية: #${shift?.id || '—'} - ${shift?.cashier_name || 'الكاشير'}`,
+          `المبيعات: ${Number(shift?.total_sales ?? shiftTotal ?? 0).toFixed(2)} ج.م`,
+          `• كاش: ${Number(shift?.cash_sales || 0).toFixed(2)} | فيزا: ${Number(shift?.visa_sales || 0).toFixed(2)}`,
+          `• آجل: ${Number(shift?.credit_sales || 0).toFixed(2)} | إنستاباي: ${Number(shift?.instapay_sales || 0).toFixed(2)}`,
+          `فواتير البيع: ${shiftInvoices.length || itemsCount}`,
+          `عهدة البداية: ${Number(shift?.opening_cash || 0).toFixed(2)} ج.م`,
+          `المتوقع بالدرج: ${Number(shift?.expected_cash || 0).toFixed(2)} ج.م`,
+          `فواتير التوريد: ${shiftPurchases.length}`,
+          `مصروفات نثريات: ${shiftExpenses.reduce((s, e) => s + (Number(e.amount) || 0), 0).toFixed(2)} ج.م`
+        ].join('\n');
+
         if (!cancelled) {
-          setReportUrl(hostedReportUrl);
-          setLocalReportUrl(localReportUrl);
-          setDailyUrl(dailyUrl);
-          setReportBase(previewBase || '');
-          setQrMode(hostedReportUrl ? 'URL' : 'TEXT');
+          setQrMode('TEXT');
         }
 
-        const payload = hostedReportUrl || lines.join('\n').slice(0, 1200);
-        const url = await QRCode.toDataURL(payload, {
+        const url = await QRCode.toDataURL(qrText, {
           width: 480,
           margin: 2,
           color: { dark: '#0B1220', light: '#FFFFFF' },
-          errorCorrectionLevel: 'L'
+          errorCorrectionLevel: 'M'
         });
         if (!cancelled) setQrDataUrl(url);
-
-        // Second QR: the on-site address (same Wi-Fi, works without internet).
-        if (localReportUrl) {
-          try {
-            const localQr = await QRCode.toDataURL(localReportUrl, {
-              width: 280,
-              margin: 2,
-              color: { dark: '#0B1220', light: '#FFFFFF' },
-              errorCorrectionLevel: 'L'
-            });
-            if (!cancelled) setLocalQrDataUrl(localQr);
-          } catch (e) {}
-        }
       } catch (e) {
         console.warn('Failed to build mobile QR:', e);
         try {
@@ -184,18 +151,8 @@ export function MobileQRModal({ isOpen, onClose, shiftTotal = 0, itemsCount = 0 
           )}
         </div>
 
-        {/* Second QR — the on-site address (same Wi-Fi, no internet needed) */}
-        {localQrDataUrl && (
-          <div className="p-3 bg-white rounded-2xl border-4 border-sky-400/80 mb-3 flex flex-col items-center">
-            <img src={localQrDataUrl} alt="On-site LAN QR" className="w-28 h-28 object-contain rounded-lg" />
-            <div className="mt-1.5 text-[9px] font-bold text-slate-700 bg-sky-50 px-2 py-1 rounded-lg border border-sky-200 text-center leading-3">
-              📶 QR داخل المحل (نفس الواي فاي — بدون إنترنت)
-            </div>
-          </div>
-        )}
-
-        <div className={`w-full mb-3 px-3 py-1.5 rounded-xl text-[10px] font-bold border ${qrMode === 'URL' ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30' : 'bg-amber-500/10 text-amber-300 border-amber-500/30'}`}>
-          {qrMode === 'URL' ? '🔗 رابط دائم لتقرير الوردية — يعمل من أي مكان' : '📄 كود نصي — شغّل نسخة الكمبيوتر/السيرفر لعرض صفحة التقرير'}
+        <div className="w-full mb-3 px-3 py-1.5 rounded-xl text-[10px] font-bold border bg-emerald-500/10 text-emerald-300 border-emerald-500/30">
+          📷 مسح فوري بكاميرا الموبايل — بدون إنترنت وبدون واي فاي نهائياً
         </div>
 
         {qrMode === 'URL' && reportUrl && (
