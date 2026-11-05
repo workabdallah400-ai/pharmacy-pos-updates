@@ -498,7 +498,9 @@ function buildDaily(store, date) {
   const rows = collectRows(store);
   const key = date || dateKey(new Date());
   const match = (r) => dateKey(r.date_time || r.closed_at || r.opened_at) === key;
-  return { date: key, ...aggregateRange(rows, match) };
+  const aggregated = aggregateRange(rows, match);
+  const outOfStock = store?.snapshot?.outOfStock || [];
+  return { date: key, outOfStock, ...aggregated };
 }
 
 function buildMonthly(store, month) {
@@ -732,22 +734,31 @@ function renderDailyPage(pharmacyId, data, meta = {}) {
   const diffClass = Number(t.discrepancy || 0) === 0 ? 'green' : Number(t.discrepancy) > 0 ? 'amber' : 'red';
   const isPending = !data.shifts.length && !data.invoices.length;
   const shiftsRows = data.shifts.length
-    ? data.shifts.map((s) => `<tr><td class="num">#${esc(s.id)}</td><td>${esc(s.cashier_name || '—')}</td><td class="num green">${money(s.total_sales)}</td><td class="num">${money(s.expected_cash)}</td><td class="num ${Number(s.discrepancy) === 0 ? 'green' : Number(s.discrepancy) > 0 ? 'amber' : 'red'}">${money(s.discrepancy)}</td><td><a href="/r/${encodeURIComponent(s.id)}" style="color:#2dd4bf">تقرير</a></td></tr>`).join('')
+    ? data.shifts.map((s) => `<tr><td class="num">#${esc(s.id)}</td><td>${esc(s.cashier_name || '—')}</td><td class="num green">${money(s.total_sales)}</td><td class="num">${money(s.expected_cash)}</td><td class="num ${Number(s.discrepancy) === 0 ? 'green' : Number(s.discrepancy) > 0 ? 'amber' : 'red'}">${money(s.discrepancy)}</td><td><a href="/r/${encodeURIComponent(s.id)}" style="color:#2dd4bf">تقرير الوردية</a></td></tr>`).join('')
     : '<tr><td colspan="6" class="empty">لا توجد ورديات في هذا اليوم</td></tr>';
   const itemsRows = data.items.length
-    ? data.items.slice(0, 40).map((i) => `<tr><td>${esc(i.name)}</td><td>${i.isStrip ? 'شريط' : 'علبة'}</td><td class="num">${i.qty}</td><td class="num green">${money(i.amount)}</td></tr>`).join('')
+    ? data.items.slice(0, 50).map((i) => `<tr><td>${esc(i.name)}</td><td>${i.isStrip ? 'شريط' : 'علبة'}</td><td class="num">${i.qty}</td><td class="num green">${money(i.amount)}</td></tr>`).join('')
     : '<tr><td colspan="4" class="empty">لا توجد أصناف مباعة</td></tr>';
+
+  const purchasesRows = (data.purchases && data.purchases.length)
+    ? data.purchases.map((p) => `<tr><td class="num">#${esc(p.supplier_invoice_no || p.id)}</td><td>${esc(p.supplier_name || 'مورد')}</td><td class="num">${(p.items || []).length || 1}</td><td class="num green">${money(p.net_total)}</td></tr>`).join('')
+    : '<tr><td colspan="4" class="empty">لا توجد فواتير توريد مدخلة اليوم</td></tr>';
+
+  const outOfStockRows = (data.outOfStock && data.outOfStock.length)
+    ? data.outOfStock.slice(0, 30).map((m) => `<tr><td>${esc(m.trade_name_ar || m.trade_name)}</td><td class="num">${esc(m.barcode || '—')}</td><td class="num red font-bold">0</td><td class="num">${money(m.price_box)}</td></tr>`).join('')
+    : '<tr><td colspan="4" class="empty" style="color:#34d399">✅ لا توجد نواقص — جميع الأصناف برصيد متوفر بالمخزن</td></tr>';
+
   const body = `
-    <div class="brand"><div class="logo">📊</div><div><h1>${esc(pharmacyId)}</h1><div class="sub">ملخص اليوم — <b style="color:#fff">${esc(data.date)}</b> • آخر مزامنة: ${esc(fmtSyncTime(lastSyncAt))}</div></div></div>
+    <div class="brand"><div class="logo">📊</div><div><h1>${esc(pharmacyId)}</h1><div class="sub">ملخص اليوم — <b style="color:#fff">${esc(data.date)}</b> • آخر تحديث: ${esc(fmtSyncTime(lastSyncAt))}</div></div></div>
 
     ${isPending ? pendingCard(
       'بيانات هذا اليوم لم تُرفع بعد',
-      'الصيدلية تعمل بدون إنترنت حالياً — كل المبيعات والورديات محفوظة على جهازها ومؤمّنة في قائمة الانتظار. بمجرد عودة الاتصال تُرفع تلقائياً.',
+      'الصيدلية تعمل بدون إنترنت حالياً — كل المبيعات والورديات محفوظة على جهازها ومؤمّنة في قائمة الانتظار.',
       lastSyncAt
     ) : ''}
 
     <div class="card">
-      <h2>💰 ملخص المبيعات</h2>
+      <h2>💰 ملخص المبيعات والخزينة</h2>
       <div class="grid">
         <div class="stat"><div class="k">إجمالي المبيعات</div><div class="v green">${money(t.salesTotal)} ج.م</div></div>
         <div class="stat"><div class="k">كاش</div><div class="v">${money(t.cash)}</div></div>
@@ -759,17 +770,18 @@ function renderDailyPage(pharmacyId, data, meta = {}) {
     </div>
 
     <div class="card">
-      <h2>🧾 الجرد والتوريد والمصروفات</h2>
+      <h2>🧾 جرد الدرج وحركة النقدية</h2>
       <div class="grid">
+        <div class="stat"><div class="k">عهدة البداية</div><div class="v">${money(t.openingCash)}</div></div>
+        <div class="stat"><div class="k">المتوقع بالدرج</div><div class="v teal">${money(t.expected)}</div></div>
+        <div class="stat"><div class="k">الفعلي المسلّم</div><div class="v">${money(t.actual)}</div></div>
+        <div class="stat"><div class="k">فرق الدرج (عجز/زيادة)</div><div class="v ${diffClass}">${money(t.discrepancy)}</div></div>
         <div class="stat"><div class="k">عدد الفواتير</div><div class="v teal">${t.invoiceCount}</div></div>
         <div class="stat"><div class="k">عدد الورديات</div><div class="v">${t.shiftCount}</div></div>
         <div class="stat"><div class="k">توريد الموردين</div><div class="v">${money(t.purchasesTotal)}</div></div>
         <div class="stat"><div class="k">مرتجع موردين</div><div class="v red">${money(t.returnsTotal)}</div></div>
-        <div class="stat"><div class="k">إتلاف</div><div class="v red">${money(t.disposalsTotal)}</div></div>
-        <div class="stat"><div class="k">مصروفات</div><div class="v red">${money(t.expensesTotal)}</div></div>
-        <div class="stat"><div class="k">المتوقع بالدرج</div><div class="v teal">${money(t.expected)}</div></div>
-        <div class="stat"><div class="k">الفعلي</div><div class="v">${money(t.actual)}</div></div>
-        <div class="stat"><div class="k">فرق الجرد</div><div class="v ${diffClass}">${money(t.discrepancy)}</div></div>
+        <div class="stat"><div class="k">إتلاف وتوالف</div><div class="v red">${money(t.disposalsTotal)}</div></div>
+        <div class="stat"><div class="k">مصروفات نثريات</div><div class="v red">${money(t.expensesTotal)}</div></div>
       </div>
     </div>
 
@@ -779,13 +791,23 @@ function renderDailyPage(pharmacyId, data, meta = {}) {
     </div>
 
     <div class="card">
-      <h2>💊 الأصناف المباعة (${data.items.length})</h2>
-      <table><thead><tr><th>الصنف</th><th>الوحدة</th><th>الكمية</th><th>الإجمالي</th></tr></thead><tbody>${itemsRows}</tbody></table>
+      <h2>📦 فواتير التوريد والمشتريات المدخلة اليوم (${(data.purchases || []).length})</h2>
+      <table><thead><tr><th>رقم الفاتورة</th><th>المورد</th><th>البنود</th><th>الصافي</th></tr></thead><tbody>${purchasesRows}</tbody></table>
+    </div>
+
+    <div class="card">
+      <h2>💊 جميع الأصناف المباعة اليوم (${data.items.length})</h2>
+      <table><thead><tr><th>الصنف</th><th>الوحدة</th><th>الكمية المباعة</th><th>الإجمالي</th></tr></thead><tbody>${itemsRows}</tbody></table>
+    </div>
+
+    <div class="card" style="border-color:rgba(251,113,133,0.3)">
+      <h2 style="color:#fb7185">🚨 أصناف نفدت من المخزن (رصيد صفر للنواقص) (${(data.outOfStock || []).length})</h2>
+      <table><thead><tr><th>الصنف</th><th>الباركود</th><th>الرصيد</th><th>سعر البيع</th></tr></thead><tbody>${outOfStockRows}</tbody></table>
     </div>
 
     <div class="actions">
       <button class="btn" onclick="window.print()">طباعة / حفظ PDF</button>
-      <a class="btn secondary" href="/">كل التقارير</a>
+      <a class="btn secondary" href="/">فهرس التقارير</a>
     </div>
   `;
   // The daily link is the page the owner keeps bookmarked, so it always

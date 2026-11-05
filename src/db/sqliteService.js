@@ -833,9 +833,13 @@ class SQLiteService {
     const items = Array.isArray(invoiceData.items) ? invoiceData.items : [];
     if (items.length === 0) throw new Error('لا يمكن حفظ فاتورة بدون أصناف');
 
-    // Always attach the sale to the currently open shift (never a hardcoded id)
+    // Always attach the sale to the currently open shift.
+    // STRICT REQUIREMENT: No sales allowed without an open shift.
     const currentShift = await this.getCurrentShift();
     const shiftId = invoiceData.shift_id || currentShift?.id || '';
+    if (!shiftId) {
+      throw new Error('لا توجد وردية مفتوحة! يرجى فتح وردية أولاً لتسجيل الفواتير.');
+    }
 
     const dateTime = invoiceData.date_time || new Date().toISOString();
     const timeStr = invoiceData.time_str || new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
@@ -1364,6 +1368,15 @@ class SQLiteService {
       .filter((r) => r.kind === 'DISPOSAL')
       .reduce((sum, r) => sum + (Number(r.amount) || 0), 0);
 
+    // 5.c Out of stock items at shift close
+    const outOfStockRes = this.db.exec(`
+      SELECT id, barcode, trade_name, trade_name_ar, stock_boxes, stock_strips, price_box, price_strip
+      FROM medicines
+      WHERE stock_boxes <= 0 AND stock_strips <= 0
+      LIMIT 100
+    `);
+    const outOfStock = this._formatRows(outOfStockRes);
+
     // 6. Summary stats
     const opening_cash = shift.opening_cash || 0;
     const cash_sales = shift.cash_sales || 0;
@@ -1407,7 +1420,8 @@ class SQLiteService {
       invoices,
       purchases,
       expenses,
-      returns
+      returns,
+      outOfStock
     };
   }
 
@@ -1829,12 +1843,20 @@ class SQLiteService {
       });
     }
 
+    const outOfStockMeds = this._formatRows(this.db.exec(`
+      SELECT id, barcode, trade_name, trade_name_ar, stock_boxes, stock_strips, price_box, price_strip
+      FROM medicines
+      WHERE stock_boxes <= 0 AND stock_strips <= 0
+      LIMIT 100
+    `));
+
     const snapshot = {
       shifts,
       invoices: invoiceRows.map((i) => ({ ...i, items: itemsByInvoice.get(String(i.id)) || [] })),
       purchases: purchaseRows.map((p) => ({ ...p, items: itemsByPurchase.get(String(p.id)) || [] })),
       expenses,
-      returns
+      returns,
+      outOfStock: outOfStockMeds
     };
 
     // Skip the upload when nothing changed since the last successful push.

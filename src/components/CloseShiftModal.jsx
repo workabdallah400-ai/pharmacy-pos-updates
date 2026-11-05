@@ -222,14 +222,8 @@ export function CloseShiftModal({
           }
         }
 
-        // Resolve the hosted report URL.
-        //
-        // The main QR ALWAYS points at the permanent cloud host: the link
-        // never changes (it can be printed on paper) and the owner can open
-        // it from Cairo even while the pharmacy itself is offline — the page
-        // then shows a friendly "not uploaded yet" state and refreshes
-        // itself automatically. A second, on-site QR is offered for phones
-        // connected to the pharmacy's own Wi-Fi.
+        // Resolve the local LAN report URL and daily summary URL.
+        // Pure Offline: QR points directly to the local server via LAN IP.
         let hostedReportUrl = '';
         let localReportUrl = '';
         let dailyUrl = '';
@@ -237,25 +231,17 @@ export function CloseShiftModal({
         try {
           await initReportServer();
           const pharmacyId = readSettings().cloudPharmacyId || 'PHARMACY-LOCAL';
-          hostedReportUrl = await resolveShiftReportUrl(activeShift.id, pharmacyId);
           localReportUrl = await resolveLocalReportUrl(activeShift.id, pharmacyId);
-          dailyUrl = buildDailySummaryUrl(
-            pharmacyId,
-            localDateKey(activeShift.closed_at || activeShift.opened_at || new Date())
-          );
-          previewBase = getPermanentReportBaseUrl() || getReportBaseUrl() || getReportPreviewBaseUrl();
-          if (hostedReportUrl) {
-            // Make sure the server has this shift before anyone scans the code.
-            // Upload a full snapshot (covers old shifts) then push the live
-            // outbox, so the report page is complete before anyone scans it.
-            await Promise.race([
-              (async () => {
-                await sqliteService.backfillReportSnapshot().catch(() => {});
-                await sqliteService.resendShiftToReportServer(activeShift.id).catch(() => {});
-              })(),
-              new Promise((resolve) => setTimeout(resolve, 6000))
-            ]);
-          }
+          const localBase = getLocalReportBaseUrl();
+          dailyUrl = localBase ? `${localBase}/d/${localDateKey(activeShift.closed_at || activeShift.opened_at || new Date())}` : '';
+          hostedReportUrl = dailyUrl || localReportUrl;
+          previewBase = localBase;
+
+          // Push local snapshot to embedded report server immediately
+          try {
+            await sqliteService.backfillReportSnapshot().catch(() => {});
+            await sqliteService.resendShiftToReportServer(activeShift.id).catch(() => {});
+          } catch (e) {}
         } catch (e) {
           hostedReportUrl = '';
         }
@@ -574,12 +560,12 @@ export function CloseShiftModal({
                   </div>
                 )}
                 <div className="mt-3 text-slate-900 font-mono font-bold text-xs bg-slate-100 px-3 py-1.5 rounded-xl border border-slate-300 w-full">
-                  وردية #{id} • مبيعات: {totalSales.toFixed(0)} ج.م • فعلي: {actualCash.toFixed(0)} ج.م
+                  ملخص اليوم • وردية #{id} • مبيعات: {totalSales.toFixed(0)} ج.م • فعلي: {actualCash.toFixed(0)} ج.م
                 </div>
                 <div className={`mt-2 w-full px-3 py-1.5 rounded-xl text-[10px] font-bold border ${qrMode === 'URL' ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-amber-50 text-amber-800 border-amber-200'}`}>
                   {qrMode === 'URL'
-                    ? '🔗 رابط دائم — يُفتح من أي مكان حتى لو الصيدلية بدون إنترنت'
-                    : '📄 كود نصي — شغّل التطبيق على الكمبيوتر/السيرفر لتظهر صفحة التقرير الكاملة'}
+                    ? '📶 باركود ملخص اليوم — يُفتح من كاميرا الموبايل على نفس شبكة الصيدلية (بدون إنترنت)'
+                    : '📄 كود نصي — تقرير الوردية المباشر'}
                 </div>
               </div>
 
@@ -606,25 +592,29 @@ export function CloseShiftModal({
                 <div className="bg-[#17233A] border border-[#23324D] p-4 rounded-2xl space-y-3">
                   <div className="flex items-center gap-2 text-emerald-400 font-bold text-sm">
                     <Smartphone className="w-5 h-5" />
-                    <span>{qrMode === 'URL' ? 'امسح الكود لفتح صفحة تقرير الوردية' : 'مسح مباشر بكاميرا الموبايل أو قارئ الباركود'}</span>
+                    <span>{qrMode === 'URL' ? 'امسح الباركود لفتح ملخص اليوم الشامل' : 'مسح مباشر بكاميرا الموبايل أو قارئ الباركود'}</span>
                   </div>
                   <p className="text-xs text-slate-300 leading-relaxed">
                     {qrMode === 'URL'
-                      ? 'امسح الكود بأي هاتف من أي مكان — الرابط دائم ولا يتغير. لو كانت الصيدلية بدون إنترنت تظهر آخر بيانات مرفوعة مع وقت آخر مزامنة، وتُحدَّث الصفحة تلقائياً فور عودة الاتصال.'
-                      : 'امسح هذا الباركود بأي هاتف ذكي ليظهر ملخص الوردية. لتجربة التقرير الكامل المنسق، شغّل نسخة الكمبيوتر/السيرفر وسيُستخدم رابط تقرير تلقائياً.'}
+                      ? 'امسح الباركود بكاميرا الموبايل (وأنت متصل بشبكة الواي فاي للصيدلية) ليفتح لك صفحة كاملة تشمل: كل المبيعات، عهدة ودرج النقدية والعجز والزيادة، الأصناف المباعة، فواتير التوريد، وقائمة النواقص (الأصناف التي نفدت).'
+                      : 'امسح هذا الباركود بأي هاتف ذكي ليظهر ملخص الوردية كاملاً.'}
                   </p>
 
-                  {qrMode === 'URL' && reportUrl && (
+                  {qrMode === 'URL' && (dailyUrl || reportUrl) && (
                     <div className="bg-[#0B1220] border border-emerald-500/30 rounded-xl p-2.5 space-y-1.5">
-                      <div className="text-[10px] text-slate-400 font-bold">رابط التقرير (يُفتح على الموبايل):</div>
-                      <div dir="ltr" className="text-[10px] text-emerald-300 font-mono break-all text-left select-text">
-                        {reportUrl}
+                      <div className="flex items-center justify-between">
+                        <div className="text-[10px] text-slate-400 font-bold">رابط التقرير عبر الشبكة الداخلية:</div>
+                        <button
+                          type="button"
+                          onClick={handleCopyReport}
+                          className="px-2 py-0.5 rounded-lg bg-[#17233A] hover:bg-[#202E4C] border border-[#23324D] text-[10px] font-bold text-teal-300 cursor-pointer"
+                        >
+                          {copied ? 'تم النسخ ✓' : 'نسخ'}
+                        </button>
                       </div>
-                      {reportBase && (
-                        <div className="text-[10px] text-slate-500">
-                          السيرفر: <span dir="ltr" className="font-mono">{reportBase}</span>
-                        </div>
-                      )}
+                      <div dir="ltr" className="text-[10px] text-emerald-300 font-mono break-all text-left select-text">
+                        {dailyUrl || reportUrl}
+                      </div>
                     </div>
                   )}
 

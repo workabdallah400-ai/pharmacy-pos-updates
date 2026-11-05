@@ -120,16 +120,16 @@ export function POSView({
     }, 3500);
   };
 
-  // Missing shift = a warning, never a blocker. The cashier can keep selling
-  // (including zero-stock items for returns / disposals / invoices) without
-  // opening a second shift.
-  const warnNoShift = () => {
-    if (noShiftWarnedRef.current) return;
-    noShiftWarnedRef.current = true;
-    showToast(
-      '⚠️ لا توجد وردية مفتوحة — سيُسجَّل البيع بدون ربط وردية. افتح وردية من الشريط العلوي لو أردت ربطه بتقارير الوردية.',
-      'warning'
-    );
+  // Strict Shift check: If shift is closed, trigger open shift modal and block selling
+  const requireShift = () => {
+    if (!isShiftOpen) {
+      showToast('⚠️ لا يمكن البيع أو إضافة أصناف: يجب فتح وردية أولاً!', 'error');
+      if (typeof onOpenShiftModal === 'function') {
+        onOpenShiftModal();
+      }
+      return false;
+    }
+    return true;
   };
 
   useEffect(() => {
@@ -217,9 +217,8 @@ export function POSView({
       const q = searchQuery.trim();
       if (!q) return;
 
-      // No shift gate here: scanning must always work (zero-stock items for
-      // returns / disposals / invoices included). A warning is shown instead.
-      if (!isShiftOpen) warnNoShift();
+      // Strict shift gate: scanning is blocked if no shift is open
+      if (!requireShift()) return;
 
       // Exact barcode match via SQLite index
       try {
@@ -241,37 +240,55 @@ export function POSView({
 
   // Add Item to Cart
   const addToCart = (medicine, unitType = 'box') => {
-    // 1. Shift check: warning only — selling is never blocked by a closed
-    //    shift, so a return / disposal / invoice can be issued without
-    //    opening a second shift.
-    if (!isShiftOpen) warnNoShift();
+    // 1. Strict Shift Check: completely block adding if no open shift
+    if (!requireShift()) return;
 
-    // 2. Zero-Stock Notification (Permit selling with notification, standard for pharmacy POS)
+    // 2. Strict Zero-Stock Guard: strictly block adding if stock is 0 or less
     const stockBoxes = parseInt(medicine.stock_boxes, 10) || 0;
     const stockStrips = parseInt(medicine.stock_strips, 10) || 0;
-    const isOutOfStock = unitType === 'box' ? (stockBoxes <= 0) : (stockStrips <= 0 && stockBoxes <= 0);
+    const stripsPerBox = parseInt(medicine.strips_per_box, 10) || 1;
+    const totalStripsAvailable = (stockBoxes * stripsPerBox) + stockStrips;
 
-    if (isOutOfStock || (stockBoxes <= 0 && stockStrips <= 0)) {
-      showToast(`⚠️ تنبيه: تم إضافة [${medicine.trade_name_ar || medicine.trade_name}] برصيد 0`, 'warning');
+    if (unitType === 'box') {
+      if (stockBoxes <= 0) {
+        showToast(`❌ لا يمكن إضافة [${medicine.trade_name_ar || medicine.trade_name}]: الرصيد 0 في المخزن!`, 'error');
+        return;
+      }
+    } else {
+      if (totalStripsAvailable <= 0) {
+        showToast(`❌ لا يمكن إضافة [${medicine.trade_name_ar || medicine.trade_name}]: الرصيد 0 في المخزن!`, 'error');
+        return;
+      }
+    }
+
+    // Check if item is already in cart and would exceed available stock
+    const existingIndex = cart.findIndex(
+      (item) => item.id === medicine.id && item.unitType === unitType
+    );
+    if (existingIndex > -1) {
+      const currentQty = cart[existingIndex].quantity;
+      if (unitType === 'box' && currentQty + 1 > stockBoxes) {
+        showToast(`❌ الرصيد المتاح بالمخزن (${stockBoxes} علبة) فقط!`, 'error');
+        return;
+      }
+      if (unitType === 'strip' && currentQty + 1 > totalStripsAvailable) {
+        showToast(`❌ الرصيد المتاح بالمخزن (${totalStripsAvailable} شريط) فقط!`, 'error');
+        return;
+      }
     }
 
     playBarcodeBeep();
 
     setCart((prevCart) => {
-      const existingIndex = prevCart.findIndex(
+      const existing = prevCart.findIndex(
         (item) => item.id === medicine.id && item.unitType === unitType
       );
 
       const unitPrice = unitType === 'box' ? medicine.price_box : medicine.price_strip;
 
-      if (existingIndex > -1) {
+      if (existing > -1) {
         const updated = [...prevCart];
-        const newQty = updated[existingIndex].quantity + 1;
-        const maxStock = unitType === 'box' ? stockBoxes : (stockBoxes * (parseInt(medicine.strips_per_box, 10) || 1) + stockStrips);
-        if (maxStock > 0 && newQty > maxStock) {
-          showToast(`⚠️ تنبيه: الكمية تتجاوز الرصيد المسجل بالمخزن (${maxStock})`, 'warning');
-        }
-        updated[existingIndex].quantity = newQty;
+        updated[existing].quantity += 1;
         return updated;
       } else {
         return [
@@ -301,28 +318,55 @@ export function POSView({
     });
   };
 
-  // Update Quantity
+  // Update Quantity with stock validation
   const updateQuantity = (index, delta) => {
     setCart((prev) => {
       const updated = [...prev];
-      const newQty = updated[index].quantity + delta;
+      const item = updated[index];
+      const newQty = item.quantity + delta;
       if (newQty <= 0) {
         return updated.filter((_, i) => i !== index);
       }
-      updated[index].quantity = newQty;
+
+      // Check max available stock
+      const stockBoxes = parseInt(item.stock_boxes, 10) || 0;
+      const stockStrips = parseInt(item.stock_strips, 10) || 0;
+      const stripsPerBox = parseInt(item.strips_per_box, 10) || 1;
+      const totalStrips = (stockBoxes * stripsPerBox) + stockStrips;
+      const maxStock = item.unitType === 'box' ? stockBoxes : totalStrips;
+
+      if (delta > 0 && newQty > maxStock) {
+        showToast(`❌ لا يمكن زيادة الكمية: الرصيد المتاح (${maxStock}) فقط!`, 'error');
+        return prev;
+      }
+
+      item.quantity = newQty;
       return updated;
     });
   };
 
-  // Direct Quantity Change
+  // Direct Quantity Change with stock validation
   const handleDirectQuantity = (index, val) => {
     const num = parseInt(val, 10);
     setCart((prev) => {
       const updated = [...prev];
+      const item = updated[index];
       if (isNaN(num) || num <= 0) {
-        updated[index].quantity = 1;
+        item.quantity = 1;
+        return updated;
+      }
+
+      const stockBoxes = parseInt(item.stock_boxes, 10) || 0;
+      const stockStrips = parseInt(item.stock_strips, 10) || 0;
+      const stripsPerBox = parseInt(item.strips_per_box, 10) || 1;
+      const totalStrips = (stockBoxes * stripsPerBox) + stockStrips;
+      const maxStock = item.unitType === 'box' ? stockBoxes : totalStrips;
+
+      if (num > maxStock) {
+        showToast(`❌ الرصيد المتاح بالمخزن (${maxStock}) فقط!`, 'error');
+        item.quantity = Math.max(1, maxStock);
       } else {
-        updated[index].quantity = num;
+        item.quantity = num;
       }
       return updated;
     });
@@ -410,30 +454,30 @@ export function POSView({
 
   // Complete & Checkout (F1)
   const handleCheckout = async () => {
-    // 1. Shift check: warning only. The invoice is still saved (linked to the
-    //    open shift when there is one, otherwise saved as a standalone
-    //    invoice) so returns / disposals / invoices never need a second shift.
-    if (!isShiftOpen) warnNoShift();
+    // 1. Strict Shift Check: Completely block checkout if no open shift
+    if (!requireShift()) return;
 
     if (cart.length === 0) {
       showToast('عفواً، السلة فارغة! أضف أدوية أولاً لإتمام البيع.', 'warning');
       return;
     }
 
-    // 2. Zero-Stock Guard: warn, but never block a real sale
-    //    (blocking here caused the app to silently refuse sales for catalog
-    //     items whose stock had not been received yet).
-    const zeroStockItems = cart.filter((item) => {
-      const stock = item.unitType === 'box'
-        ? (parseInt(item.stock_boxes, 10) || 0)
-        : ((parseInt(item.stock_boxes, 10) || 0) * (parseInt(item.strips_per_box, 10) || 1) + (parseInt(item.stock_strips, 10) || 0));
-      return stock <= 0;
-    });
-    if (zeroStockItems.length > 0) {
-      showToast(
-        `⚠️ تنبيه: ${zeroStockItems.map((i) => i.trade_name_ar || i.trade_name).join('، ')} برصيد صفر — سيتم تسجيل البيع وتحديث الرصيد.`,
-        'warning'
-      );
+    // 2. Strict Zero-Stock and Over-Stock Verification
+    for (const item of cart) {
+      const stockBoxes = parseInt(item.stock_boxes, 10) || 0;
+      const stockStrips = parseInt(item.stock_strips, 10) || 0;
+      const stripsPerBox = parseInt(item.strips_per_box, 10) || 1;
+      const totalStrips = (stockBoxes * stripsPerBox) + stockStrips;
+      const maxStock = item.unitType === 'box' ? stockBoxes : totalStrips;
+
+      if (maxStock <= 0) {
+        showToast(`❌ الصنف [${item.trade_name_ar || item.trade_name}] نفد من المخزن تماماً (رصيد 0). يرجى حذفه لإتمام البيع!`, 'error');
+        return;
+      }
+      if (item.quantity > maxStock) {
+        showToast(`❌ كمية [${item.trade_name_ar || item.trade_name}] في السلة (${item.quantity}) تتجاوز رصيد المخزن (${maxStock})!`, 'error');
+        return;
+      }
     }
 
     playCashDrawerSound();
@@ -677,8 +721,8 @@ export function POSView({
                               inStock ? 'bg-emerald-400' : 'bg-rose-400 animate-pulse'
                             }`}
                           ></span>
-                          <span className={`text-[11px] font-semibold ${inStock ? 'text-slate-300' : 'text-rose-400'}`}>
-                            {inStock ? `${med.stock_boxes} ع (${med.stock_strips} ش)` : 'نفد من المخزن — يمكن الإضافة'}
+                          <span className={`text-[11px] font-semibold ${inStock ? 'text-slate-300' : 'text-rose-400 font-bold'}`}>
+                            {inStock ? `${med.stock_boxes} ع (${med.stock_strips} ش)` : 'نفد من المخزن'}
                           </span>
                         </div>
 
@@ -701,12 +745,13 @@ export function POSView({
                         <button
                           type="button"
                           onClick={() => addToCart(med, 'box')}
-                          className={`py-1.5 rounded-xl text-xs font-bold flex items-center justify-center gap-1 transition-all active:scale-95 cursor-pointer ${
+                          disabled={!inStock}
+                          className={`py-1.5 rounded-xl text-xs font-bold flex items-center justify-center gap-1 transition-all ${
                             inStock
-                              ? 'bg-[#17233A] hover:bg-teal-500 hover:text-slate-950 text-white border border-[#23324D]'
-                              : 'bg-rose-500/10 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30'
+                              ? 'bg-[#17233A] hover:bg-teal-500 hover:text-slate-950 text-white border border-[#23324D] active:scale-95 cursor-pointer'
+                              : 'bg-slate-800/40 text-slate-600 border border-slate-700/40 cursor-not-allowed opacity-50'
                           }`}
-                          title={inStock ? 'إضافة علبة للسلة' : 'رصيد 0 — يمكن إضافته للسلة (مرتجع / إتلاف / فاتورة)'}
+                          title={inStock ? 'إضافة علبة للسلة' : 'الرصيد نفد من المخزن (0) — غير متاح للبيع'}
                         >
                           <Plus className="w-3 h-3" />
                           <span>+ علبة</span>
@@ -716,12 +761,13 @@ export function POSView({
                         <button
                           type="button"
                           onClick={() => addToCart(med, 'strip')}
-                          className={`py-1.5 rounded-xl text-xs font-bold flex items-center justify-center gap-1 transition-all active:scale-95 cursor-pointer ${
+                          disabled={!inStock}
+                          className={`py-1.5 rounded-xl text-xs font-bold flex items-center justify-center gap-1 transition-all ${
                             inStock
-                              ? 'bg-[#17233A] hover:bg-teal-500 hover:text-slate-950 text-white border border-[#23324D]'
-                              : 'bg-rose-500/10 hover:bg-rose-500/25 text-rose-300 border border-rose-500/30'
+                              ? 'bg-[#17233A] hover:bg-teal-500 hover:text-slate-950 text-white border border-[#23324D] active:scale-95 cursor-pointer'
+                              : 'bg-slate-800/40 text-slate-600 border border-slate-700/40 cursor-not-allowed opacity-50'
                           }`}
-                          title={inStock ? 'إضافة شريط للسلة' : 'رصيد 0 — يمكن إضافته للسلة (مرتجع / إتلاف / فاتورة)'}
+                          title={inStock ? 'إضافة شريط للسلة' : 'الرصيد نفد من المخزن (0) — غير متاح للبيع'}
                         >
                           <Plus className="w-3 h-3" />
                           <span>+ شريط</span>
@@ -1150,23 +1196,23 @@ export function POSView({
         itemsCount={shiftInvoicesCount}
       />
 
-      {/* Non-blocking notice: selling works without an open shift */}
+      {/* Blocking banner when no shift is open */}
       {!isShiftOpen && (
-        <div className="px-3.5 pt-3 bg-[#111A2B] border-b border-amber-500/30">
-          <div className="flex items-center justify-between gap-3 px-3 py-2 rounded-xl bg-amber-500/10 border border-amber-500/30">
-            <div className="flex items-center gap-2 text-amber-300 text-[11px] font-bold">
-              <AlertTriangle className="w-4 h-4 shrink-0" />
+        <div className="px-3.5 pt-3 bg-[#111A2B] border-b border-rose-500/40">
+          <div className="flex items-center justify-between gap-3 px-4 py-2.5 rounded-xl bg-rose-500/15 border border-rose-500/40">
+            <div className="flex items-center gap-2.5 text-rose-300 text-xs font-bold">
+              <AlertTriangle className="w-5 h-5 shrink-0 text-rose-400 animate-bounce" />
               <span>
-                لا توجد وردية مفتوحة — البيع والإضافة يعملان كالمعتاد (حتى الأصناف برصيد صفر)، لكن الفواتير لن تُربط بتقرير وردية.
+                ⚠️ لا توجد وردية مفتوحة حالياً! البيع وإضافة الأصناف معطلان بالكامل حتى يتم فتح وردية عمل جديدة باسم الكاشير.
               </span>
             </div>
             {onOpenShiftModal && (
               <button
                 type="button"
                 onClick={onOpenShiftModal}
-                className="shrink-0 px-3 py-1.5 rounded-lg bg-gradient-to-r from-teal-500 to-emerald-500 hover:from-teal-400 hover:to-emerald-400 text-slate-950 font-black text-[11px] transition-all cursor-pointer whitespace-nowrap"
+                className="shrink-0 px-4 py-2 rounded-xl bg-gradient-to-r from-teal-500 to-emerald-500 hover:from-teal-400 hover:to-emerald-400 text-slate-950 font-black text-xs shadow-lg shadow-teal-500/20 transition-all cursor-pointer whitespace-nowrap active:scale-95"
               >
-                🔓 فتح وردية
+                🔓 فتح وردية الآن
               </button>
             )}
           </div>

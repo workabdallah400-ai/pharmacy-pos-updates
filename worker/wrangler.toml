@@ -1,0 +1,26 @@
+# Pharmacy POS — Cloudflare Worker
+#
+# A permanent, free public host for the shift reports:
+#   https://pharmacy-reports.<your-subdomain>.workers.dev
+#
+# Setup (one time):
+#   1. npm install
+#   2. npx wrangler login
+#   3. npx wrangler kv namespace create REPORTS   → paste the id below
+#   4. npx wrangler deploy
+
+name = "pharmacy-reports"
+main = "src/index.js"
+compatibility_date = "2026-01-01"
+
+# The KV namespace that stores every pharmacy snapshot.
+# `wrangler kv namespace create REPORTS` prints the id — put it here.
+[[kv_namespaces]]
+binding = "REPORTS"
+id = "1d2ad9442cad4f748db4ecbd5cd6f712"
+
+# Optional: protect the reports with a shared secret.
+#   npx wrangler secret put REPORT_TOKEN
+# The same value then goes into the app: Settings → Cloud Sync → Report token.
+# [vars]
+# REPORT_TOKEN = ""
