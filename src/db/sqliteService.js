@@ -581,17 +581,7 @@ class SQLiteService {
           }
         }
 
-        // Flag legacy default admin for mandatory password change only once
-        for (const u of users) {
-          if (
-            u.username.toLowerCase() === 'admin' &&
-            u.created_by === 'SYSTEM' &&
-            !String(u.password_hash || '').startsWith('pbkdf2_')
-          ) {
-            this.db.run(`UPDATE app_users SET must_change_password = 1 WHERE id = ${u.id}`);
-          }
         }
-      }
     } catch (e) {
       console.warn('User migration error:', e);
     }

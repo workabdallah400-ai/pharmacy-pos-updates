@@ -13,7 +13,6 @@ import { ReportsView } from './components/ReportsView';
 import { SettingsView } from './components/SettingsView';
 import { PlaceholderView } from './components/PlaceholderView';
 import { FirstRunSetupScreen } from './components/FirstRunSetupScreen';
-import { ForcePasswordChangeScreen } from './components/ForcePasswordChangeScreen';
 import { OpenShiftModal } from './components/OpenShiftModal';
 import {
   initReportServer,
@@ -639,17 +638,6 @@ export default function App() {
     );
   }
 
-  // 6. Force Password Change Guard (for users with must_change_password = 1)
-  if (currentUser?.must_change_password) {
-    return (
-      <ForcePasswordChangeScreen
-        currentUser={currentUser}
-        onPasswordChanged={() => {
-          setCurrentUser((prev) => ({ ...prev, must_change_password: 0 }));
-        }}
-      />
-    );
-  }
 
   // 4. Master Shell & Workspace
   return (
