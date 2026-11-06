@@ -267,43 +267,45 @@ export function POSView({
     }
   };
 
-  // Add Item to Cart
+  // Add Item to Cart (unitType: 'box' | 'strip' | 'unit')
   const addToCart = (medicine, unitType = 'box') => {
     // 1. Strict Shift Check: completely block adding if no open shift
     if (!requireShift()) return;
 
-    // 2. Strict Zero-Stock Guard: strictly block adding if stock is 0 or less
+    // 2. Strict Zero-Stock Guard: compute exact smallest units available
     const stockBoxes = parseInt(medicine.stock_boxes, 10) || 0;
     const stockStrips = parseInt(medicine.stock_strips, 10) || 0;
-    const stripsPerBox = parseInt(medicine.strips_per_box, 10) || 1;
-    const totalStripsAvailable = (stockBoxes * stripsPerBox) + stockStrips;
+    const stockUnits = parseInt(medicine.stock_units, 10) || 0;
+    const stripsPerBox = Math.max(1, parseInt(medicine.strips_per_box, 10) || 1);
+    const unitsPerStrip = Math.max(1, parseInt(medicine.units_per_strip, 10) || 10);
+    const totalSmallestUnits = (stockBoxes * stripsPerBox * unitsPerStrip) + (stockStrips * unitsPerStrip) + stockUnits;
 
-    if (unitType === 'box') {
-      if (stockBoxes <= 0) {
-        showToast(`❌ لا يمكن إضافة [${medicine.trade_name_ar || medicine.trade_name}]: الرصيد 0 في المخزن!`, 'error');
-        return;
-      }
-    } else {
-      if (totalStripsAvailable <= 0) {
-        showToast(`❌ لا يمكن إضافة [${medicine.trade_name_ar || medicine.trade_name}]: الرصيد 0 في المخزن!`, 'error');
-        return;
-      }
+    if (totalSmallestUnits <= 0) {
+      showToast(`❌ لا يمكن إضافة [${medicine.trade_name_ar || medicine.trade_name}]: الرصيد 0 في المخزن!`, 'error');
+      return;
     }
 
-    // Check if item is already in cart and would exceed available stock
-    const existingIndex = cart.findIndex(
-      (item) => item.id === medicine.id && item.unitType === unitType
-    );
-    if (existingIndex > -1) {
-      const currentQty = cart[existingIndex].quantity;
-      if (unitType === 'box' && currentQty + 1 > stockBoxes) {
-        showToast(`❌ الرصيد المتاح بالمخزن (${stockBoxes} علبة) فقط!`, 'error');
-        return;
-      }
-      if (unitType === 'strip' && currentQty + 1 > totalStripsAvailable) {
-        showToast(`❌ الرصيد المتاح بالمخزن (${totalStripsAvailable} شريط) فقط!`, 'error');
-        return;
-      }
+    // Check if adding this unit exceeds available stock
+    const neededSmallestUnits = unitType === 'box' ? (stripsPerBox * unitsPerStrip) : (unitType === 'strip' ? unitsPerStrip : 1);
+    if (neededSmallestUnits > totalSmallestUnits) {
+      showToast(`❌ الكمية المطلوبة غير متوفرة في المخزن!`, 'error');
+      return;
+    }
+
+    // Check existing cart items for this medicine
+    const currentUnitsInCart = cart
+      .filter((item) => item.id === medicine.id)
+      .reduce((sum, item) => {
+        const u = item.unitType || 'box';
+        const spb = Math.max(1, parseInt(item.strips_per_box, 10) || stripsPerBox);
+        const ups = Math.max(1, parseInt(item.units_per_strip, 10) || unitsPerStrip);
+        const mult = u === 'box' ? (spb * ups) : (u === 'strip' ? ups : 1);
+        return sum + (item.quantity * mult);
+      }, 0);
+
+    if (currentUnitsInCart + neededSmallestUnits > totalSmallestUnits) {
+      showToast(`❌ تجاوز إجمالي الرصيد المتاح بالمخزن لهذا الصنف!`, 'error');
+      return;
     }
 
     playBarcodeBeep();
@@ -313,7 +315,9 @@ export function POSView({
         (item) => item.id === medicine.id && item.unitType === unitType
       );
 
-      const unitPrice = unitType === 'box' ? medicine.price_box : medicine.price_strip;
+      let unitPrice = medicine.price_box;
+      if (unitType === 'strip') unitPrice = medicine.price_strip;
+      else if (unitType === 'unit') unitPrice = medicine.price_unit || (medicine.price_strip / unitsPerStrip);
 
       if (existing > -1) {
         const updated = [...prevCart];
@@ -325,7 +329,7 @@ export function POSView({
           {
             ...medicine,
             unitType,
-            unitPrice,
+            unitPrice: parseFloat(Number(unitPrice).toFixed(2)),
             quantity: 1
           }
         ];
@@ -335,14 +339,32 @@ export function POSView({
     searchInputRef.current?.focus();
   };
 
-  // Toggle Box vs Strip in Cart
+  // Cycle Unit Type in Cart: Box -> Strip -> Unit -> Box
   const toggleUnitType = (index) => {
     setCart((prev) => {
       const updated = [...prev];
       const item = updated[index];
-      const newUnit = item.unitType === 'box' ? 'strip' : 'box';
-      item.unitType = newUnit;
-      item.unitPrice = newUnit === 'box' ? item.price_box : item.price_strip;
+      const spb = Math.max(1, parseInt(item.strips_per_box, 10) || 1);
+      const ups = Math.max(1, parseInt(item.units_per_strip, 10) || 10);
+      
+      let nextUnit = 'box';
+      if (item.unitType === 'box') {
+        nextUnit = spb > 1 ? 'strip' : 'unit';
+      } else if (item.unitType === 'strip') {
+        nextUnit = 'unit';
+      } else {
+        nextUnit = 'box';
+      }
+
+      let newPrice = item.price_box;
+      if (nextUnit === 'strip') {
+        newPrice = item.price_strip || (item.price_box / spb);
+      } else if (nextUnit === 'unit') {
+        newPrice = item.price_unit || (item.price_strip ? item.price_strip / ups : item.price_box / (spb * ups));
+      }
+
+      item.unitType = nextUnit;
+      item.unitPrice = parseFloat(Number(newPrice).toFixed(2));
       return updated;
     });
   };
@@ -357,15 +379,23 @@ export function POSView({
         return updated.filter((_, i) => i !== index);
       }
 
-      // Check max available stock
       const stockBoxes = parseInt(item.stock_boxes, 10) || 0;
       const stockStrips = parseInt(item.stock_strips, 10) || 0;
-      const stripsPerBox = parseInt(item.strips_per_box, 10) || 1;
-      const totalStrips = (stockBoxes * stripsPerBox) + stockStrips;
-      const maxStock = item.unitType === 'box' ? stockBoxes : totalStrips;
+      const stockUnits = parseInt(item.stock_units, 10) || 0;
+      const spb = Math.max(1, parseInt(item.strips_per_box, 10) || 1);
+      const ups = Math.max(1, parseInt(item.units_per_strip, 10) || 10);
+      const totalAvailable = (stockBoxes * spb * ups) + (stockStrips * ups) + stockUnits;
 
-      if (delta > 0 && newQty > maxStock) {
-        showToast(`❌ لا يمكن زيادة الكمية: الرصيد المتاح (${maxStock}) فقط!`, 'error');
+      const itemMultiplier = item.unitType === 'box' ? (spb * ups) : (item.unitType === 'strip' ? ups : 1);
+      const otherUnits = updated
+        .filter((it, idx) => it.id === item.id && idx !== index)
+        .reduce((s, it) => {
+          const m = it.unitType === 'box' ? (spb * ups) : (it.unitType === 'strip' ? ups : 1);
+          return s + (it.quantity * m);
+        }, 0);
+
+      if (delta > 0 && (otherUnits + (newQty * itemMultiplier) > totalAvailable)) {
+        showToast(`❌ لا يمكن زيادة الكمية: إجمالي الرصيد المتاح بالمخزن نفد!`, 'error');
         return prev;
       }
 
@@ -387,13 +417,23 @@ export function POSView({
 
       const stockBoxes = parseInt(item.stock_boxes, 10) || 0;
       const stockStrips = parseInt(item.stock_strips, 10) || 0;
-      const stripsPerBox = parseInt(item.strips_per_box, 10) || 1;
-      const totalStrips = (stockBoxes * stripsPerBox) + stockStrips;
-      const maxStock = item.unitType === 'box' ? stockBoxes : totalStrips;
+      const stockUnits = parseInt(item.stock_units, 10) || 0;
+      const spb = Math.max(1, parseInt(item.strips_per_box, 10) || 1);
+      const ups = Math.max(1, parseInt(item.units_per_strip, 10) || 10);
+      const totalAvailable = (stockBoxes * spb * ups) + (stockStrips * ups) + stockUnits;
 
-      if (num > maxStock) {
-        showToast(`❌ الرصيد المتاح بالمخزن (${maxStock}) فقط!`, 'error');
-        item.quantity = Math.max(1, maxStock);
+      const itemMultiplier = item.unitType === 'box' ? (spb * ups) : (item.unitType === 'strip' ? ups : 1);
+      const otherUnits = updated
+        .filter((it, idx) => it.id === item.id && idx !== index)
+        .reduce((s, it) => {
+          const m = it.unitType === 'box' ? (spb * ups) : (it.unitType === 'strip' ? ups : 1);
+          return s + (it.quantity * m);
+        }, 0);
+
+      const maxAllowed = Math.floor(Math.max(0, totalAvailable - otherUnits) / itemMultiplier);
+      if (num > maxAllowed) {
+        showToast(`❌ الرصيد المتاح بالمخزن (${maxAllowed}) فقط!`, 'error');
+        item.quantity = Math.max(1, maxAllowed);
       } else {
         item.quantity = num;
       }
@@ -518,24 +558,32 @@ export function POSView({
         if (fresh) med = fresh;
       } catch (e) {}
 
-      const stripsPerBox = Math.max(1, parseInt(med.strips_per_box, 10) || 1);
-      const existing = demandByMedicine.get(medicineId) || { med, stripsPerBox, needed: 0 };
-      existing.needed += item.unitType === 'strip' ? qty : qty * stripsPerBox;
+      const spb = Math.max(1, parseInt(med.strips_per_box, 10) || 1);
+      const ups = Math.max(1, parseInt(med.units_per_strip, 10) || 10);
+      const existing = demandByMedicine.get(medicineId) || { med, spb, ups, neededUnits: 0 };
+      
+      let unitsNeeded = 0;
+      if (item.unitType === 'box') unitsNeeded = qty * spb * ups;
+      else if (item.unitType === 'strip') unitsNeeded = qty * ups;
+      else unitsNeeded = qty;
+
+      existing.neededUnits += unitsNeeded;
       demandByMedicine.set(medicineId, existing);
     }
 
-    for (const { med, stripsPerBox, needed } of demandByMedicine.values()) {
+    for (const { med, spb, ups, neededUnits } of demandByMedicine.values()) {
       const stockBoxes = parseInt(med.stock_boxes, 10) || 0;
       const stockStrips = parseInt(med.stock_strips, 10) || 0;
-      const available = (stockBoxes * stripsPerBox) + stockStrips;
+      const stockUnits = parseInt(med.stock_units, 10) || 0;
+      const availableUnits = (stockBoxes * spb * ups) + (stockStrips * ups) + stockUnits;
       const name = med.trade_name_ar || med.trade_name;
 
-      if (available <= 0) {
+      if (availableUnits <= 0) {
         showToast(`❌ الصنف [${name}] نفد من المخزن تماماً (رصيد 0). يرجى حذفه لإتمام البيع!`, 'error');
         return;
       }
-      if (needed > available) {
-        showToast(`❌ الكمية المطلوبة من [${name}] تتجاوز رصيد المخزن (المتاح ${available} شريط فقط)!`, 'error');
+      if (neededUnits > availableUnits) {
+        showToast(`❌ الكمية المطلوبة من [${name}] تتجاوز رصيد المخزن (المتاح ${availableUnits} وحدة فقط)!`, 'error');
         return;
       }
     }
@@ -760,7 +808,25 @@ export function POSView({
               </div>
             ) : (
               filteredMedicines.map((med) => {
-                const inStock = med.stock_boxes > 0 || med.stock_strips > 0;
+                const spb = Math.max(1, parseInt(med.strips_per_box, 10) || 1);
+                const ups = Math.max(1, parseInt(med.units_per_strip, 10) || 10);
+                const boxes = parseInt(med.stock_boxes, 10) || 0;
+                const strips = parseInt(med.stock_strips, 10) || 0;
+                const units = parseInt(med.stock_units, 10) || 0;
+                const totalUnits = (boxes * spb * ups) + (strips * ups) + units;
+                const inStock = totalUnits > 0;
+                const unitPriceCalc = med.price_unit > 0 ? med.price_unit : (med.price_strip ? med.price_strip / ups : med.price_box / (spb * ups));
+
+                const unitTypeName = (() => {
+                  switch (med.unit_type) {
+                    case 'ampoules': return 'أمبول';
+                    case 'spray': return 'بخاخ';
+                    case 'sachets': return 'كيس';
+                    case 'capsules': return 'كبسولة';
+                    case 'units': return 'وحدة';
+                    default: return 'قرص';
+                  }
+                })();
 
                 return (
                   <div
@@ -795,8 +861,8 @@ export function POSView({
 
                     {/* Stock & Pricing */}
                     <div>
-                      <div className="flex flex-wrap items-center justify-between gap-1 text-xs mb-2.5 pt-1.5 border-t border-[#23324D]/60">
-                        {/* Stock status */}
+                      <div className="flex flex-wrap items-center justify-between gap-1 text-xs mb-2 pt-1.5 border-t border-[#23324D]/60">
+                        {/* Stock status with composite display */}
                         <div className="flex items-center gap-1.5 shrink-0">
                           <span
                             className={`w-2 h-2 rounded-full shrink-0 ${
@@ -804,69 +870,93 @@ export function POSView({
                             }`}
                           ></span>
                           <span className={`text-[11px] font-semibold whitespace-nowrap ${inStock ? 'text-slate-300' : 'text-rose-400 font-bold'}`}>
-                            {inStock ? `${med.stock_boxes} ع (${med.stock_strips} ش)` : 'نفد من المخزن'}
+                            {inStock ? (
+                              <span>
+                                {boxes} ع {strips > 0 ? `و ${strips} ش` : ''} {units > 0 ? `و ${units} ${unitTypeName}` : ''}
+                              </span>
+                            ) : 'نفد من المخزن'}
                           </span>
                         </div>
 
-                        {/* Prices */}
+                        {/* Prices: Box | Strip | Unit */}
                         <div className="text-left font-mono shrink-0 whitespace-nowrap" dir="ltr">
                           <span className="font-extrabold text-teal-300 text-sm">
                             {med.price_box.toFixed(2)}
                           </span>
-                          <span className="text-[10px] text-slate-400 ml-1">EGP</span>
-                          <span className="text-[10px] text-slate-500 mr-1.5 ml-1.5">|</span>
+                          <span className="text-[10px] text-slate-400 ml-1">ج</span>
+                          <span className="text-[10px] text-slate-500 mr-1 ml-1">|</span>
                           <span className="text-[11px] text-slate-400">
-                            شريط: {med.price_strip.toFixed(2)}
+                            ش: {med.price_strip.toFixed(2)}
+                          </span>
+                          <span className="text-[10px] text-slate-500 mr-1 ml-1">|</span>
+                          <span className="text-[11px] text-cyan-300">
+                            {unitTypeName}: {unitPriceCalc.toFixed(2)}
                           </span>
                         </div>
                       </div>
 
-                      {/* Fast Action Buttons */}
-                      <div className="grid grid-cols-3 gap-1.5">
+                      {/* Fast Action Buttons: Box, Strip, Unit, Alternatives */}
+                      <div className="grid grid-cols-4 gap-1">
                         {/* Add Box Button */}
                         <button
                           type="button"
                           onClick={() => addToCart(med, 'box')}
                           disabled={!inStock}
-                          className={`py-1.5 rounded-xl text-xs font-bold flex items-center justify-center gap-1 transition-all ${
+                          className={`py-1.5 rounded-xl text-xs font-bold flex items-center justify-center gap-0.5 transition-all ${
                             inStock
                               ? 'bg-[#17233A] hover:bg-teal-500 hover:text-slate-950 text-white border border-[#23324D] active:scale-95 cursor-pointer'
                               : 'bg-slate-800/40 text-slate-600 border border-slate-700/40 cursor-not-allowed opacity-50'
                           }`}
-                          title={inStock ? 'إضافة علبة للسلة' : 'الرصيد نفد من المخزن (0) — غير متاح للبيع'}
+                          title={inStock ? 'إضافة علبة كاملة للسلة' : 'الرصيد نفد'}
                         >
-                          <Plus className="w-3 h-3" />
-                          <span>+ علبة</span>
+                          <Plus className="w-2.5 h-2.5" />
+                          <span>علبة</span>
                         </button>
 
                         {/* Add Strip Button */}
                         <button
                           type="button"
                           onClick={() => addToCart(med, 'strip')}
-                          disabled={!inStock}
-                          className={`py-1.5 rounded-xl text-xs font-bold flex items-center justify-center gap-1 transition-all ${
-                            inStock
+                          disabled={!inStock || spb <= 1}
+                          className={`py-1.5 rounded-xl text-xs font-bold flex items-center justify-center gap-0.5 transition-all ${
+                            inStock && spb > 1
                               ? 'bg-[#17233A] hover:bg-teal-500 hover:text-slate-950 text-white border border-[#23324D] active:scale-95 cursor-pointer'
+                              : 'bg-slate-800/20 text-slate-600 border border-slate-800 cursor-not-allowed opacity-40'
+                          }`}
+                          title={spb > 1 ? 'إضافة شريط للسلة' : 'لا يحتوي على شرائط'}
+                        >
+                          <Plus className="w-2.5 h-2.5" />
+                          <span>شريط</span>
+                        </button>
+
+                        {/* Add Unit / Tablet Button */}
+                        <button
+                          type="button"
+                          onClick={() => addToCart(med, 'unit')}
+                          disabled={!inStock}
+                          className={`py-1.5 rounded-xl text-xs font-bold flex items-center justify-center gap-0.5 transition-all ${
+                            inStock
+                              ? 'bg-cyan-500/15 hover:bg-cyan-400 hover:text-slate-950 text-cyan-300 border border-cyan-500/30 active:scale-95 cursor-pointer'
                               : 'bg-slate-800/40 text-slate-600 border border-slate-700/40 cursor-not-allowed opacity-50'
                           }`}
-                          title={inStock ? 'إضافة شريط للسلة' : 'الرصيد نفد من المخزن (0) — غير متاح للبيع'}
+                          title={`إضافة ${unitTypeName} واحد للسلة`}
                         >
-                          <Plus className="w-3 h-3" />
-                          <span>+ شريط</span>
+                          <Plus className="w-2.5 h-2.5" />
+                          <span>{unitTypeName}</span>
                         </button>
 
                         {/* Alternatives Button (F6) */}
                         <button
                           type="button"
                           onClick={() => handleOpenAlternatives(med)}
-                          className={`py-1.5 rounded-xl text-xs font-bold flex items-center justify-center gap-1 transition-all ${
+                          className={`py-1.5 rounded-xl text-xs font-bold flex items-center justify-center gap-0.5 transition-all ${
                             !inStock
                               ? 'bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 animate-pulse'
                               : 'bg-[#17233A]/80 hover:bg-[#202E4C] text-slate-300 border border-[#23324D]'
                           }`}
                           title="عرض الأدوية البديلة لنفس المادة الفعالة"
                         >
-                          <Dna className="w-3 h-3 text-teal-400" />
+                          <Dna className="w-2.5 h-2.5 text-teal-400" />
                           <span>بدائل</span>
                         </button>
                       </div>
@@ -961,7 +1051,22 @@ export function POSView({
             ) : (
               cart.map((item, index) => {
                 const itemTotal = item.unitPrice * item.quantity;
-                const isStrip = item.unitType === 'strip';
+                const spb = Math.max(1, parseInt(item.strips_per_box, 10) || 1);
+                const ups = Math.max(1, parseInt(item.units_per_strip, 10) || 10);
+                const uType = item.unitType || 'box';
+
+                const unitTypeName = (() => {
+                  switch (item.unit_type) {
+                    case 'ampoules': return 'أمبول';
+                    case 'spray': return 'بخاخ';
+                    case 'sachets': return 'كيس';
+                    case 'capsules': return 'كبسولة';
+                    case 'units': return 'وحدة';
+                    default: return 'قرص';
+                  }
+                })();
+
+                const unitLabel = uType === 'box' ? 'علبة' : (uType === 'strip' ? 'شريط' : unitTypeName);
 
                 return (
                   <div
@@ -1003,23 +1108,25 @@ export function POSView({
                       
                       {/* Unit Price indicator */}
                       <div className="text-[11px] font-mono text-teal-400 mt-1" dir="ltr">
-                        {item.unitPrice.toFixed(2)} EGP
+                        {item.unitPrice.toFixed(2)} EGP <span className="text-[10px] text-slate-400 font-sans">/ {unitLabel}</span>
                       </div>
                     </div>
 
-                    {/* Unit Switch: Box 📦 vs Strip 💊 */}
+                    {/* Unit Switch: Box 📦 vs Strip 💊 vs Unit ⚪ */}
                     <button
                       type="button"
                       onClick={() => toggleUnitType(index)}
-                      className={`px-2 py-1 rounded-lg text-[10px] font-bold border transition-colors flex items-center gap-1 ${
-                        isStrip
-                          ? 'bg-blue-500/20 text-blue-300 border-blue-500/40'
-                          : 'bg-teal-500/20 text-teal-300 border-teal-500/40'
+                      className={`px-2 py-1 rounded-lg text-[10px] font-bold border transition-colors flex items-center gap-1 cursor-pointer ${
+                        uType === 'box'
+                          ? 'bg-teal-500/20 text-teal-300 border-teal-500/40 hover:bg-teal-500/30'
+                          : uType === 'strip'
+                          ? 'bg-blue-500/20 text-blue-300 border-blue-500/40 hover:bg-blue-500/30'
+                          : 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40 hover:bg-cyan-500/30'
                       }`}
-                      title="تبديل الوحدة بين علبة وشريط"
+                      title="تبديل الوحدة (علبة / شريط / حبة)"
                     >
-                      {isStrip ? <Pill className="w-3 h-3" /> : <Package className="w-3 h-3" />}
-                      <span>{isStrip ? 'شريط' : 'علبة'}</span>
+                      {uType === 'box' ? <Package className="w-3 h-3" /> : <Pill className="w-3 h-3" />}
+                      <span>{unitLabel} 🔄</span>
                     </button>
 
                     {/* Quantity Controls */}

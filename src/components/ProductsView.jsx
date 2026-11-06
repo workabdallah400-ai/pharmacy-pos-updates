@@ -769,13 +769,18 @@ export function ProductsView({ currentUser, medicines = [], onSaveMedicine, onDe
                           )}
                         </td>
 
-                        {/* 4. Strip Retail Price */}
+                        {/* 4. Strip & Sub-unit Price */}
                         <td className="p-3.5">
                           <div className="font-mono text-teal-300 text-xs" dir="ltr">
-                            {priceStrip.toFixed(2)} ج.م
+                            {priceStrip.toFixed(2)} ج.م <span className="text-[10px] text-slate-400">/ شريط</span>
                           </div>
+                          {med.price_unit > 0 && (
+                            <div className="font-mono text-cyan-300 text-[11px]" dir="ltr">
+                              {Number(med.price_unit).toFixed(2)} ج.م <span className="text-[10px] text-slate-400">/ حبة</span>
+                            </div>
+                          )}
                           <div className="text-[10px] text-slate-400 font-normal">
-                            ({stripsCount} شرائط / علبة)
+                            ({stripsCount} ش • {med.units_per_strip || 10} حبة/ش)
                           </div>
                         </td>
 
@@ -796,7 +801,7 @@ export function ProductsView({ currentUser, medicines = [], onSaveMedicine, onDe
                           ) : (
                             <span
                               className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-bold border ${
-                                isZero
+                                isZero && !(med.stock_units > 0)
                                   ? 'bg-rose-500/15 border-rose-500/30 text-rose-400'
                                   : isNearEmpty
                                   ? 'bg-amber-500/15 border-amber-500/30 text-amber-300'
@@ -805,11 +810,11 @@ export function ProductsView({ currentUser, medicines = [], onSaveMedicine, onDe
                             >
                               <span
                                 className={`w-1.5 h-1.5 rounded-full ${
-                                  isZero ? 'bg-rose-400' : isNearEmpty ? 'bg-amber-400' : 'bg-emerald-400'
+                                  isZero && !(med.stock_units > 0) ? 'bg-rose-400' : isNearEmpty ? 'bg-amber-400' : 'bg-emerald-400'
                                 }`}
                               ></span>
                               <span>
-                                {boxes} ع {strips > 0 ? `و ${strips} ش` : ''}
+                                {boxes} ع {strips > 0 ? `و ${strips} ش` : ''} {med.stock_units > 0 ? `و ${med.stock_units} ح` : ''}
                               </span>
                             </span>
                           )}

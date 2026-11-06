@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>صيدليتي — أداة المطور الرسمية لتوليد وإدارة التراخيص | م/ عبد الله جميل</title>
+  <title>بوابة المطور — إدارة وتوليد تراخيص صيدليتي | فارما كير</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&family=JetBrains+Mono:wght@700;800&display=swap" rel="stylesheet">
@@ -14,29 +14,31 @@
       padding: 0;
     }
     body {
-      font-family: 'Cairo', sans-serif;
-      background: radial-gradient(circle at 50% 5%, #17233A 0%, #0B1220 100%);
+      font-family: 'Cairo', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: radial-gradient(circle at 50% 0%, #17253b 0%, #0B1220 100%);
       color: #e2e8f0;
       min-height: 100vh;
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: flex-start;
-      padding: 30px 20px;
+      padding: 30px 16px;
       -webkit-font-smoothing: antialiased;
     }
     .container {
       width: 100%;
-      max-width: 820px;
+      max-width: 960px;
+      margin: 0 auto;
     }
     .card {
       background: #111A2B;
       border: 1px solid #23324D;
-      border-radius: 28px;
-      padding: 36px;
-      box-shadow: 0 30px 70px -15px rgba(0, 0, 0, 0.8), 0 0 45px -10px rgba(20, 184, 166, 0.15);
+      border-radius: 24px;
+      padding: 32px;
+      box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.7), 0 0 35px -10px rgba(20, 184, 166, 0.15);
       position: relative;
       overflow: hidden;
+      margin-bottom: 24px;
     }
     .card::before {
       content: '';
@@ -54,32 +56,32 @@
       align-items: center;
       gap: 18px;
       border-bottom: 1px solid #23324D;
-      padding-bottom: 24px;
-      margin-bottom: 28px;
+      padding-bottom: 20px;
+      margin-bottom: 24px;
     }
     .header-icon {
-      width: 72px;
-      height: 72px;
-      border-radius: 22px;
+      width: 64px;
+      height: 64px;
+      border-radius: 20px;
       background: linear-gradient(135deg, #14B8A6, #10B981);
       color: #0b1220;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 38px;
+      font-size: 34px;
       box-shadow: 0 10px 25px -5px rgba(20, 184, 166, 0.4);
       flex-shrink: 0;
     }
     .header-info h1 {
-      font-size: 24px;
+      font-size: 22px;
       font-weight: 900;
       color: #ffffff;
-      line-height: 1.25;
+      line-height: 1.3;
     }
     .header-info p {
       font-size: 13px;
       color: #94a3b8;
-      margin-top: 4px;
+      margin-top: 3px;
       font-weight: 600;
     }
     .dev-badge {
@@ -89,16 +91,16 @@
       background: rgba(20, 184, 166, 0.12);
       border: 1px solid rgba(20, 184, 166, 0.3);
       color: #2dd4bf;
-      padding: 4px 12px;
+      padding: 3px 12px;
       border-radius: 20px;
       font-size: 12px;
       font-weight: 800;
-      margin-top: 8px;
+      margin-top: 6px;
     }
 
     /* Form Fields */
     .form-group {
-      margin-bottom: 22px;
+      margin-bottom: 18px;
     }
     label {
       display: flex;
@@ -109,7 +111,7 @@
       color: #cbd5e1;
       margin-bottom: 8px;
     }
-    .paste-btn {
+    .paste-btn, .mini-btn {
       background: #17233A;
       border: 1px solid #23324D;
       color: #2dd4bf;
@@ -121,55 +123,68 @@
       font-family: inherit;
       transition: all 0.2s;
     }
-    .paste-btn:hover {
+    .paste-btn:hover, .mini-btn:hover {
       background: #23324D;
       color: #fff;
     }
-    input[type="text"], input[type="number"], input[type="date"] {
+    input[type="text"], input[type="number"], input[type="date"], select {
       width: 100%;
       background: #0B1220;
       border: 1px solid #23324D;
-      border-radius: 14px;
-      padding: 13px 16px;
-      font-size: 14px;
+      border-radius: 12px;
+      padding: 12px 14px;
+      font-size: 13.5px;
       font-weight: 700;
       color: #fff;
       font-family: inherit;
       outline: none;
       transition: border-color 0.2s, box-shadow 0.2s;
     }
-    input[type="text"]:focus, input[type="number"]:focus, input[type="date"]:focus {
+    input[type="text"]:focus, input[type="number"]:focus, input[type="date"]:focus, select:focus {
       border-color: #14B8A6;
       box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.15);
     }
     .code-input {
       font-family: 'JetBrains Mono', monospace !important;
       font-weight: 800 !important;
-      font-size: 16px !important;
+      font-size: 15px !important;
       color: #2dd4bf !important;
       letter-spacing: 1.5px;
       text-align: center;
       text-transform: uppercase;
     }
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 14px;
+    }
     .grid-2 {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 16px;
+      gap: 14px;
     }
 
-    /* License Mode Selection Grid (9 Options) */
-    .modes-label {
+    /* Duration Selector Grid (7 exact options) */
+    .section-title {
       font-size: 13px;
       font-weight: 800;
       color: #2dd4bf;
       margin-bottom: 10px;
-      display: block;
+      display: flex;
+      align-items: center;
+      gap: 6px;
     }
-    .modes-grid {
+    .durations-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+    .special-grid {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
       gap: 10px;
-      margin-bottom: 18px;
+      margin-bottom: 20px;
     }
     .mode-btn {
       background: #0B1220;
@@ -201,11 +216,11 @@
       color: #2dd4bf;
       box-shadow: 0 0 16px rgba(20, 184, 166, 0.25);
     }
-    .mode-btn.danger.active {
-      background: rgba(239, 68, 68, 0.2);
-      border-color: #ef4444;
-      color: #fca5a5;
-      box-shadow: 0 0 16px rgba(239, 68, 68, 0.25);
+    .mode-btn.special.active {
+      background: rgba(20, 184, 166, 0.25);
+      border-color: #14B8A6;
+      color: #2dd4bf;
+      box-shadow: 0 0 16px rgba(20, 184, 166, 0.3);
     }
     .mode-btn.warning.active {
       background: rgba(245, 158, 11, 0.2);
@@ -213,16 +228,21 @@
       color: #fcd34d;
       box-shadow: 0 0 16px rgba(245, 158, 11, 0.25);
     }
+    .mode-btn.danger.active {
+      background: rgba(239, 68, 68, 0.2);
+      border-color: #ef4444;
+      color: #fca5a5;
+      box-shadow: 0 0 16px rgba(239, 68, 68, 0.25);
+    }
 
     /* Dynamic inputs container */
     .dynamic-input-row {
       display: none;
       background: #0B1220;
       border: 1px solid #23324D;
-      border-radius: 14px;
+      border-radius: 12px;
       padding: 14px;
-      margin-bottom: 20px;
-      animation: fadeIn 0.3s;
+      margin-bottom: 18px;
     }
 
     /* Main Action Button */
@@ -230,10 +250,10 @@
       width: 100%;
       background: linear-gradient(135deg, #14B8A6, #10B981);
       border: none;
-      border-radius: 16px;
-      padding: 16px;
+      border-radius: 14px;
+      padding: 15px;
       color: #0b1220;
-      font-size: 16px;
+      font-size: 15px;
       font-weight: 900;
       font-family: inherit;
       cursor: pointer;
@@ -241,12 +261,12 @@
       align-items: center;
       justify-content: center;
       gap: 10px;
-      box-shadow: 0 12px 30px -5px rgba(20, 184, 166, 0.4);
+      box-shadow: 0 10px 25px -5px rgba(20, 184, 166, 0.4);
       transition: all 0.2s;
     }
     .btn-generate:hover {
       transform: translateY(-2px);
-      box-shadow: 0 16px 36px -5px rgba(20, 184, 166, 0.5);
+      box-shadow: 0 14px 30px -5px rgba(20, 184, 166, 0.5);
     }
     .btn-generate:active {
       transform: scale(0.99);
@@ -255,17 +275,17 @@
     /* Results Output Container */
     .results-container {
       display: none;
-      margin-top: 32px;
+      margin-top: 26px;
       border-top: 1px solid #23324D;
-      padding-top: 28px;
+      padding-top: 22px;
       animation: fadeIn 0.3s ease-out;
     }
     .result-card {
       background: #0B1220;
       border: 1px solid #23324D;
-      border-radius: 16px;
-      padding: 18px;
-      margin-bottom: 16px;
+      border-radius: 14px;
+      padding: 16px;
+      margin-bottom: 14px;
     }
     .result-card-header {
       display: flex;
@@ -281,15 +301,15 @@
     .code-box {
       font-family: 'JetBrains Mono', monospace;
       font-weight: 800;
-      font-size: 18px;
-      padding: 12px 16px;
+      font-size: 17px;
+      padding: 12px 14px;
       background: #111A2B;
       border: 1px solid #23324D;
-      border-radius: 12px;
+      border-radius: 10px;
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 12px;
+      gap: 10px;
       letter-spacing: 1px;
     }
     .code-box.primary {
@@ -332,7 +352,7 @@
       display: grid;
       grid-template-columns: repeat(3, 1fr);
       gap: 12px;
-      margin-bottom: 18px;
+      margin-bottom: 16px;
     }
     .stat-box {
       background: #0B1220;
@@ -357,15 +377,15 @@
     .whatsapp-box {
       background: linear-gradient(135deg, rgba(37, 211, 102, 0.08), rgba(16, 185, 129, 0.05));
       border: 1px solid rgba(37, 211, 102, 0.3);
-      border-radius: 16px;
-      padding: 20px;
-      margin-top: 20px;
+      border-radius: 14px;
+      padding: 18px;
+      margin-top: 18px;
     }
     .whatsapp-header {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-bottom: 12px;
+      margin-bottom: 10px;
     }
     .whatsapp-title {
       font-size: 13px;
@@ -378,24 +398,24 @@
     .whatsapp-text {
       background: #0B1220;
       border: 1px solid #23324D;
-      border-radius: 12px;
-      padding: 16px;
+      border-radius: 10px;
+      padding: 14px;
       font-size: 12px;
       line-height: 1.8;
       color: #cbd5e1;
       white-space: pre-line;
-      max-height: 220px;
+      max-height: 200px;
       overflow-y: auto;
     }
     .whatsapp-actions {
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 12px;
-      margin-top: 14px;
+      margin-top: 12px;
     }
     .btn-wa-copy, .btn-wa-send {
-      padding: 12px;
-      border-radius: 12px;
+      padding: 11px;
+      border-radius: 10px;
       font-size: 12px;
       font-weight: 800;
       font-family: inherit;
@@ -424,10 +444,76 @@
       background: #20bd5a;
     }
 
+    /* Clients History Log Table */
+    .history-card {
+      background: #111A2B;
+      border: 1px solid #23324D;
+      border-radius: 20px;
+      padding: 24px;
+      box-shadow: 0 15px 40px -10px rgba(0, 0, 0, 0.6);
+    }
+    .history-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .history-title {
+      font-size: 15px;
+      font-weight: 800;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .table-responsive {
+      overflow-x: auto;
+      border-radius: 12px;
+      border: 1px solid #23324D;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+      text-align: right;
+    }
+    th {
+      background: #0B1220;
+      color: #94a3b8;
+      font-weight: 800;
+      padding: 12px 14px;
+      border-bottom: 1px solid #23324D;
+      white-space: nowrap;
+    }
+    td {
+      padding: 12px 14px;
+      border-bottom: 1px solid #1c2a42;
+      color: #e2e8f0;
+      white-space: nowrap;
+    }
+    tr:last-child td {
+      border-bottom: none;
+    }
+    tr:hover td {
+      background: rgba(23, 35, 58, 0.5);
+    }
+    .badge {
+      display: inline-block;
+      padding: 3px 8px;
+      border-radius: 6px;
+      font-size: 10.5px;
+      font-weight: 800;
+    }
+    .badge-teal { background: rgba(20, 184, 166, 0.15); color: #2dd4bf; border: 1px solid rgba(20, 184, 166, 0.3); }
+    .badge-amber { background: rgba(245, 158, 11, 0.15); color: #fcd34d; border: 1px solid rgba(245, 158, 11, 0.3); }
+    .badge-rose { background: rgba(239, 68, 68, 0.15); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.3); }
+
     /* Footer */
     .footer {
       text-align: center;
-      margin-top: 24px;
+      margin: 24px 0 10px 0;
       font-size: 12px;
       color: #64748b;
     }
@@ -442,8 +528,10 @@
       to { opacity: 1; transform: translateY(0); }
     }
 
-    @media (max-width: 680px) {
-      .modes-grid { grid-template-columns: repeat(2, 1fr); }
+    @media (max-width: 768px) {
+      .durations-grid { grid-template-columns: repeat(2, 1fr); }
+      .special-grid { grid-template-columns: 1fr; }
+      .grid-3 { grid-template-columns: 1fr; }
       .grid-2 { grid-template-columns: 1fr; }
       .dates-breakdown { grid-template-columns: 1fr; }
       .whatsapp-actions { grid-template-columns: 1fr; }
@@ -453,88 +541,108 @@
 <body>
 
   <div class="container">
+    
+    <!-- MAIN CARD: Generator -->
     <div class="card">
       
       <!-- Header -->
       <div class="header">
         <div class="header-icon">💊</div>
         <div class="header-info">
-          <h1>صيدليتي — أداة المطور الرسمية لتوليد وإدارة التراخيص</h1>
-          <p>لوحة التحكم والتشفير المعتمدة لإصدار التراخيص، إيقاف الأجهزة، واستعادة الحسابات</p>
+          <h1>بوابة المطور — إصدار وتوليد تراخيص صيدليتي (فارما كير)</h1>
+          <p>لوحة التحكم المستقلة لتوليد أكواد التفعيل الرسمية، إدارة مدد التراخيص، وإرسال المفاتيح للعملاء</p>
           <div class="dev-badge">
-            <span>👨‍💻 المطور: م/ عبد الله جميل</span>
+            <span>👨‍💻 بوابة المطور الرسمية</span>
             <span>•</span>
-            <span dir="ltr">01201395243</span>
+            <span>تعمل محلياً في Google Chrome 100% دون إنترنت</span>
           </div>
         </div>
       </div>
 
       <!-- Form Inputs -->
+      <div class="grid-3">
+        <div class="form-group">
+          <label>
+            <span>كود جهاز العميل (Machine ID):</span>
+            <button type="button" class="paste-btn" onclick="pasteMachineId()">📋 لصق</button>
+          </label>
+          <input type="text" id="machineId" class="code-input" placeholder="ألصق كود جهاز العميل هنا">
+        </div>
+
+        <div class="form-group">
+          <label>اسم العميل / الصيدلي:</label>
+          <input type="text" id="clientName" placeholder="اكتب اسم العميل">
+        </div>
+
+        <div class="form-group">
+          <label>اسم الصيدلية:</label>
+          <input type="text" id="pharmacyName" placeholder="اكتب اسم الصيدلية">
+        </div>
+      </div>
+
       <div class="form-group">
-        <label>
-          <span>كود جهاز العميل (Hardware Machine ID):</span>
-          <button type="button" class="paste-btn" onclick="pasteMachineId()">📋 لصق من الحافظة</button>
-        </label>
-        <input type="text" id="machineId" class="code-input" placeholder="مثال: EGYP-B009-4237-53D2 أو PH-F496-344D-5FA3" value="EGYP-B009-4237-53D2">
+        <label>رقم هاتف العميل (واتساب):</label>
+        <input type="text" id="clientPhone" placeholder="أدخل رقم هاتف العميل لإرسال الكود له">
       </div>
 
-      <div class="grid-2">
-        <div class="form-group">
-          <label>اسم الصيدلية أو العميل:</label>
-          <input type="text" id="clientName" placeholder="مثال: صيدلية النخبة الحديثة" value="صيدلية النخبة الحديثة">
-        </div>
-
-        <div class="form-group">
-          <label>رقم واتساب العميل (لإرسال الكود فوراً):</label>
-          <input type="text" id="clientPhone" placeholder="010XXXXXXXX" value="01201395243">
-        </div>
-      </div>
-
-      <!-- License Mode Selector (9 Options) -->
-      <span class="modes-label">حدد نوع وخيار الترخيص المطلوب للجهاز:</span>
-      <div class="modes-grid">
-        <button type="button" class="mode-btn active" onclick="selectMode('LIFETIME', this)">
-          <span style="font-size: 16px;">🏆</span>
-          <span>ترخيص دائم مدى الحياة</span>
+      <!-- Duration Selection (7 Options Requested by User) -->
+      <span class="section-title">⏱️ حدد مدة صلاحية الترخيص (اختر المدة المطلوبة):</span>
+      <div class="durations-grid">
+        <button type="button" class="mode-btn" onclick="selectMode('1_DAY', this)">
+          <span style="font-size: 15px;">⚡</span>
+          <span>يوم واحد (تجريبي)</span>
         </button>
-        <button type="button" class="mode-btn" onclick="selectMode('DAYS_30', this)">
-          <span style="font-size: 16px;">📅</span>
-          <span>شهر تجاري (30 يوماً)</span>
+        <button type="button" class="mode-btn" onclick="selectMode('7_DAYS', this)">
+          <span style="font-size: 15px;">📅</span>
+          <span>أسبوع (7 أيام)</span>
         </button>
-        <button type="button" class="mode-btn" onclick="selectMode('DAYS_90', this)">
-          <span style="font-size: 16px;">📅</span>
-          <span>3 أشهر (90 يوماً)</span>
+        <button type="button" class="mode-btn" onclick="selectMode('30_DAYS', this)">
+          <span style="font-size: 15px;">🗓️</span>
+          <span>شهر (30 يوماً)</span>
         </button>
-        <button type="button" class="mode-btn" onclick="selectMode('DAYS_180', this)">
-          <span style="font-size: 16px;">📅</span>
-          <span>6 أشهر (180 يوماً)</span>
+        <button type="button" class="mode-btn" onclick="selectMode('90_DAYS', this)">
+          <span style="font-size: 15px;">Quarter</span>
+          <span>90 يوم (3 أشهر)</span>
         </button>
-        <button type="button" class="mode-btn" onclick="selectMode('DAYS_365', this)">
-          <span style="font-size: 16px;">📅</span>
-          <span>سنة كاملة (365 يوماً)</span>
+        <button type="button" class="mode-btn" onclick="selectMode('120_DAYS', this)">
+          <span style="font-size: 15px;">Trimester</span>
+          <span>120 يوم (4 أشهر)</span>
+        </button>
+        <button type="button" class="mode-btn" onclick="selectMode('365_DAYS', this)">
+          <span style="font-size: 15px;">⭐</span>
+          <span>سنة كاملة (365 يوم)</span>
+        </button>
+        <button type="button" class="mode-btn" onclick="selectMode('LIFETIME', this)">
+          <span style="font-size: 15px;">🏆</span>
+          <span>مدى الحياة (دائم)</span>
         </button>
         <button type="button" class="mode-btn" onclick="selectMode('CUSTOM_DAYS', this)">
-          <span style="font-size: 16px;">🔢</span>
+          <span style="font-size: 15px;">🔢</span>
           <span>عدد أيام مخصص</span>
         </button>
-        <button type="button" class="mode-btn" onclick="selectMode('CUSTOM_DATE', this)">
-          <span style="font-size: 16px;">📆</span>
-          <span>تاريخ انتهاء محدد</span>
-        </button>
+      </div>
+
+      <!-- Administrative & Support Tools -->
+      <span class="section-title">🛠️ أدوات الإدارة والاستعادة (للمطور فقط):</span>
+      <div class="special-grid">
         <button type="button" class="mode-btn warning" onclick="selectMode('RESET_PIN', this)">
-          <span style="font-size: 16px;">🔑</span>
-          <span>كود استعادة رقم الأدمن (RST)</span>
+          <span style="font-size: 15px;">🔑</span>
+          <span>كود استعادة رقم سري الأدمن (RST)</span>
         </button>
         <button type="button" class="mode-btn danger" onclick="selectMode('REVOKE', this)">
-          <span style="font-size: 16px;">🚫</span>
-          <span>كود إلغاء وسحب الترخيص (REV)</span>
+          <span style="font-size: 15px;">🚫</span>
+          <span>كود إيقاف وقفل الترخيص (REV)</span>
+        </button>
+        <button type="button" class="mode-btn" onclick="selectMode('CUSTOM_DATE', this)">
+          <span style="font-size: 15px;">📆</span>
+          <span>تحديد تاريخ انتهاء معين</span>
         </button>
       </div>
 
       <!-- Dynamic Custom Inputs Row -->
       <div class="dynamic-input-row" id="customDaysRow">
         <label>أدخل عدد الأيام المطلوب تشغيل البرنامج خلالها:</label>
-        <input type="number" id="customDaysInput" min="1" max="3650" placeholder="مثال: 45 يوماً" value="45">
+        <input type="number" id="customDaysInput" min="1" max="3650" placeholder="مثال: 45">
       </div>
 
       <div class="dynamic-input-row" id="customDateRow">
@@ -545,7 +653,7 @@
       <!-- Submit Button -->
       <button type="button" class="btn-generate" onclick="generateAllCodes()">
         <span>⚡</span>
-        <span>توليد كود الترخيص والبيانات فوراً</span>
+        <span>توليد وحفظ كود الترخيص الرسمي الآن</span>
       </button>
 
       <!-- Results Container -->
@@ -555,15 +663,15 @@
         <div class="dates-breakdown" id="datesBreakdown">
           <div class="stat-box">
             <span class="stat-box-label">تاريخ الإصدار والتوليد</span>
-            <span class="stat-box-val" id="statIssueDate">2026-11-02</span>
+            <span class="stat-box-val" id="statIssueDate">—</span>
           </div>
           <div class="stat-box">
             <span class="stat-box-label">تاريخ انتهاء الصلاحية</span>
-            <span class="stat-box-val" id="statExpiryDate">مدى الحياة</span>
+            <span class="stat-box-val" id="statExpiryDate">—</span>
           </div>
           <div class="stat-box">
             <span class="stat-box-label">الأيام المتبقية المحسوبة</span>
-            <span class="stat-box-val" id="statDaysRemaining">دائم (غير محدود)</span>
+            <span class="stat-box-val" id="statDaysRemaining">—</span>
           </div>
         </div>
 
@@ -571,10 +679,10 @@
         <div class="result-card">
           <div class="result-card-header">
             <span class="result-card-title">🔑 كود التفعيل والتشغيل الرئيسي (License Key):</span>
-            <span style="color: #10B981; font-size: 11px; font-weight: 800;">✓ مشفر ومطابق 100%</span>
+            <span style="color: #10B981; font-size: 11px; font-weight: 800;">✓ مشفر ومطابق لبرنامج الصيدلية 100%</span>
           </div>
           <div class="code-box primary">
-            <span id="displayLicenseKey">LIC-LIFE-XXXX-YYYY-ZZZZ</span>
+            <span id="displayLicenseKey">LIC-XXXX-YYYY-ZZZZ</span>
             <button type="button" class="copy-icon-btn" onclick="copyText('displayLicenseKey', this)">📋 نسخ المفتاح</button>
           </div>
         </div>
@@ -614,7 +722,7 @@
 
           <div class="whatsapp-actions">
             <button type="button" class="btn-wa-copy" onclick="copyWhatsAppMessage(this)">
-              <span>📱</span>
+              <span>📋</span>
               <span>نسخ رسالة الواتساب كاملة</span>
             </button>
             <button type="button" class="btn-wa-send" onclick="sendWhatsAppDirect()">
@@ -628,24 +736,62 @@
 
     </div>
 
+    <!-- CLIENTS HISTORY CARD -->
+    <div class="history-card">
+      <div class="history-header">
+        <div class="history-title">
+          <span>📑</span>
+          <span>سجل العملاء والتراخيص المصدرة (محفوظ في المتصفح):</span>
+        </div>
+        <div style="display: flex; gap: 8px;">
+          <button type="button" class="mini-btn" onclick="exportLicensesBackup()">💾 تصدير نسخة احتياطية (JSON)</button>
+          <button type="button" class="mini-btn" onclick="clearLicensesHistory()">🗑️ مسح السجل</button>
+        </div>
+      </div>
+
+      <div class="table-responsive">
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>العميل / الصيدلية</th>
+              <th>كود الجهاز (MID)</th>
+              <th>مدة الترخيص</th>
+              <th>تاريخ الإصدار</th>
+              <th>تاريخ الانتهاء</th>
+              <th>مفتاح التفعيل</th>
+              <th>إجراءات سريعة</th>
+            </tr>
+          </thead>
+          <tbody id="licensesTableBody">
+            <tr>
+              <td colspan="8" style="text-align: center; color: #94a3b8; padding: 20px;">
+                لا توجد تراخيص مسجلة حتى الآن. قم بتوليد أول ترخيص أعلاه وسيتم حفظه هنا تلقائياً.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
     <!-- Footer -->
     <div class="footer">
-      نظام إدارة الصيدليات ونقاط البيع | تطوير وإدارة: <a href="https://wa.me/201201395243" target="_blank">م/ عبد الله جميل (01201395243)</a>
+      نظام إدارة الصيدليات ونقاط البيع «صيدليتي» | بوابة المطور الرسمية
     </div>
+
   </div>
 
   <script>
     const MASTER_SECRET = 'PHARMACY_POS_MASTER_SECRET_2026';
-    let currentMode = 'LIFETIME';
+    const STORAGE_KEY = 'PHARMACY_DEV_CLIENT_LICENSES_V1';
+    let currentMode = null; // No default duration pre-selected
 
-    // Set default date in date picker to next month
+    // Initialize page
     window.addEventListener('DOMContentLoaded', () => {
-      const d = new Date();
-      d.setMonth(d.getMonth() + 1);
-      document.getElementById('customDateInput').value = d.toISOString().slice(0, 10);
+      renderLicensesTable();
     });
 
-    // Pure Web Crypto SHA-256 Engine
+    // Pure Web Crypto SHA-256 Engine with Math fallback
     async function sha256Hex(str) {
       if (window.crypto && window.crypto.subtle) {
         const buf = await window.crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
@@ -654,7 +800,7 @@
           .join('')
           .toUpperCase();
       }
-      // Fallback
+      // Pure JS fallback
       let h1 = 0xdeadbeef, h2 = 0x41c64e6d;
       for (let i = 0; i < str.length; i++) {
         const ch = str.charCodeAt(i);
@@ -678,12 +824,20 @@
     async function generateAllCodes() {
       const midInput = document.getElementById('machineId').value.trim().toUpperCase();
       if (!midInput) {
-        alert('⚠️ يرجى إدخال أو لصق كود جهاز العميل (Machine Code) أولاً!');
+        alert('⚠️ يرجى إدخال أو لصق كود جهاز العميل (Machine ID) أولاً!');
+        document.getElementById('machineId').focus();
+        return;
+      }
+
+      if (!currentMode) {
+        alert('⚠️ يرجى اختيار مدة صلاحية الترخيص أولاً!');
         return;
       }
 
       const cleanMid = midInput.replace(/[^A-Z0-9]/g, '');
-      const clientName = document.getElementById('clientName').value.trim() || 'الصيدلية';
+      const clientName = document.getElementById('clientName').value.trim();
+      const pharmacyName = document.getElementById('pharmacyName').value.trim();
+      const phone = document.getElementById('clientPhone').value.trim();
 
       // 1. Calculate Expiry Date & Remaining Days
       let licenseKey = '';
@@ -706,27 +860,43 @@
         licenseKey = 'REV-KILL-' + revHash.substring(0, 4) + '-' + revHash.substring(4, 8);
         modeTitle = 'كود إلغاء وسحب الترخيص فوراً (إيقاف البرنامج)';
       } else {
-        // DURATION MODES
+        // DURATION MODES (1 day, 7 days, 30 days, 90 days, 120 days, 365 days, custom days, custom date)
         let targetDate = new Date();
-        if (currentMode === 'DAYS_30') {
+        if (currentMode === '1_DAY') {
+          targetDate.setDate(targetDate.getDate() + 1);
+          modeTitle = 'يوم واحد (تجريبي)';
+        } else if (currentMode === '7_DAYS') {
+          targetDate.setDate(targetDate.getDate() + 7);
+          modeTitle = 'أسبوع كامل (7 أيام)';
+        } else if (currentMode === '30_DAYS') {
           targetDate.setDate(targetDate.getDate() + 30);
           modeTitle = 'شهر تجاري (30 يوماً)';
-        } else if (currentMode === 'DAYS_90') {
+        } else if (currentMode === '90_DAYS') {
           targetDate.setDate(targetDate.getDate() + 90);
           modeTitle = '3 أشهر (90 يوماً)';
-        } else if (currentMode === 'DAYS_180') {
-          targetDate.setDate(targetDate.getDate() + 180);
-          modeTitle = '6 أشهر (180 يوماً)';
-        } else if (currentMode === 'DAYS_365') {
+        } else if (currentMode === '120_DAYS') {
+          targetDate.setDate(targetDate.getDate() + 120);
+          modeTitle = '4 أشهر (120 يوماً)';
+        } else if (currentMode === '365_DAYS') {
           targetDate.setDate(targetDate.getDate() + 365);
           modeTitle = 'سنة كاملة (365 يوماً)';
         } else if (currentMode === 'CUSTOM_DAYS') {
-          const days = parseInt(document.getElementById('customDaysInput').value, 10) || 30;
+          const days = parseInt(document.getElementById('customDaysInput').value, 10);
+          if (!days || days < 1) {
+            alert('⚠️ يرجى إدخال عدد الأيام المطلوب!');
+            document.getElementById('customDaysInput').focus();
+            return;
+          }
           targetDate.setDate(targetDate.getDate() + days);
           modeTitle = `فترة مخصصة (${days} يوماً)`;
         } else if (currentMode === 'CUSTOM_DATE') {
           const picked = document.getElementById('customDateInput').value;
-          if (picked) targetDate = new Date(picked + 'T23:59:59');
+          if (!picked) {
+            alert('⚠️ يرجى اختيار تاريخ الانتهاء المحدد!');
+            document.getElementById('customDateInput').focus();
+            return;
+          }
+          targetDate = new Date(picked + 'T23:59:59');
           modeTitle = `تاريخ محدد حتى (${picked})`;
         }
 
@@ -759,23 +929,144 @@
       document.getElementById('statExpiryDate').innerText = expiryDateText;
       document.getElementById('statDaysRemaining').innerText = daysRemainingText;
 
-      // 4. Construct Exact WhatsApp Template
-      const whatsappMsg = `أهلاً بك د. ${clientName}،
-تم بنجاح إصدار كود تفعيل وتشغيل نظام «صيدليتي» لإدارة الصيدليات ونقاط البيع:
+      // 4. Construct WhatsApp Template
+      let clientGreeting = clientName ? `أهلاً بك د. ${clientName}،\n` : 'مرحباً بك،\n';
+      let pharmacyLine = pharmacyName ? `صيدلية: ${pharmacyName}\n\n` : '\n';
+
+      const whatsappMsg = `${clientGreeting}${pharmacyLine}تم بنجاح إصدار كود تفعيل وتشغيل نظام «صيدليتي» لإدارة الصيدليات ونقاط البيع:
 
 🔹 كود الجهاز: ${midInput}
-🔹 نوع الترخيص: ${currentMode === 'LIFETIME' ? 'دائم مدى الحياة' : expiryDateText}
+🔹 نوع الترخيص: ${modeTitle}
+🔹 تاريخ الانتهاء: ${expiryDateText}
 🔹 مفتاح التفعيل: ${licenseKey}
 
-طريقة التفعيل: انسخ الكود وضعه في خانة مفتاح التفعيل واضغط "تفعيل البرنامج".
-لأي دعم فني واستفسار: م/ عبد الله جميل — 01201395243.
-نتمنى لكم تجارة مباركة ودوام التوفيق! 💊`;
+طريقة التفعيل: انسخ الكود وضعه في خانة مفتاح التفعيل في شاشة تشغيل البرنامج ثم اضغط "تفعيل البرنامج".
+نتمنى لكم دوام التوفيق والنجاح! 💊`;
 
       document.getElementById('whatsappMessageText').innerText = whatsappMsg;
       document.getElementById('resultsBox').style.display = 'block';
 
+      // 5. Save to Local Clients History
+      saveLicenseRecord({
+        machineId: midInput,
+        clientName: clientName || '—',
+        pharmacyName: pharmacyName || '—',
+        phone: phone || '',
+        mode: currentMode,
+        modeTitle,
+        licenseKey,
+        issueDate: issueDateText,
+        expiryDate: expiryDateText
+      });
+
       // Smooth scroll to results
       document.getElementById('resultsBox').scrollIntoView({ behavior: 'smooth' });
+    }
+
+    // Save Record to LocalStorage
+    function saveLicenseRecord(record) {
+      try {
+        let history = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+        // Prepend new record
+        history.unshift({ id: 'REC-' + Date.now(), ...record });
+        // Limit to 200 records
+        if (history.length > 200) history = history.slice(0, 200);
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(history));
+        renderLicensesTable();
+      } catch (e) {
+        console.error('Failed to save to localStorage', e);
+      }
+    }
+
+    // Render Clients History Table
+    function renderLicensesTable() {
+      try {
+        const history = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+        const tbody = document.getElementById('licensesTableBody');
+        if (!tbody) return;
+
+        if (history.length === 0) {
+          tbody.innerHTML = `
+            <tr>
+              <td colspan="8" style="text-align: center; color: #94a3b8; padding: 20px;">
+                لا توجد تراخيص مسجلة حتى الآن. قم بتوليد أول ترخيص أعلاه وسيتم حفظه هنا تلقائياً.
+              </td>
+            </tr>`;
+          return;
+        }
+
+        tbody.innerHTML = history.map((item, idx) => {
+          const isLife = item.mode === 'LIFETIME';
+          const isDanger = item.mode === 'REVOKE';
+          const badgeClass = isLife ? 'badge-teal' : isDanger ? 'badge-rose' : 'badge-amber';
+
+          return `
+            <tr>
+              <td style="color: #94a3b8; font-weight: bold;">${idx + 1}</td>
+              <td>
+                <div style="font-weight: 800; color: #fff;">${escapeHtml(item.clientName || '—')}</div>
+                <div style="font-size: 11px; color: #94a3b8;">${escapeHtml(item.pharmacyName || '')}</div>
+              </td>
+              <td><code style="font-family: monospace; color: #2dd4bf;">${escapeHtml(item.machineId)}</code></td>
+              <td><span class="badge ${badgeClass}">${escapeHtml(item.modeTitle || item.mode)}</span></td>
+              <td style="color: #94a3b8;">${item.issueDate || '—'}</td>
+              <td style="color: ${isLife ? '#2dd4bf' : '#fcd34d'}; font-weight: bold;">${item.expiryDate || '—'}</td>
+              <td>
+                <code style="font-family: monospace; font-size: 11px; background: #0B1220; padding: 3px 6px; border-radius: 4px; border: 1px solid #23324D;">
+                  ${escapeHtml(item.licenseKey)}
+                </code>
+              </td>
+              <td>
+                <button type="button" class="mini-btn" onclick="quickCopyKey('${escapeHtml(item.licenseKey)}')">📋 نسخ</button>
+                <button type="button" class="mini-btn" onclick="loadClientIntoForm('${escapeHtml(item.machineId)}', '${escapeHtml(item.clientName || '')}', '${escapeHtml(item.pharmacyName || '')}', '${escapeHtml(item.phone || '')}')">🔄 تجديد</button>
+              </td>
+            </tr>
+          `;
+        }).join('');
+      } catch (e) {
+        console.error('Failed to render table', e);
+      }
+    }
+
+    function quickCopyKey(key) {
+      navigator.clipboard.writeText(key);
+      alert('✓ تم نسخ مفتاح التفعيل: ' + key);
+    }
+
+    function loadClientIntoForm(mid, client, pharmacy, phone) {
+      document.getElementById('machineId').value = mid;
+      document.getElementById('clientName').value = client === '—' ? '' : client;
+      document.getElementById('pharmacyName').value = pharmacy === '—' ? '' : pharmacy;
+      document.getElementById('clientPhone').value = phone;
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function clearLicensesHistory() {
+      if (confirm('هل أنت متأكد من رغبتك في مسح سجل التراخيص المحفوظة في هذا المتصفح؟')) {
+        localStorage.removeItem(STORAGE_KEY);
+        renderLicensesTable();
+      }
+    }
+
+    function exportLicensesBackup() {
+      const data = localStorage.getItem(STORAGE_KEY) || '[]';
+      const blob = new Blob([data], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `pharmacare-licenses-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
     }
 
     // Copy Helper
@@ -791,18 +1082,18 @@
       }, 2000);
     }
 
-    // Copy WhatsApp Full Message
+    // Copy WhatsApp
     function copyWhatsAppMessage(btn) {
       const text = document.getElementById('whatsappMessageText').innerText;
       navigator.clipboard.writeText(text);
       const originalText = btn.innerHTML;
-      btn.innerHTML = '<span>✓</span> <span>تم نسخ الرسالة بنجاح</span>';
+      btn.innerHTML = '<span>✓</span><span>تم نسخ الرسالة بنجاح</span>';
       setTimeout(() => {
         btn.innerHTML = originalText;
       }, 2000);
     }
 
-    // Send WhatsApp Direct
+    // Direct WhatsApp Web Trigger
     function sendWhatsAppDirect() {
       const text = document.getElementById('whatsappMessageText').innerText;
       let phone = document.getElementById('clientPhone').value.trim().replace(/\D/g, '');

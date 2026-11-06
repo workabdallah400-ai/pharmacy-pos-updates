@@ -276,7 +276,11 @@ class SQLiteService {
         shelf TEXT,
         category TEXT,
         reorder_level INTEGER DEFAULT 5,
-        preferred_supplier TEXT
+        preferred_supplier TEXT,
+        unit_type TEXT DEFAULT 'tablets',
+        units_per_strip INTEGER DEFAULT 10,
+        price_unit REAL DEFAULT 0,
+        stock_units INTEGER DEFAULT 0
       );
       CREATE INDEX IF NOT EXISTS idx_med_barcode ON medicines(barcode);
       CREATE INDEX IF NOT EXISTS idx_med_name ON medicines(trade_name);
@@ -340,6 +344,7 @@ class SQLiteService {
         trade_name TEXT,
         trade_name_ar TEXT,
         is_strip INTEGER DEFAULT 0,
+        unit_type TEXT DEFAULT 'box',
         quantity INTEGER,
         unit_price REAL,
         total_price REAL,
@@ -559,6 +564,13 @@ class SQLiteService {
     try { this.db.run("ALTER TABLE app_users ADD COLUMN must_change_password INTEGER DEFAULT 0;"); } catch (e) {}
     try { this.db.run("ALTER TABLE app_users ADD COLUMN failed_attempts INTEGER DEFAULT 0;"); } catch (e) {}
     try { this.db.run("ALTER TABLE app_users ADD COLUMN locked_until TEXT;"); } catch (e) {}
+
+    // Migration: multi-unit inventory columns in medicines & invoice_items
+    try { this.db.run("ALTER TABLE medicines ADD COLUMN unit_type TEXT DEFAULT 'tablets';"); } catch (e) {}
+    try { this.db.run("ALTER TABLE medicines ADD COLUMN units_per_strip INTEGER DEFAULT 10;"); } catch (e) {}
+    try { this.db.run("ALTER TABLE medicines ADD COLUMN price_unit REAL DEFAULT 0;"); } catch (e) {}
+    try { this.db.run("ALTER TABLE medicines ADD COLUMN stock_units INTEGER DEFAULT 0;"); } catch (e) {}
+    try { this.db.run("ALTER TABLE invoice_items ADD COLUMN unit_type TEXT DEFAULT 'box';"); } catch (e) {}
 
     // Migration safe check for setup_completed and legacy admin
     this._runUserMigration();
@@ -1071,20 +1083,31 @@ class SQLiteService {
       }
     }
 
+    const unitType = med.unit_type || 'tablets';
+    const unitsPerStrip = Math.max(1, parseInt(med.units_per_strip, 10) || 10);
+    const stripsPerBox = Math.max(1, parseInt(med.strips_per_box, 10) || 1);
+    const priceBox = parseFloat(med.price_box) || 0;
+    const priceStrip = parseFloat(med.price_strip) || (stripsPerBox > 0 ? parseFloat((priceBox / stripsPerBox).toFixed(2)) : 0);
+    const priceUnit = parseFloat(med.price_unit) || (unitsPerStrip > 0 ? parseFloat((priceStrip / unitsPerStrip).toFixed(2)) : 0);
+    const stockBoxes = parseInt(med.stock_boxes, 10) || 0;
+    const stockStrips = parseInt(med.stock_strips, 10) || 0;
+    const stockUnits = parseInt(med.stock_units, 10) || 0;
+
     if (isUpdate) {
       // Update
       const stmt = this.db.prepare(`
         UPDATE medicines SET
           trade_name = ?, trade_name_ar = ?, generic_name = ?, barcode = ?,
           price_box = ?, price_strip = ?, strips_per_box = ?, stock_boxes = ?,
-          stock_strips = ?, shelf = ?, category = ?, reorder_level = ?, preferred_supplier = ?
+          stock_strips = ?, shelf = ?, category = ?, reorder_level = ?, preferred_supplier = ?,
+          unit_type = ?, units_per_strip = ?, price_unit = ?, stock_units = ?
         WHERE id = ?
       `);
       stmt.run([
         med.trade_name, med.trade_name_ar, med.generic_name, med.barcode,
-        med.price_box, med.price_strip, med.strips_per_box || 2, med.stock_boxes,
-        med.stock_strips || 0, med.shelf, med.category, med.reorder_level || 5,
-        med.preferred_supplier, id
+        priceBox, priceStrip, stripsPerBox, stockBoxes,
+        stockStrips, med.shelf, med.category, med.reorder_level || 5,
+        med.preferred_supplier, unitType, unitsPerStrip, priceUnit, stockUnits, id
       ]);
       stmt.free();
 
@@ -1104,14 +1127,15 @@ class SQLiteService {
         INSERT INTO medicines (
           id, trade_name, trade_name_ar, generic_name, barcode,
           price_box, price_strip, strips_per_box, stock_boxes, stock_strips,
-          shelf, category, reorder_level, preferred_supplier
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          shelf, category, reorder_level, preferred_supplier,
+          unit_type, units_per_strip, price_unit, stock_units
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       stmt.run([
         id, med.trade_name, med.trade_name_ar, med.generic_name, med.barcode,
-        med.price_box, med.price_strip, med.strips_per_box || 2, med.stock_boxes,
-        med.stock_strips || 0, med.shelf, med.category, med.reorder_level || 5,
-        med.preferred_supplier
+        priceBox, priceStrip, stripsPerBox, stockBoxes,
+        stockStrips, med.shelf, med.category, med.reorder_level || 5,
+        med.preferred_supplier, unitType, unitsPerStrip, priceUnit, stockUnits
       ]);
       stmt.free();
     }
@@ -1308,16 +1332,17 @@ class SQLiteService {
       // 2. Insert Invoice Items
       const itemStmt = this.db.prepare(`
         INSERT INTO invoice_items (
-          invoice_id, medicine_id, trade_name, trade_name_ar, is_strip,
+          invoice_id, medicine_id, trade_name, trade_name_ar, is_strip, unit_type,
           quantity, unit_price, total_price, unit_cost, profit
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       for (const item of items) {
         const qty = Number(item.quantity) || 0;
         const unitPrice = Number(item.unit_price) || 0;
+        const unitType = item.unitType || (item.is_strip ? 'strip' : 'box');
         itemStmt.run([
           invoiceId, item.medicine_id || null, item.trade_name || '', item.trade_name_ar || '',
-          item.is_strip ? 1 : 0, qty, unitPrice,
+          unitType === 'box' ? 0 : 1, unitType, qty, unitPrice,
           Number(item.total_price) || (unitPrice * qty),
           Number(item.unit_cost) || (unitPrice * 0.75),
           Number(item.profit) || ((Number(item.total_price) || (unitPrice * qty)) * 0.25)
@@ -1325,12 +1350,10 @@ class SQLiteService {
       }
       itemStmt.free();
 
-      // 3. Deduct stock atomically. Stock is validated per MEDICINE (not per
-      // cart line) so 1 box + 1 strip of the same medicine cannot each pass a
-      // separate check and oversell the shelf. Any shortage rolls the whole
-      // sale back instead of silently clamping stock to zero.
-      const stockStmt = this.db.prepare('UPDATE medicines SET stock_boxes = ?, stock_strips = ? WHERE id = ?');
-      const requiredStrips = new Map();
+      // 3. Deduct stock atomically with multi-unit support (Box / Strip / Unit-Tablet).
+      // Stock is validated per MEDICINE (not per cart line) in smallest discrete units.
+      const stockStmt = this.db.prepare('UPDATE medicines SET stock_boxes = ?, stock_strips = ?, stock_units = ? WHERE id = ?');
+      const requiredSmallestUnits = new Map();
       const medicineInfo = new Map();
       for (const item of items) {
         const medicineId = Number(item.medicine_id);
@@ -1338,32 +1361,56 @@ class SQLiteService {
         if (!medicineId || qty <= 0) continue;
 
         const medRows = this._formatRows(
-          this.db.exec(`SELECT stock_boxes, stock_strips, strips_per_box, trade_name, trade_name_ar FROM medicines WHERE id = ${medicineId} LIMIT 1`)
+          this.db.exec(`SELECT stock_boxes, stock_strips, stock_units, strips_per_box, units_per_strip, unit_type, trade_name, trade_name_ar FROM medicines WHERE id = ${medicineId} LIMIT 1`)
         );
         if (medRows.length === 0) continue;
 
-        const spb = Math.max(1, parseInt(medRows[0].strips_per_box, 10) || 1);
-        medicineInfo.set(medicineId, { med: medRows[0], spb });
-        const needed = item.is_strip ? qty : qty * spb;
-        requiredStrips.set(medicineId, (requiredStrips.get(medicineId) || 0) + needed);
+        const med = medRows[0];
+        const spb = Math.max(1, parseInt(med.strips_per_box, 10) || 1);
+        const ups = Math.max(1, parseInt(med.units_per_strip, 10) || 10);
+        medicineInfo.set(medicineId, { med, spb, ups });
+
+        const itemUnit = item.unitType || (item.is_strip ? 'strip' : 'box');
+        let neededInUnits = 0;
+        if (itemUnit === 'box') {
+          neededInUnits = qty * spb * ups;
+        } else if (itemUnit === 'strip') {
+          neededInUnits = qty * ups;
+        } else {
+          // 'unit' / 'tablet'
+          neededInUnits = qty;
+        }
+
+        requiredSmallestUnits.set(medicineId, (requiredSmallestUnits.get(medicineId) || 0) + neededInUnits);
       }
 
-      for (const [medicineId, needed] of requiredStrips) {
-        const { med, spb } = medicineInfo.get(medicineId);
-        const available = (Math.max(0, parseInt(med.stock_boxes, 10) || 0) * spb)
-          + Math.max(0, parseInt(med.stock_strips, 10) || 0);
-        if (needed > available) {
+      for (const [medicineId, neededUnits] of requiredSmallestUnits) {
+        const { med, spb, ups } = medicineInfo.get(medicineId);
+        const boxes = Math.max(0, parseInt(med.stock_boxes, 10) || 0);
+        const strips = Math.max(0, parseInt(med.stock_strips, 10) || 0);
+        const units = Math.max(0, parseInt(med.stock_units, 10) || 0);
+        const availableUnits = (boxes * spb * ups) + (strips * ups) + units;
+
+        if (neededUnits > availableUnits) {
           const name = med.trade_name_ar || med.trade_name || `#${medicineId}`;
-          throw new Error(`الكمية المطلوبة من [${name}] غير متوفرة بالمخزن (المطلوب يعادل ${needed} شريط، المتاح ${available} شريط).`);
+          throw new Error(`الكمية المطلوبة من [${name}] غير متوفرة بالمخزن (المطلوب ${neededUnits} وحدة، المتاح ${availableUnits} وحدة).`);
         }
       }
 
-      for (const [medicineId, needed] of requiredStrips) {
-        const { med, spb } = medicineInfo.get(medicineId);
+      for (const [medicineId, neededUnits] of requiredSmallestUnits) {
+        const { med, spb, ups } = medicineInfo.get(medicineId);
         const boxes = Math.max(0, parseInt(med.stock_boxes, 10) || 0);
         const strips = Math.max(0, parseInt(med.stock_strips, 10) || 0);
-        const remaining = (boxes * spb) + strips - needed;
-        stockStmt.run([Math.floor(remaining / spb), remaining % spb, medicineId]);
+        const units = Math.max(0, parseInt(med.stock_units, 10) || 0);
+        const remainingTotalUnits = (boxes * spb * ups) + (strips * ups) + units - neededUnits;
+
+        const unitsPerBox = spb * ups;
+        const newBoxes = Math.floor(remainingTotalUnits / unitsPerBox);
+        const remainderAfterBoxes = remainingTotalUnits % unitsPerBox;
+        const newStrips = Math.floor(remainderAfterBoxes / ups);
+        const newUnits = remainderAfterBoxes % ups;
+
+        stockStmt.run([newBoxes, newStrips, newUnits, medicineId]);
       }
       stockStmt.free();
 
@@ -1728,13 +1775,14 @@ class SQLiteService {
     const origItemsRes = this.db.exec(`SELECT * FROM invoice_items WHERE invoice_id = '${safeInvId}'`);
     const origInvoiceItems = this._formatRows(origItemsRes);
 
-    // Sum previously refunded quantities per (medicine_id, is_strip)
-    const previouslyRefundedQtyMap = new Map(); // key: `${medicine_id}_${is_strip}` => total qty
+    // Sum previously refunded quantities per (medicine_id, unit_type)
+    const previouslyRefundedQtyMap = new Map(); // key: `${medicine_id}_${unit_type}` => total qty
     for (const pr of prevRefunds) {
       let prItems = [];
       try { prItems = JSON.parse(pr.items_json || '[]'); } catch (e) {}
       for (const pi of prItems) {
-        const key = `${Number(pi.medicine_id)}_${pi.is_strip ? 1 : 0}`;
+        const uType = pi.unit_type || (pi.is_strip ? 'strip' : 'box');
+        const key = `${Number(pi.medicine_id)}_${uType}`;
         previouslyRefundedQtyMap.set(key, (previouslyRefundedQtyMap.get(key) || 0) + (Number(pi.quantity) || 0));
       }
     }
@@ -1746,10 +1794,13 @@ class SQLiteService {
     const validatedItemsToRefund = [];
     for (const inc of incomingItems) {
       const medId = Number(inc.medicine_id);
-      const isStrip = inc.is_strip ? 1 : 0;
-      const key = `${medId}_${isStrip}`;
+      const uType = inc.unit_type || (inc.is_strip ? 'strip' : 'box');
+      const key = `${medId}_${uType}`;
 
-      const origLine = origInvoiceItems.find((oi) => Number(oi.medicine_id) === medId && (oi.is_strip ? 1 : 0) === isStrip);
+      const origLine = origInvoiceItems.find((oi) => {
+        const origUType = oi.unit_type || (oi.is_strip ? 'strip' : 'box');
+        return Number(oi.medicine_id) === medId && origUType === uType;
+      });
       if (!origLine) {
         throw new Error(`الصنف رقم #${medId} لا ينتمي إلى الفاتورة الأصلية #${invoiceId}.`);
       }
@@ -1770,7 +1821,8 @@ class SQLiteService {
       if (qtyToReturn > 0) {
         validatedItemsToRefund.push({
           medicine_id: medId,
-          is_strip: isStrip === 1,
+          is_strip: uType === 'strip' ? 1 : 0,
+          unit_type: uType,
           quantity: qtyToReturn,
           trade_name: origLine.trade_name || '',
           trade_name_ar: origLine.trade_name_ar || ''
@@ -1791,6 +1843,7 @@ class SQLiteService {
         validatedItemsToRefund.map((v) => ({
           medicine_id: v.medicine_id,
           is_strip: v.is_strip,
+          unit_type: v.unit_type,
           quantity: v.quantity
         }))
       );
@@ -1807,28 +1860,43 @@ class SQLiteService {
       ]);
       stmt.free();
 
-      // 2. Restock medicines in inventory with naturalization
-      const stockStmt = this.db.prepare('UPDATE medicines SET stock_boxes = ?, stock_strips = ? WHERE id = ?');
+      // 2. Restock medicines in inventory with naturalization across Box / Strip / Unit
+      const stockStmt = this.db.prepare('UPDATE medicines SET stock_boxes = ?, stock_strips = ?, stock_units = ? WHERE id = ?');
       for (const item of validatedItemsToRefund) {
         const medId = Number(item.medicine_id);
         const qty = Number(item.quantity) || 0;
         if (!medId || qty <= 0) continue;
 
-        const medRows = this._formatRows(this.db.exec(`SELECT stock_boxes, stock_strips, strips_per_box FROM medicines WHERE id = ${medId} LIMIT 1`));
+        const medRows = this._formatRows(this.db.exec(`SELECT stock_boxes, stock_strips, stock_units, strips_per_box, units_per_strip FROM medicines WHERE id = ${medId} LIMIT 1`));
         if (medRows.length === 0) continue;
 
-        const spb = Math.max(1, parseInt(medRows[0].strips_per_box, 10) || 1);
-        let boxes = Math.max(0, parseInt(medRows[0].stock_boxes, 10) || 0);
-        let strips = Math.max(0, parseInt(medRows[0].stock_strips, 10) || 0);
+        const med = medRows[0];
+        const spb = Math.max(1, parseInt(med.strips_per_box, 10) || 1);
+        const ups = Math.max(1, parseInt(med.units_per_strip, 10) || 10);
+        let boxes = Math.max(0, parseInt(med.stock_boxes, 10) || 0);
+        let strips = Math.max(0, parseInt(med.stock_strips, 10) || 0);
+        let units = Math.max(0, parseInt(med.stock_units, 10) || 0);
 
-        if (item.is_strip) {
-          const totalStrips = (boxes * spb) + strips + qty;
-          boxes = Math.floor(totalStrips / spb);
-          strips = totalStrips % spb;
+        let returnedSmallestUnits = 0;
+        const uType = item.unit_type || (item.is_strip ? 'strip' : 'box');
+        if (uType === 'box') {
+          returnedSmallestUnits = qty * spb * ups;
+        } else if (uType === 'strip') {
+          returnedSmallestUnits = qty * ups;
         } else {
-          boxes += qty;
+          returnedSmallestUnits = qty;
         }
-        stockStmt.run([boxes, strips, medId]);
+
+        const currentTotalUnits = (boxes * spb * ups) + (strips * ups) + units;
+        const newTotalUnits = currentTotalUnits + returnedSmallestUnits;
+
+        const unitsPerBox = spb * ups;
+        const newBoxes = Math.floor(newTotalUnits / unitsPerBox);
+        const remAfterBoxes = newTotalUnits % unitsPerBox;
+        const newStrips = Math.floor(remAfterBoxes / ups);
+        const newUnits = remAfterBoxes % ups;
+
+        stockStmt.run([newBoxes, newStrips, newUnits, medId]);
       }
       stockStmt.free();
 

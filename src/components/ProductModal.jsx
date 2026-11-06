@@ -26,10 +26,14 @@ export function ProductModal({ isOpen = true, onClose, medicine, medicineToEdit,
     category: 'مسكنات وخافض حرارة',
     shelf: 'A-01',
     strips_per_box: 2,
+    units_per_strip: 10,
+    unit_type: 'tablets',
     price_box: '',
     price_strip: '',
+    price_unit: '',
     stock_boxes: 0,
     stock_strips: 0,
+    stock_units: 0,
     reorder_level: 3,
     manufacturer: 'إيبيكو (EIPICO)'
   });
@@ -52,11 +56,15 @@ export function ProductModal({ isOpen = true, onClose, medicine, medicineToEdit,
         barcode: targetMedicine.barcode || '',
         category: targetMedicine.category || 'مسكنات وخافض حرارة',
         shelf: targetMedicine.shelf || 'A-01',
+        unit_type: targetMedicine.unit_type || 'tablets',
         strips_per_box: targetMedicine.strips_per_box || 2,
+        units_per_strip: targetMedicine.units_per_strip || 10,
         price_box: targetMedicine.price_box != null ? targetMedicine.price_box.toString() : '',
         price_strip: targetMedicine.price_strip != null ? targetMedicine.price_strip.toString() : '',
+        price_unit: targetMedicine.price_unit != null ? targetMedicine.price_unit.toString() : '',
         stock_boxes: targetMedicine.stock_boxes != null ? targetMedicine.stock_boxes : 0,
         stock_strips: targetMedicine.stock_strips != null ? targetMedicine.stock_strips : 0,
+        stock_units: targetMedicine.stock_units != null ? targetMedicine.stock_units : 0,
         reorder_level: targetMedicine.reorder_level != null ? targetMedicine.reorder_level : 3,
         manufacturer: targetMedicine.manufacturer || 'إيبيكو (EIPICO)'
       });
@@ -68,11 +76,15 @@ export function ProductModal({ isOpen = true, onClose, medicine, medicineToEdit,
         barcode: generateBarcode(),
         category: 'مسكنات وخافض حرارة',
         shelf: 'A-01',
+        unit_type: 'tablets',
         strips_per_box: 2,
+        units_per_strip: 10,
         price_box: '',
         price_strip: '',
+        price_unit: '',
         stock_boxes: 0,
         stock_strips: 0,
+        stock_units: 0,
         reorder_level: 3,
         manufacturer: 'إيبيكو (EIPICO)'
       });
@@ -85,20 +97,40 @@ export function ProductModal({ isOpen = true, onClose, medicine, medicineToEdit,
   const handlePriceBoxChange = (val) => {
     const num = parseFloat(val);
     const strips = parseInt(formData.strips_per_box, 10) || 1;
+    const units = parseInt(formData.units_per_strip, 10) || 1;
+    const stripP = !isNaN(num) && strips > 0 ? (num / strips).toFixed(2) : formData.price_strip;
+    const unitP = !isNaN(num) && strips > 0 && units > 0 ? (num / (strips * units)).toFixed(2) : formData.price_unit;
     setFormData((prev) => ({
       ...prev,
       price_box: val,
-      price_strip: !isNaN(num) && strips > 0 ? (num / strips).toFixed(2) : prev.price_strip
+      price_strip: stripP,
+      price_unit: unitP
     }));
   };
 
   const handleStripsChange = (val) => {
     const strips = parseInt(val, 10) || 1;
+    const units = parseInt(formData.units_per_strip, 10) || 1;
     const num = parseFloat(formData.price_box);
+    const stripP = !isNaN(num) && strips > 0 ? (num / strips).toFixed(2) : formData.price_strip;
+    const unitP = !isNaN(num) && strips > 0 && units > 0 ? (num / (strips * units)).toFixed(2) : formData.price_unit;
     setFormData((prev) => ({
       ...prev,
       strips_per_box: strips,
-      price_strip: !isNaN(num) && strips > 0 ? (num / strips).toFixed(2) : prev.price_strip
+      price_strip: stripP,
+      price_unit: unitP
+    }));
+  };
+
+  const handleUnitsPerStripChange = (val) => {
+    const units = parseInt(val, 10) || 1;
+    const strips = parseInt(formData.strips_per_box, 10) || 1;
+    const num = parseFloat(formData.price_box);
+    const unitP = !isNaN(num) && strips > 0 && units > 0 ? (num / (strips * units)).toFixed(2) : formData.price_unit;
+    setFormData((prev) => ({
+      ...prev,
+      units_per_strip: units,
+      price_unit: unitP
     }));
   };
 
@@ -116,11 +148,15 @@ export function ProductModal({ isOpen = true, onClose, medicine, medicineToEdit,
     const payload = {
       ...formData,
       id: targetMedicine ? targetMedicine.id : Date.now(),
+      unit_type: formData.unit_type || 'tablets',
       price_box: parseFloat(formData.price_box) || 0,
       price_strip: parseFloat(formData.price_strip) || 0,
+      price_unit: parseFloat(formData.price_unit) || 0,
       strips_per_box: parseInt(formData.strips_per_box, 10) || 1,
+      units_per_strip: parseInt(formData.units_per_strip, 10) || 1,
       stock_boxes: parseInt(formData.stock_boxes, 10) || 0,
       stock_strips: parseInt(formData.stock_strips, 10) || 0,
+      stock_units: parseInt(formData.stock_units, 10) || 0,
       reorder_level: parseInt(formData.reorder_level, 10) || 3
     };
 
@@ -255,11 +291,28 @@ export function ProductModal({ isOpen = true, onClose, medicine, medicineToEdit,
             </div>
           </div>
 
-          {/* Pricing & Strips */}
+          {/* Unit Type & Sub-unit Pricing */}
           <div className="p-3.5 rounded-2xl bg-[#17233A]/60 border border-[#23324D] space-y-3">
-            <span className="text-xs font-bold text-teal-300 block">بيانات التسعير والشرائط:</span>
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-teal-300 block">وحدات وتجزئة البيع والتسعير:</span>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[11px] text-slate-400">نوع التجزئة:</span>
+                <select
+                  value={formData.unit_type || 'tablets'}
+                  onChange={(e) => setFormData({ ...formData, unit_type: e.target.value })}
+                  className="h-7 bg-[#111A2B] border border-[#23324D] text-teal-300 text-xs rounded-lg px-2 outline-none font-bold"
+                >
+                  <option value="tablets">أقراص / حبوب (قرص)</option>
+                  <option value="ampoules">حقن وأمبولات (أمبول)</option>
+                  <option value="spray">بخاخ ومحاليل (بخاخ/زجاجة)</option>
+                  <option value="sachets">فوار وأكياس (كيس)</option>
+                  <option value="capsules">كبسولات (كبسولة)</option>
+                  <option value="units">وحدات مفردة (وحدة)</option>
+                </select>
+              </div>
+            </div>
             
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
               <div>
                 <label className="block text-[11px] font-semibold text-slate-300 mb-1">
                   سعر بيع العلبة (ج.م) *
@@ -268,7 +321,7 @@ export function ProductModal({ isOpen = true, onClose, medicine, medicineToEdit,
                   type="number"
                   step="0.5"
                   required
-                  placeholder="35.00"
+                  placeholder="30.00"
                   value={formData.price_box}
                   onChange={(e) => handlePriceBoxChange(e.target.value)}
                   className="w-full h-10 bg-[#111A2B] border border-[#23324D] focus:border-teal-400 rounded-xl px-3 text-emerald-400 font-bold font-mono text-sm outline-none"
@@ -278,12 +331,12 @@ export function ProductModal({ isOpen = true, onClose, medicine, medicineToEdit,
 
               <div>
                 <label className="block text-[11px] font-semibold text-slate-300 mb-1">
-                  عدد الشرائط بالعلبة
+                  شرائط / أجزاء بالعلبة
                 </label>
                 <input
                   type="number"
                   min="1"
-                  max="10"
+                  max="100"
                   value={formData.strips_per_box}
                   onChange={(e) => handleStripsChange(e.target.value)}
                   className="w-full h-10 bg-[#111A2B] border border-[#23324D] focus:border-teal-400 rounded-xl px-3 text-white font-mono text-xs outline-none"
@@ -293,7 +346,7 @@ export function ProductModal({ isOpen = true, onClose, medicine, medicineToEdit,
 
               <div>
                 <label className="block text-[11px] font-semibold text-slate-300 mb-1">
-                  سعر بيع الشريط (ج.م)
+                  سعر الشريط (ج.م)
                 </label>
                 <input
                   type="number"
@@ -304,14 +357,44 @@ export function ProductModal({ isOpen = true, onClose, medicine, medicineToEdit,
                   dir="ltr"
                 />
               </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                  سعر الحبة / الوحدة
+                </label>
+                <input
+                  type="number"
+                  step="0.1"
+                  value={formData.price_unit}
+                  onChange={(e) => setFormData({ ...formData, price_unit: e.target.value })}
+                  className="w-full h-10 bg-[#111A2B] border border-[#23324D] focus:border-teal-400 rounded-xl px-3 text-cyan-300 font-mono text-xs outline-none"
+                  dir="ltr"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 pt-1 border-t border-[#23324D]/40 text-[11px] text-slate-400">
+              <span>عدد الحبات/الوحدات في الشريط الواحد:</span>
+              <input
+                type="number"
+                min="1"
+                max="50"
+                value={formData.units_per_strip}
+                onChange={(e) => handleUnitsPerStripChange(e.target.value)}
+                className="w-16 h-7 bg-[#111A2B] border border-[#23324D] focus:border-teal-400 rounded-lg text-center text-white font-mono text-xs outline-none"
+                dir="ltr"
+              />
+              <span className="text-[10px] text-slate-500">
+                (إجمالي العلبة = {(parseInt(formData.strips_per_box, 10) || 1) * (parseInt(formData.units_per_strip, 10) || 1)} وحدة)
+              </span>
             </div>
           </div>
 
           {/* Stock & Reorder Level */}
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-4 gap-2.5">
             <div>
               <label className="block text-xs font-semibold text-slate-300 mb-1">
-                رصيد العلب المتاح
+                رصيد العلب
               </label>
               <input
                 type="number"
@@ -325,7 +408,7 @@ export function ProductModal({ isOpen = true, onClose, medicine, medicineToEdit,
 
             <div>
               <label className="block text-xs font-semibold text-slate-300 mb-1">
-                رصيد الشرائط المنفصلة
+                شرائط منفصلة
               </label>
               <input
                 type="number"
@@ -339,7 +422,21 @@ export function ProductModal({ isOpen = true, onClose, medicine, medicineToEdit,
 
             <div>
               <label className="block text-xs font-semibold text-slate-300 mb-1">
-                حد الطلب (تنبيه النواقص)
+                حبات / وحدات
+              </label>
+              <input
+                type="number"
+                min="0"
+                value={formData.stock_units}
+                onChange={(e) => setFormData({ ...formData, stock_units: e.target.value })}
+                className="w-full h-10 bg-[#17233A] border border-[#23324D] focus:border-teal-400 rounded-xl px-3 text-cyan-300 font-mono text-xs outline-none"
+                dir="ltr"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">
+                حد الطلب (نواقص)
               </label>
               <input
                 type="number"

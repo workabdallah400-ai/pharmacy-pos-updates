@@ -39,7 +39,6 @@ import {
 import { DEFAULT_SETTINGS } from '../data/mockSettings';
 import { playBarcodeBeep, playCashDrawerSound } from '../utils/sound';
 import { UsersManagementView } from './UsersManagementView';
-import LicensePortalApp from '../licensePortal/LicensePortalApp';
 import { sqliteService } from '../db/sqliteService';
 import { hasPermission } from '../utils/permissions';
 import { initReportServer, getReportPreviewBaseUrl, getPermanentReportBaseUrl, buildLiveReportsUrl, buildDailySummaryUrl, buildMonthlySummaryUrl } from '../utils/reportServer';
@@ -383,7 +382,6 @@ export function SettingsView({ onUpdatePharmacyName, onRevokeDevice, currentUser
     { id: 'receipt', label: 'هوية الصيدلية والفاتورة', icon: Store },
     { id: 'hardware', label: 'الأجهزة والطباعة والدرج', icon: Printer },
     { id: 'backup', label: 'النسخ الاحتياطي والأمان', icon: HardDrive },
-    { id: 'license_portal', label: 'تراخيص وعملاء فارما كير', icon: Key, permission: 'canManageUsers' },
     { id: 'users', label: 'إدارة المستخدمين والحسابات', icon: Shield, permission: 'canManageUsers' },
     { id: 'audit', label: 'سجل العمليات والتدقيق (Audit Log)', icon: Eye, permission: 'canViewAuditLog' },
     { id: 'security', label: 'أكواد PIN (توافق قديم)', icon: Lock },
@@ -850,14 +848,6 @@ export function SettingsView({ onUpdatePharmacyName, onRevokeDevice, currentUser
                 </label>
               </div>
 
-            </div>
-          )}
-
-          
-          {/* TAB 4.a: PharmaCare License & Clients Portal */}
-          {activeTab === 'license_portal' && (
-            <div className="max-w-7xl mx-auto space-y-4">
-              <LicensePortalApp />
             </div>
           )}
 

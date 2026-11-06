@@ -14,11 +14,7 @@ const MACHINE_ID_STORAGE_KEY = 'PHARMACY_MACHINE_ID';
 const LAST_TIME_STORAGE_KEY = 'PHARMACY_SYS_CLOCK_TIMESTAMP';
 
 // Keys issued by the developer that are valid regardless of the machine ID.
-const MASTER_LIFETIME_KEYS = [
-  'LIC-LIFE-7729-9941-EGYP',
-  'LIC-LIFE-0120-1395-2430', // Developer Eng. Abdullah Gamil
-  'LIC-LIFE-2026-PHAR-EGYP'
-];
+const MASTER_LIFETIME_KEYS = [];
 
 /**
  * Verify that a stored license key really belongs to this machine.
@@ -231,7 +227,7 @@ export async function checkLicenseStatus() {
   // 5. Check if Lifetime
   if (activeStatus === 'LIFETIME' || activeKey.startsWith('LIC-LIFE-')) {
     // Verify the key was issued for this machine (empty legacy keys are tolerated)
-    if (activeKey && !(await isLicenseKeyValidForMachine(activeKey, machineId))) {
+    if (!activeKey || !(await isLicenseKeyValidForMachine(activeKey, machineId))) {
       return {
         isLicensed: false,
         isTrial: false,
@@ -251,7 +247,7 @@ export async function checkLicenseStatus() {
       status: 'LIFETIME',
       trialDaysRemaining: 0,
       machineId,
-      licenseKey: activeKey || 'LIC-LIFE-7729-9941-EGYP',
+      licenseKey: activeKey || '',
       activatedAt: activatedAt ? activatedAt.slice(0, 10) : '2026-11-02',
       expiresAt: 'مدى الحياة (غير محدد)',
       daysRemaining: 'دائم (غير محدود)'
