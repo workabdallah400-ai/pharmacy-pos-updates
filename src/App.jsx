@@ -12,11 +12,9 @@ import { ShiftsView } from './components/ShiftsView';
 import { ReportsView } from './components/ReportsView';
 import { SettingsView } from './components/SettingsView';
 import { PlaceholderView } from './components/PlaceholderView';
-import { ActivationScreen } from './components/ActivationScreen';
 import { FirstRunSetupScreen } from './components/FirstRunSetupScreen';
 import { ForcePasswordChangeScreen } from './components/ForcePasswordChangeScreen';
 import { OpenShiftModal } from './components/OpenShiftModal';
-import { checkLicenseStatus } from './utils/licenseManager';
 import {
   initReportServer,
   readSettings,
@@ -302,9 +300,7 @@ export default function App() {
     setShowOpenShiftModal(false);
   };
 
-  // Startup License & Activation Guard State
-  const [licenseInfo, setLicenseInfo] = useState(null);
-  const [isCheckingLicense, setIsCheckingLicense] = useState(true);
+  // Settings Tab Deep Link
   const [settingsInitialTab, setSettingsInitialTab] = useState(() => resolveDeepLinkSettingsTab() || 'receipt');
   const [setupState, setSetupState] = useState(null);
   const [isCheckingSetup, setIsCheckingSetup] = useState(true);
@@ -323,28 +319,6 @@ export default function App() {
 
   useEffect(() => {
     refreshSetupState();
-  }, []);
-
-
-
-  // Check License on Application Startup
-  useEffect(() => {
-    let isCurrent = true;
-    const verifyLicense = async () => {
-      try {
-        const info = await checkLicenseStatus();
-        if (isCurrent) {
-          setLicenseInfo(info);
-        }
-      } catch (err) {
-        console.warn('License verification error:', err);
-      } finally {
-        if (isCurrent) setIsCheckingLicense(false);
-      }
-    };
-
-    verifyLicense();
-    return () => { isCurrent = false; };
   }, []);
 
   const [pharmacyName, setPharmacyName] = useState(() => {
@@ -451,12 +425,6 @@ export default function App() {
 
   // Only admins (or users explicitly granted settings access) may open Settings.
   const canManageSettings = hasPermission(currentUser, 'canManageSettings');
-
-  const handleOpenLicenseSettings = () => {
-    if (!canManageSettings) return;
-    setSettingsInitialTab('license');
-    setActiveTab('settings');
-  };
 
   const handleLogout = () => {
     try {
@@ -630,57 +598,9 @@ export default function App() {
     );
   };
 
-  // --- STARTUP ACTIVATION GUARD CHECKS ---
+  // --- STARTUP GUARD CHECKS ---
 
-  // 1. Loading splash while verifying license
-  if (isCheckingLicense) {
-    return (
-      <div className="h-screen w-screen bg-[#0B1220] flex flex-col items-center justify-center font-cairo select-none text-slate-200">
-        <div className="w-14 h-14 rounded-2xl bg-teal-500/20 border border-teal-500/40 flex items-center justify-center text-3xl shadow-glow-teal mb-4 animate-pulse">
-          💊
-        </div>
-        <div className="text-base font-bold text-white mb-1">صيدليتي - نقاط البيع الذكية</div>
-        <div className="text-xs text-teal-400 font-medium">جارٍ فحص ترخيص وحماية النظام...</div>
-      </div>
-    );
-  }
-
-  // 2. Strict Full-Screen Activation Screen (Locks the app completely if unlicensed)
-  if (!licenseInfo || !licenseInfo.isLicensed || licenseInfo.isExpired) {
-    return (
-      <ActivationScreen
-        machineId={licenseInfo?.machineId || ''}
-        initialStatus={licenseInfo?.status || 'UNLICENSED'}
-        expiresDate={licenseInfo?.expiresAt || ''}
-        onActivationSuccess={async (status) => {
-          // Re-read the real persisted license so expiry/days remaining are accurate
-          try {
-            const fresh = await checkLicenseStatus();
-            setLicenseInfo(fresh);
-            await refreshSetupState();
-          } catch (e) {
-            setLicenseInfo((prev) => ({
-              ...prev,
-              isLicensed: true,
-              isTrial: false,
-              isExpired: false,
-              status
-            }));
-          }
-        }}
-        onRevoke={() => {
-          setLicenseInfo((prev) => ({
-            ...prev,
-            isLicensed: false,
-            isExpired: true,
-            status: 'REVOKED'
-          }));
-        }}
-      />
-    );
-  }
-
-  // 3. First-Run Owner Setup Guard (After license activation)
+  // 1. First-Run Owner Setup Guard
   if (setupState?.needsSetup) {
     return (
       <FirstRunSetupScreen
@@ -692,7 +612,7 @@ export default function App() {
     );
   }
 
-  // 4. Missing Owner Account State (setup completed but 0 users remain)
+  // 2. Missing Owner Account State (setup completed but 0 users remain)
   if (setupState?.setupCompleted && setupState.userCount === 0) {
     return (
       <div className="h-screen w-screen bg-[#0B1220] flex flex-col items-center justify-center font-cairo select-none text-slate-200 p-4" dir="rtl">
@@ -740,8 +660,6 @@ export default function App() {
         pharmacyName={pharmacyName}
         shiftNumber={currentShift?.shift_number || 1}
         isShiftOpen={!!currentShift}
-        licenseInfo={licenseInfo}
-        onOpenActivation={canManageSettings ? handleOpenLicenseSettings : null}
       />
 
       {/* Main Workspace with Sidebar on Right (RTL) */}

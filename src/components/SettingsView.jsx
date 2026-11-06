@@ -38,7 +38,6 @@ import {
 } from 'lucide-react';
 import { DEFAULT_SETTINGS } from '../data/mockSettings';
 import { playBarcodeBeep, playCashDrawerSound } from '../utils/sound';
-import { activateLicenseKey, getMachineId, checkLicenseStatus, revokeLicense } from '../utils/licenseManager';
 import { UsersManagementView } from './UsersManagementView';
 import { sqliteService } from '../db/sqliteService';
 import { hasPermission } from '../utils/permissions';
@@ -139,32 +138,13 @@ export function SettingsView({ onUpdatePharmacyName, onRevokeDevice, currentUser
     const off = onUpdateStatus((payload) => setUpdateState(payload));
     return () => { if (typeof off === 'function') off(); };
   }, []);
-  const [licenseState, setLicenseState] = useState({
-    isLicensed: true,
-    status: 'LIFETIME',
-    machineId: getMachineId(),
-    licenseKey: settings.licenseKey || '',
-    activatedAt: '2026-11-02',
-    expiresAt: 'مدى الحياة (غير محدد)',
-    daysRemaining: 'دائم (غير محدود)'
-  });
-
+  
   useEffect(() => {
     setActiveTab(initialTab);
   }, [initialTab]);
 
   useEffect(() => {
-    async function loadLicense() {
-      try {
-        const res = await checkLicenseStatus();
-        setLicenseState(res);
-        if (res.licenseKey && !enteredLicenseKey) {
-          setEnteredLicenseKey(res.licenseKey);
-        }
-      } catch (e) {}
-    }
-    loadLicense();
-  }, []);
+    }, []);
 
   useEffect(() => {
     try {
@@ -311,98 +291,6 @@ export function SettingsView({ onUpdatePharmacyName, onRevokeDevice, currentUser
     } catch (e) {}
   };
 
-  // 1. Copy Machine ID
-  const handleCopyMachineId = () => {
-    const mid = licenseState.machineId || settings.machineId || getMachineId();
-    navigator.clipboard.writeText(mid);
-    setCopiedKey(true);
-    showToast('تم نسخ كود الجهاز (Machine ID) للحافظة بنجاح! 📋');
-    setTimeout(() => setCopiedKey(false), 2500);
-  };
-
-  // Re-check License Status
-  const handleRecheckLicense = async () => {
-    try {
-      const res = await checkLicenseStatus();
-      setLicenseState(res);
-      if (res.isLicensed) {
-        showToast('🟢 البرنامج مرخص ونشط ويعمل بشكل سليم (مدى الحياة LIFETIME)');
-      } else {
-        showToast('⚠️ البرنامج غير مرخص على هذا الجهاز!');
-      }
-      playCashDrawerSound();
-    } catch (e) {
-      showToast('تم فحص الترخيص بنجاح');
-    }
-  };
-
-  // WhatsApp Support Contact
-  const handleWhatsAppContact = () => {
-    const devPhone = '201201395243';
-    const mid = licenseState.machineId || settings.machineId || getMachineId();
-    const text = encodeURIComponent(
-      `السلام عليكم م/ عبد الله جميل،\nأرغب في الاستفسار وتجديد ترخيص برنامج صيدليتي.\nكود الجهاز الخاص بي:\n${mid}`
-    );
-    window.open(`https://wa.me/${devPhone}?text=${text}`, '_blank');
-  };
-
-  // Confirm Revocation of License (Deactivate Device)
-  const handleConfirmRevoke = async () => {
-    const adminPin = settings.adminPin || '1234';
-    if (revokePinInput !== adminPin && revokePinInput !== '0120' && revokePinInput !== '1234') {
-      setRevokeError('رمز PIN غير صحيح! يرجى إدخال رمز مدير الصيدلية أو رمز المطور.');
-      playBarcodeBeep();
-      return;
-    }
-
-    try {
-      const mid = licenseState.machineId || settings.machineId || getMachineId();
-      await revokeLicense(mid);
-      showToast('تم إلغاء وسحب ترخيص هذا الجهاز وقفل البرنامج فوراً! 🚫');
-      playBarcodeBeep();
-      setShowRevokeModal(false);
-      setTimeout(() => {
-        if (onRevokeDevice) {
-          onRevokeDevice();
-        } else {
-          window.location.reload();
-        }
-      }, 700);
-    } catch (e) {
-      setRevokeError('حدث خطأ أثناء إلغاء التفعيل');
-    }
-  };
-
-  // 2. Activate License Key
-  const handleActivateLicense = async (e) => {
-    e.preventDefault();
-    if (!enteredLicenseKey.trim()) {
-      showToast('يرجى إدخال مفتاح الترخيص');
-      return;
-    }
-
-    const res = await activateLicenseKey(enteredLicenseKey.trim());
-    if (res.success) {
-      setSettings((prev) => ({
-        ...prev,
-        licenseKey: enteredLicenseKey.trim().toUpperCase(),
-        licenseStatus: res.status
-      }));
-      setLicenseState({
-        isLicensed: true,
-        status: res.status,
-        machineId: getMachineId(),
-        licenseKey: enteredLicenseKey.trim().toUpperCase()
-      });
-
-      playCashDrawerSound();
-      showToast('مبروك! تم تفعيل ترخيص البرنامج بنجاح وحفظه في قاعدة البيانات 🔑');
-    } else {
-      playBarcodeBeep();
-      showToast(res.error || 'مفتاح الترخيص غير صالح');
-    }
-  };
-
   // 3. Backup Database to JSON file download
   const handleBackupNow = async () => {
     try {
@@ -494,7 +382,6 @@ export function SettingsView({ onUpdatePharmacyName, onRevokeDevice, currentUser
     { id: 'receipt', label: 'هوية الصيدلية والفاتورة', icon: Store },
     { id: 'hardware', label: 'الأجهزة والطباعة والدرج', icon: Printer },
     { id: 'backup', label: 'النسخ الاحتياطي والأمان', icon: HardDrive },
-    { id: 'license', label: 'التراخيص وبوابة المطور', icon: Key },
     { id: 'users', label: 'إدارة المستخدمين والحسابات', icon: Shield, permission: 'canManageUsers' },
     { id: 'audit', label: 'سجل العمليات والتدقيق (Audit Log)', icon: Eye, permission: 'canViewAuditLog' },
     { id: 'security', label: 'أكواد PIN (توافق قديم)', icon: Lock },
@@ -959,204 +846,6 @@ export function SettingsView({ onUpdatePharmacyName, onRevokeDevice, currentUser
                     className="hidden"
                   />
                 </label>
-              </div>
-
-            </div>
-          )}
-
-          {/* TAB 4: Licensing & Developer Portal */}
-          {activeTab === 'license' && (
-            <div className="max-w-3xl space-y-6">
-              
-              {/* Card 1: ترخيص البرنامج للجهاز الحالي */}
-              <div className="bg-[#111A2B] border border-[#23324D] rounded-2xl p-6 shadow-xl space-y-5">
-                
-                {/* Header row with status & action buttons */}
-                <div className="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-[#23324D]">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-teal-500/15 border border-teal-500/30 flex items-center justify-center text-teal-400">
-                      <Key className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <h4 className="text-sm font-black text-white">ترخيص البرنامج للجهاز الحالي</h4>
-                      <p className="text-[11px] text-slate-400">بيانات الترخيص وبصمة العتاد المعتمدة للمنظومة</p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={handleRecheckLicense}
-                      className="px-3.5 py-1.5 rounded-xl bg-[#17233A] hover:bg-[#1E2D4A] border border-[#23324D] text-slate-300 hover:text-white text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm"
-                      title="إعادة فحص حالة الترخيص من قاعدة البيانات"
-                    >
-                      <RefreshCw className="w-3.5 h-3.5 text-teal-400" />
-                      <span>🔄 إعادة فحص ومزامنة الترخيص</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={handleCopyMachineId}
-                      className="px-3.5 py-1.5 rounded-xl bg-teal-500/15 hover:bg-teal-500/25 border border-teal-500/30 text-teal-300 text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm"
-                      title="نسخ كود الجهاز للحافظة"
-                    >
-                      <Copy className="w-3.5 h-3.5" />
-                      <span>{copiedKey ? '✓ تم النسخ' : '📋 نسخ كود الجهاز'}</span>
-                    </button>
-                  </div>
-                </div>
-
-                {/* Status Badge */}
-                {licenseState.status === 'REVOKED' ? (
-                  <div className="bg-rose-500/15 border border-rose-500/40 rounded-xl p-4 flex items-center justify-between shadow-lg shadow-rose-950/20">
-                    <div className="flex items-center gap-3">
-                      <span className="relative flex h-3.5 w-3.5">
-                        <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-rose-500 shadow-[0_0_12px_#EF4444]"></span>
-                      </span>
-                      <div>
-                        <div className="text-sm font-black text-rose-400">
-                          🔴 تم إيقاف أو سحب الترخيص لهذا الجهاز (Revoked)
-                        </div>
-                        <div className="text-[11px] text-slate-400 mt-0.5">
-                          تم إلغاء التفعيل من قبل المطور أو الإدارة
-                        </div>
-                      </div>
-                    </div>
-                    <div className="w-10 h-10 rounded-xl bg-rose-500/20 text-rose-400 border border-rose-500/30 flex items-center justify-center shrink-0">
-                      <Ban className="w-5 h-5" />
-                    </div>
-                  </div>
-                ) : (
-                  <div className="bg-gradient-to-r from-emerald-500/15 via-[#111A2B] to-teal-500/15 border border-emerald-500/40 rounded-xl p-4 flex items-center justify-between shadow-lg shadow-emerald-950/20">
-                    <div className="flex items-center gap-3">
-                      <span className="relative flex h-3.5 w-3.5">
-                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                        <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-emerald-500 shadow-[0_0_12px_#10B981]"></span>
-                      </span>
-                      <div>
-                        <div className="text-sm font-black text-emerald-400 flex items-center gap-2">
-                          <span>🟢 البرنامج مرخص ويعمل بشكل سليم ({licenseState.status === 'ANNUAL' ? 'سنوي ANNUAL' : 'مدى الحياة LIFETIME'})</span>
-                        </div>
-                        <div className="text-[11px] text-slate-400 mt-0.5">
-                          ترخيص تجاري رسمي نشط — مقترن بالعتاد وقاعدة البيانات
-                        </div>
-                      </div>
-                    </div>
-                    <div className="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center shrink-0">
-                      <CheckCircle2 className="w-5 h-5" />
-                    </div>
-                  </div>
-                )}
-
-                {/* Machine Code Box */}
-                <div className="space-y-1.5">
-                  <label className="block text-xs font-bold text-slate-300">
-                    كود الجهاز الفريد (Hardware Machine ID):
-                  </label>
-                  <div className="p-3.5 bg-[#0B1220] rounded-xl border border-[#23324D] font-mono font-black text-base text-[#14B8A6] tracking-wider text-center select-all">
-                    {licenseState.machineId || settings.machineId || getMachineId()}
-                  </div>
-                  <p className="text-[11px] text-slate-400">
-                    هذا الكود يمثل بصمة العتاد الفريدة لهذا الجهاز، ويتم توليد مفتاح التفعيل بناءً عليه.
-                  </p>
-                </div>
-
-                {/* Registered License Key Display */}
-                <div className="space-y-1.5">
-                  <label className="block text-xs font-bold text-slate-300">
-                    مفتاح الترخيص المسجل حالياً على هذا الجهاز:
-                  </label>
-                  <div className="p-3 bg-[#0B1220] rounded-xl border border-[#23324D] font-mono font-bold text-xs text-emerald-400 tracking-wider text-center select-all">
-                    {licenseState.licenseKey || settings.licenseKey || 'LIC-LIFE-7729-9941-EGYP'}
-                  </div>
-                </div>
-
-                {/* License Validity & Dates Breakdown */}
-                <div className="grid grid-cols-3 gap-3 p-3.5 bg-[#0B1220] rounded-xl border border-[#23324D] text-center">
-                  <div>
-                    <span className="block text-[11px] text-slate-400 mb-0.5">تاريخ التفعيل</span>
-                    <span className="text-xs font-bold text-slate-200">{licenseState.activatedAt || '2026-11-02'}</span>
-                  </div>
-                  <div>
-                    <span className="block text-[11px] text-slate-400 mb-0.5">تاريخ انتهاء الصلاحية</span>
-                    <span className="text-xs font-bold text-teal-300">{licenseState.expiresAt || 'مدى الحياة (غير محدد)'}</span>
-                  </div>
-                  <div>
-                    <span className="block text-[11px] text-slate-400 mb-0.5">الأيام المتبقية</span>
-                    <span className="text-xs font-bold text-emerald-400">{licenseState.daysRemaining || 'دائم (غير محدود)'}</span>
-                  </div>
-                </div>
-
-                {/* Form to Upgrade/Re-enter License Key */}
-                <form onSubmit={handleActivateLicense} className="pt-2 border-t border-[#23324D] space-y-2.5">
-                  <label className="block text-xs font-bold text-slate-300">
-                    إدخال مفتاح ترخيص جديد أو تجديد:
-                  </label>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="text"
-                      value={enteredLicenseKey}
-                      onChange={(e) => setEnteredLicenseKey(e.target.value.toUpperCase())}
-                      placeholder="LIC-LIFE-XXXX-XXXX-XXXX"
-                      className="flex-1 bg-[#0B1220] border border-[#23324D] focus:border-teal-400 rounded-xl px-3.5 py-2.5 text-xs text-white font-mono font-bold focus:outline-none uppercase"
-                    />
-                    <button
-                      type="submit"
-                      className="px-5 py-2.5 rounded-xl bg-teal-500 hover:bg-teal-400 text-slate-950 text-xs font-black shadow-lg shadow-teal-500/20 flex items-center gap-1.5 transition-all shrink-0 cursor-pointer"
-                    >
-                      <Key className="w-4 h-4" />
-                      <span>تحديث الترخيص 🔑</span>
-                    </button>
-                  </div>
-                </form>
-
-                {/* 🔥 Supervisory Action: Revoke & Deactivate Device Button */}
-                <div className="pt-3 border-t border-[#23324D] flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <span className="block text-xs font-bold text-rose-400">الإجراءات الرقابية والأمنية للجهاز:</span>
-                    <span className="text-[11px] text-slate-400">إلغاء الترخيص يقفل النظام فوراً ويعيد الجهاز لشاشة التفعيل</span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setRevokeError('');
-                      setRevokePinInput('');
-                      setShowRevokeModal(true);
-                    }}
-                    className="px-4 py-2.5 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/40 text-rose-300 hover:text-rose-200 text-xs font-black transition-all flex items-center gap-2 cursor-pointer shadow-sm"
-                  >
-                    <Ban className="w-4 h-4 text-rose-400" />
-                    <span>🚫 حذف وإلغاء تفعيل هذا الجهاز (Deactivate / Revoke)</span>
-                  </button>
-                </div>
-
-              </div>
-
-              {/* Card 2: الدعم الفني وتجديد تراخيص النظام */}
-              <div className="bg-[#111A2B] border border-[#23324D] rounded-2xl p-6 shadow-xl space-y-4">
-                <div className="flex items-start gap-4">
-                  <div className="w-12 h-12 rounded-2xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0">
-                    <Headphones className="w-6 h-6" />
-                  </div>
-                  <div className="flex-1">
-                    <h4 className="text-sm font-black text-white">الدعم الفني وتجديد تراخيص النظام</h4>
-                    <p className="text-xs text-slate-300 mt-1 leading-relaxed">
-                      تواصل مباشرة مع المطور لتجديد الترخيص، إضافة أجهزة جديدة، أو طلب الترقية والدعم الفني.
-                    </p>
-                    <div className="mt-2.5 text-xs font-bold text-teal-300">
-                      المطور: م/ عبد الله جميل &nbsp;|&nbsp; هاتف / واتساب: 01201395243
-                    </div>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={handleWhatsAppContact}
-                  className="w-full h-12 rounded-xl bg-[#25D366] hover:bg-[#20ba59] active:scale-[0.99] text-white text-xs font-black shadow-lg shadow-emerald-900/30 flex items-center justify-center gap-2.5 transition-all cursor-pointer"
-                >
-                  <MessageCircle className="w-5 h-5 fill-white text-[#25D366]" />
-                  <span>💬 مراسلة المطور عبر واتساب (01201395243)</span>
-                </button>
               </div>
 
             </div>
