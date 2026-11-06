@@ -30,6 +30,7 @@ import { QuickExpenseModal } from './QuickExpenseModal';
 import { MobileQRModal } from './MobileQRModal';
 import { sqliteService } from '../db/sqliteService';
 import { hasPermission } from '../utils/permissions';
+import { calculateCartTotal } from '../utils/pricing';
 
 export function POSView({
   currentUser,
@@ -471,8 +472,7 @@ export function POSView({
 
   const calculateTotal = () => {
     const sub = calculateSubtotal();
-    const finalTotal = sub - (parseFloat(discount) || 0);
-    return finalTotal > 0 ? finalTotal : 0;
+    return calculateCartTotal(sub, discount).total;
   };
 
   const currentSubtotal = calculateSubtotal();
@@ -487,6 +487,18 @@ export function POSView({
 
     if (cart.length === 0) {
       showToast('عفواً، السلة فارغة! أضف أدوية أولاً لإتمام البيع.', 'warning');
+      return;
+    }
+
+    // Check discount validity
+    const rawDisc = parseFloat(discount);
+    if (!isNaN(rawDisc) && rawDisc < 0) {
+      showToast('⚠️ لا يمكن تطبيق قيمة خصم سالبة.', 'warning');
+      return;
+    }
+    const safeDisc = Math.max(0, isNaN(rawDisc) ? 0 : rawDisc);
+    if (safeDisc > currentSubtotal) {
+      showToast('⚠️ قيمة الخصم لا يمكن أن تتجاوز إجمالي الفاتورة.', 'warning');
       return;
     }
 
@@ -762,11 +774,11 @@ export function POSView({
                     {/* Top Row: Name & Shelf Tag */}
                     <div>
                       <div className="flex items-start justify-between gap-2 mb-1">
-                        <div>
-                          <h4 className="font-extrabold text-sm text-white group-hover:text-teal-300 transition-colors">
+                        <div className="min-w-0 flex-1">
+                          <h4 className="font-extrabold text-sm text-white group-hover:text-teal-300 transition-colors truncate" title={med.trade_name_ar}>
                             {med.trade_name_ar}
                           </h4>
-                          <span className="text-xs text-slate-400 block font-normal">
+                          <span className="text-xs text-slate-400 block font-normal truncate" title={med.trade_name}>
                             {med.trade_name}
                           </span>
                         </div>
@@ -776,28 +788,28 @@ export function POSView({
                       </div>
 
                       {/* Active Ingredient */}
-                      <p className="text-[11px] text-slate-400 truncate mb-2">
+                      <p className="text-[11px] text-slate-400 truncate mb-2" title={med.generic_name}>
                         {med.generic_name}
                       </p>
                     </div>
 
                     {/* Stock & Pricing */}
                     <div>
-                      <div className="flex items-center justify-between text-xs mb-2.5 pt-1.5 border-t border-[#23324D]/60">
+                      <div className="flex flex-wrap items-center justify-between gap-1 text-xs mb-2.5 pt-1.5 border-t border-[#23324D]/60">
                         {/* Stock status */}
-                        <div className="flex items-center gap-1.5">
+                        <div className="flex items-center gap-1.5 shrink-0">
                           <span
-                            className={`w-2 h-2 rounded-full ${
+                            className={`w-2 h-2 rounded-full shrink-0 ${
                               inStock ? 'bg-emerald-400' : 'bg-rose-400 animate-pulse'
                             }`}
                           ></span>
-                          <span className={`text-[11px] font-semibold ${inStock ? 'text-slate-300' : 'text-rose-400 font-bold'}`}>
+                          <span className={`text-[11px] font-semibold whitespace-nowrap ${inStock ? 'text-slate-300' : 'text-rose-400 font-bold'}`}>
                             {inStock ? `${med.stock_boxes} ع (${med.stock_strips} ش)` : 'نفد من المخزن'}
                           </span>
                         </div>
 
                         {/* Prices */}
-                        <div className="text-left font-mono" dir="ltr">
+                        <div className="text-left font-mono shrink-0 whitespace-nowrap" dir="ltr">
                           <span className="font-extrabold text-teal-300 text-sm">
                             {med.price_box.toFixed(2)}
                           </span>
@@ -1078,8 +1090,24 @@ export function POSView({
                       !hasPermission(currentUser, 'canDiscount') &&
                       !hasPermission(currentUser, 'canGiveDiscount')
                     }
-                    value={discount || ''}
-                    onChange={(e) => setDiscount(e.target.value)}
+                    value={discount === 0 || discount === '0' ? (discount === '' ? '' : discount) : (discount || '')}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val === '') {
+                        setDiscount('');
+                      } else {
+                        const parsed = parseFloat(val);
+                        setDiscount(isNaN(parsed) ? '' : Math.max(0, parsed));
+                      }
+                    }}
+                    onBlur={() => {
+                      if (discount === '' || isNaN(parseFloat(discount))) {
+                        setDiscount(0);
+                      } else {
+                        const clean = Math.max(0, parseFloat(discount) || 0);
+                        setDiscount(Math.min(clean, currentSubtotal));
+                      }
+                    }}
                     className="w-16 h-7 bg-[#17233A] border border-[#23324D] text-center text-rose-300 text-xs font-bold rounded-lg outline-none font-mono disabled:opacity-50"
                   />
                   <span className="text-[10px] text-slate-500 mr-1">ج.م</span>
@@ -1127,7 +1155,17 @@ export function POSView({
               <div className="bg-[#17233A] border border-[#23324D] p-1.5 px-2.5 rounded-xl flex items-center justify-between">
                 <span className="text-slate-400 text-[11px]">المستلم:</span>
                 {paymentMethod === 'مختلط' ? (
-                  <span className="text-[11px] text-amber-300 font-medium">انظر تفصيل المختلط أعلاه</span>
+                  <div className="flex flex-col items-end">
+                    <input
+                      type="text"
+                      readOnly
+                      value={paidAmount ? `${parseFloat(paidAmount).toFixed(2)} EGP` : '0.00 EGP'}
+                      className="w-24 text-left bg-transparent text-emerald-400 font-mono font-bold outline-none text-xs cursor-not-allowed"
+                      dir="ltr"
+                      title="المدفوع كاش (يُعدَّل من تفصيل المختلط أعلاه)"
+                    />
+                    <span className="text-[9px] text-slate-500">المدفوع كاش (من أعلى)</span>
+                  </div>
                 ) : (
                   <input
                     type="number"

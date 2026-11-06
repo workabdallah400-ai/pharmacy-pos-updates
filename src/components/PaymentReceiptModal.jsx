@@ -29,15 +29,17 @@ export function PaymentReceiptModal({
 
   const handleConfirmPayment = (e) => {
     e.preventDefault();
-    if (!parsedAmount || parsedAmount <= 0) {
-      setError('يرجى إدخال مبلغ صحيح للتحصيل');
+    if (currentDebt <= 0) {
+      setError('لا توجد مديونية مستحقة على هذا العميل.');
       return;
     }
-    if (parsedAmount > currentDebt && currentDebt > 0) {
-      const confirmOverpay = window.confirm(
-        `المبلغ المدخل (${parsedAmount} ج.م) أكبر من إجمالي المديونية (${currentDebt} ج.م)، هل تريد المتابعة وقيد الرصيد المتبقي كرصيد دائن لصالح العميل؟`
-      );
-      if (!confirmOverpay) return;
+    if (!parsedAmount || parsedAmount <= 0) {
+      setError('يرجى إدخال مبلغ صحيح للتحصيل أكبر من صفر.');
+      return;
+    }
+    if (parsedAmount > currentDebt) {
+      setError(`المبلغ المدخل (${parsedAmount.toFixed(2)} ج.م) يتجاوز إجمالي المديونية المستحقة (${currentDebt.toFixed(2)} ج.م).`);
+      return;
     }
 
     const receiptNo = `REC-${Math.floor(10000 + Math.random() * 90000)}`;
@@ -141,7 +143,8 @@ export function PaymentReceiptModal({
                 <input
                   type="number"
                   step="0.5"
-                  min="1"
+                  min="0.5"
+                  max={currentDebt > 0 ? currentDebt : 0}
                   required
                   autoFocus
                   value={amount}

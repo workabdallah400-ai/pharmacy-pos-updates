@@ -497,7 +497,7 @@ export function SettingsView({ onUpdatePharmacyName, onRevokeDevice, currentUser
     { id: 'license', label: 'التراخيص وبوابة المطور', icon: Key },
     { id: 'users', label: 'إدارة المستخدمين والحسابات', icon: Shield, permission: 'canManageUsers' },
     { id: 'audit', label: 'سجل العمليات والتدقيق (Audit Log)', icon: Eye, permission: 'canViewAuditLog' },
-    { id: 'security', label: 'صلاحيات PIN التقليدية', icon: Lock },
+    { id: 'security', label: 'أكواد PIN (توافق قديم)', icon: Lock },
     { id: 'cloud', label: 'المزامنة وبوابة الموبايل', icon: Cloud }
   ];
 
@@ -1255,6 +1255,12 @@ export function SettingsView({ onUpdatePharmacyName, onRevokeDevice, currentUser
           {/* TAB 5: Users & PIN Security */}
           {activeTab === 'security' && (
             <div className="max-w-3xl space-y-8">
+
+              {/* Legacy PIN Info Banner */}
+              <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs font-medium flex items-center gap-2 mb-4">
+                <AlertTriangle className="w-4 h-4 shrink-0 text-amber-400" />
+                <span>نظام الحسابات (اسم المستخدم/كلمة المرور) هو النظام الأساسي. أكواد PIN متبقية للتوافق مع الإصدارات القديمة فقط.</span>
+              </div>
 
               {/* PIN Settings */}
               <div className="grid grid-cols-2 gap-4">

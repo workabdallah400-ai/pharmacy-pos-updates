@@ -1047,10 +1047,28 @@ class SQLiteService {
     const customerName = invoiceData.customer_name || 'عميل نقدي (كاشير)';
     const customerPhone = invoiceData.customer_phone || '-';
     const paymentMethod = invoiceData.payment_method || 'كاش';
-    const totalRetail = Number(invoiceData.total_retail) || 0;
+    const totalRetail = Number(invoiceData.total_retail);
+    if (!Number.isFinite(totalRetail) || totalRetail < 0) {
+      throw new Error('إجمالي الفاتورة يجب أن يكون رقماً صحيحاً غير سالب.');
+    }
+
+    const rawDiscount = invoiceData.discount;
+    if (rawDiscount !== undefined && rawDiscount !== null && rawDiscount !== '') {
+      const numDisc = Number(rawDiscount);
+      if (!Number.isFinite(numDisc) || numDisc < 0) {
+        throw new Error('قيمة الخصم لا يمكن أن تكون سالبة أو غير صالحة.');
+      }
+    }
+    const safeDiscount = Math.max(0, Number(invoiceData.discount) || 0);
+
+    const subtotal = invoiceData.subtotal !== undefined ? Number(invoiceData.subtotal) : null;
+    if (subtotal !== null && Number.isFinite(subtotal) && safeDiscount > subtotal) {
+      throw new Error('قيمة الخصم لا يمكن أن تتجاوز الإجمالي الفرعي للفاتورة.');
+    }
+
     const totalCost = Number(invoiceData.total_cost) || 0;
     const totalProfit = Number(invoiceData.total_profit) || 0;
-    const discount = Number(invoiceData.discount) || 0;
+    const discount = safeDiscount;
     const cashierName = invoiceData.cashier_name || 'الكاشير';
 
     let paidCash = 0;
@@ -1352,53 +1370,72 @@ class SQLiteService {
     this.db.run('BEGIN TRANSACTION;');
 
     try {
-      const parsedAmount = parseFloat(amountPaid) || 0;
+      const parsedAmount = parseFloat(amountPaid);
+      if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+        throw new Error('يرجى إدخال مبلغ تحصيل صحيح أكبر من صفر.');
+      }
       const paymentMethod = receiptData?.paymentMethod || 'كاش';
 
-      // 1. Deduct customer balance
-      this.db.run(`
+      // 1. Read current customer balance inside transaction
+      const custRows = this._formatRows(
+        this.db.exec(`SELECT id, name, balance FROM customers WHERE id = ${Number(customerId) || 0} LIMIT 1`)
+      );
+      if (custRows.length === 0) {
+        throw new Error('العميل غير موجود في قاعدة البيانات.');
+      }
+      const currentBalance = Number(custRows[0].balance) || 0;
+      if (currentBalance <= 0) {
+        throw new Error('لا توجد مديونية مستحقة على هذا العميل.');
+      }
+      if (parsedAmount > currentBalance + 0.001) {
+        throw new Error(`مبلغ التحصيل (${parsedAmount.toFixed(2)} ج.م) يتجاوز إجمالي المديونية المستحقة (${currentBalance.toFixed(2)} ج.م).`);
+      }
+
+      const effectiveAmount = Math.round(parsedAmount * 100) / 100;
+      const newBal = Math.max(0, Math.round((currentBalance - effectiveAmount) * 100) / 100);
+
+      // 2. Deduct customer balance using parameterized prepared statement
+      const updateCustStmt = this.db.prepare(`
         UPDATE customers SET
-          balance = CASE WHEN balance >= ${parsedAmount} THEN balance - ${parsedAmount} ELSE 0 END,
-          last_payment_date = '${new Date().toISOString().slice(0, 10)}',
-          last_payment_amount = ${parsedAmount}
-        WHERE id = ${customerId}
+          balance = ?,
+          last_payment_date = ?,
+          last_payment_amount = ?
+        WHERE id = ?
       `);
+      updateCustStmt.run([newBal, new Date().toISOString().slice(0, 10), effectiveAmount, Number(customerId)]);
+      updateCustStmt.free();
 
-      // 2. Insert into customer ledger
-      const cust = this.db.exec(`SELECT balance FROM customers WHERE id = ${customerId}`);
-      const newBal = cust[0]?.values[0]?.[0] || 0;
-
+      // 3. Insert into customer ledger
       const stmt = this.db.prepare(`
         INSERT INTO customer_ledger (
           customer_id, date_time, type, ref_no, description, debit, credit, balance
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `);
       stmt.run([
-        customerId, new Date().toISOString(), 'PAYMENT',
+        Number(customerId), new Date().toISOString(), 'PAYMENT',
         receiptData?.receiptNo || `REC-${Date.now()}`,
-        `سداد نقدي (${paymentMethod})`, 0, parsedAmount, newBal
+        `سداد نقدي (${paymentMethod})`, 0, effectiveAmount, newBal
       ]);
       stmt.free();
 
-      // 3. If paid in CASH, update active shift's debt_collections and EXPECTED CASH!
+      // 4. If paid in CASH, update active shift's debt_collections and EXPECTED CASH!
       if (paymentMethod === 'كاش') {
-        this.db.run(`
+        const shiftStmt = this.db.prepare(`
           UPDATE shifts SET
-            debt_collections = debt_collections + ${parsedAmount}
-          WHERE status = 'OPEN';
-
-          UPDATE shifts SET
-            expected_cash = opening_cash + cash_sales + debt_collections - petty_expenses
-          WHERE status = 'OPEN';
+            debt_collections = debt_collections + ?,
+            expected_cash = opening_cash + cash_sales + debt_collections + ? - petty_expenses
+          WHERE status = 'OPEN'
         `);
+        shiftStmt.run([effectiveAmount, effectiveAmount]);
+        shiftStmt.free();
       }
 
       this.db.run('COMMIT;');
       this.saveToDisk();
       this._enqueueSync('customer_payment', receiptData?.receiptNo || customerId, 'CREATE', {
-        customerId, amountPaid: parsedAmount, paymentMethod, receiptNo: receiptData?.receiptNo
+        customerId, amountPaid: effectiveAmount, paymentMethod, receiptNo: receiptData?.receiptNo
       });
-      console.log(`✅ Customer ${customerId} paid ${parsedAmount} EGP (Drawer Expected Cash updated).`);
+      console.log(`✅ Customer ${customerId} paid ${effectiveAmount} EGP (Drawer Expected Cash updated).`);
     } catch (e) {
       this.db.run('ROLLBACK;');
       throw e;

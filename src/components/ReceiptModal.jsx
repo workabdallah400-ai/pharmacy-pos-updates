@@ -125,7 +125,7 @@ export function ReceiptModal({ isOpen, onClose, invoice, pharmacyName = 'صيد�
             <div className="text-center pt-3 text-[10px] text-slate-600 space-y-1">
               <div>نتمنى لكم الشفاء العاجل دائمًا 💚</div>
               <div className="text-[9px] text-slate-500">البضاعة المباعة ترد وتستبدل بالفاتورة خلال 14 يومًا</div>
-              <div className="font-bold text-[8px] tracking-widest text-slate-400 pt-1">* EGYPT PHARMACY POS *</div>
+              <div className="font-bold text-[9px] text-slate-500 pt-1">{pharmacyName} — نسعد بخدمتكم</div>
             </div>
 
           </div>

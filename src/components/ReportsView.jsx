@@ -37,6 +37,16 @@ export function ReportsView({ currentUser }) {
     setTimeout(() => setToastMessage(''), 3000);
   };
 
+  const openInvoicePreview = async (inv) => {
+    setSelectedInvoiceForModal(inv);
+    try {
+      const refs = await sqliteService.getInvoiceRefunds(inv.id);
+      setModalInvoiceRefunds(refs || []);
+    } catch (e) {
+      setModalInvoiceRefunds([]);
+    }
+  };
+
   // Load Invoices and Refunds from SQLite on mount
   useEffect(() => {
     let isCurrent = true;
@@ -352,7 +362,18 @@ export function ReportsView({ currentUser }) {
                   </tr>
                 ) : (
                   filteredInvoices.map((inv, idx) => (
-                    <tr key={inv.id || idx} className="hover:bg-[#17233A]/70 transition-colors">
+                    <tr
+                      key={inv.id || idx}
+                      onClick={() => openInvoicePreview(inv)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          openInvoicePreview(inv);
+                        }
+                      }}
+                      tabIndex={0}
+                      className="hover:bg-[#17233A]/70 transition-colors cursor-pointer focus:outline-none focus:bg-[#17233A]"
+                    >
                       <td className="p-3 font-mono font-bold text-teal-300">#{inv.invoice_number || inv.id}</td>
                       <td className="p-3 font-mono text-slate-400">
                         {inv.created_at ? new Date(inv.created_at).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' }) : '-'}
@@ -388,14 +409,9 @@ export function ReportsView({ currentUser }) {
                       <td className="p-3 text-center">
                         <button
                           type="button"
-                          onClick={async () => {
-                            setSelectedInvoiceForModal(inv);
-                            try {
-                              const refs = await sqliteService.getInvoiceRefunds(inv.id);
-                              setModalInvoiceRefunds(refs || []);
-                            } catch (e) {
-                              setModalInvoiceRefunds([]);
-                            }
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openInvoicePreview(inv);
                           }}
                           className="px-2.5 py-1 rounded-lg bg-[#17233A] hover:bg-teal-500/20 text-teal-300 hover:text-white border border-[#23324D] text-[11px] font-bold flex items-center gap-1 mx-auto transition-colors cursor-pointer"
                         >

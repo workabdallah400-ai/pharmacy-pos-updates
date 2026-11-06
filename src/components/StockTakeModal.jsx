@@ -19,6 +19,7 @@ export function StockTakeModal({ isOpen, onClose, currentUser, onComplete }) {
   const [notes, setNotes] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [displayedMedicines, setDisplayedMedicines] = useState([]);
+  const [displayLimit, setDisplayLimit] = useState(100);
   const [medicinesById, setMedicinesById] = useState(new Map());
   const [countedData, setCountedData] = useState({}); // { [medId]: { boxes: number, strips: number } }
   const [historyList, setHistoryList] = useState([]);
@@ -103,6 +104,7 @@ export function StockTakeModal({ isOpen, onClose, currentUser, onComplete }) {
 
   const handleSearchChange = (val) => {
     setSearchQuery(val);
+    setDisplayLimit(100);
     if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
 
     searchDebounceRef.current = setTimeout(async () => {
@@ -387,7 +389,7 @@ export function StockTakeModal({ isOpen, onClose, currentUser, onComplete }) {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#23324D]/60 font-medium">
-                  {displayedMedicines.map((med) => {
+                  {displayedMedicines.slice(0, displayLimit).map((med) => {
                     const spb = Math.max(1, parseInt(med.strips_per_box, 10) || 1);
                     const sysBoxes = Number(med.stock_boxes) || 0;
                     const sysStrips = Number(med.stock_strips) || 0;
@@ -474,6 +476,18 @@ export function StockTakeModal({ isOpen, onClose, currentUser, onComplete }) {
                   })}
                 </tbody>
               </table>
+
+              {displayedMedicines.length > displayLimit && (
+                <div className="p-3 bg-[#141E30] border-t border-[#23324D] text-center">
+                  <button
+                    type="button"
+                    onClick={() => setDisplayLimit((prev) => prev + 100)}
+                    className="px-4 py-1.5 rounded-xl bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 border border-purple-500/40 text-xs font-bold transition-all shadow-sm cursor-pointer"
+                  >
+                    تحميل المزيد من الأصناف (يُعرض {Math.min(displayLimit, displayedMedicines.length)} من إجمالي {displayedMedicines.length})
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Footer Buttons */}
