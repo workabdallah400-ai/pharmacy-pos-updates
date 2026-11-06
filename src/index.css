@@ -9,7 +9,40 @@
     font-family: 'Cairo', sans-serif;
     user-select: none;
     -webkit-user-select: none;
+    transition: filter 0.25s ease, font-size 0.2s ease;
   }
+}
+
+/* ======================================================== */
+/* FONT SIZES (تكبير وتصغير حجم الخط)                      */
+/* ======================================================== */
+html[data-font-size="sm"] {
+  font-size: 14px;
+}
+html[data-font-size="md"] {
+  font-size: 16px;
+}
+html[data-font-size="lg"] {
+  font-size: 18px;
+}
+html[data-font-size="xl"] {
+  font-size: 20px;
+}
+
+/* ======================================================== */
+/* THEME MODE (الوضع الفاتح والداكن)                       */
+/* ======================================================== */
+html.theme-light {
+  filter: invert(0.92) hue-rotate(180deg) brightness(1.05) contrast(0.98);
+}
+
+/* Exempt images, barcodes, user avatars and camera feeds from invert */
+html.theme-light img,
+html.theme-light video,
+html.theme-light canvas,
+html.theme-light svg.keep-color,
+html.theme-light .no-invert {
+  filter: invert(1) hue-rotate(180deg);
 }
 
 /* Custom Scrollbars */
