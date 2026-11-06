@@ -11,6 +11,7 @@ import {
   isPrivateHost
 } from '../utils/reportServer';
 import { DEFAULT_SETTINGS } from '../data/mockSettings.js';
+import { validateInvoiceDiscount, validateDebtCollection } from '../utils/validation.js';
 
 // IndexedDB helper for browser & mobile offline database persistence
 const IDB_NAME = 'PharmacyPOS_DB';
@@ -1052,19 +1053,7 @@ class SQLiteService {
       throw new Error('إجمالي الفاتورة يجب أن يكون رقماً صحيحاً غير سالب.');
     }
 
-    const rawDiscount = invoiceData.discount;
-    if (rawDiscount !== undefined && rawDiscount !== null && rawDiscount !== '') {
-      const numDisc = Number(rawDiscount);
-      if (!Number.isFinite(numDisc) || numDisc < 0) {
-        throw new Error('قيمة الخصم لا يمكن أن تكون سالبة أو غير صالحة.');
-      }
-    }
-    const safeDiscount = Math.max(0, Number(invoiceData.discount) || 0);
-
-    const subtotal = invoiceData.subtotal !== undefined ? Number(invoiceData.subtotal) : null;
-    if (subtotal !== null && Number.isFinite(subtotal) && safeDiscount > subtotal) {
-      throw new Error('قيمة الخصم لا يمكن أن تتجاوز الإجمالي الفرعي للفاتورة.');
-    }
+    const { discount: safeDiscount } = validateInvoiceDiscount(invoiceData.discount, invoiceData.subtotal);
 
     const totalCost = Number(invoiceData.total_cost) || 0;
     const totalProfit = Number(invoiceData.total_profit) || 0;
@@ -1370,10 +1359,6 @@ class SQLiteService {
     this.db.run('BEGIN TRANSACTION;');
 
     try {
-      const parsedAmount = parseFloat(amountPaid);
-      if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
-        throw new Error('يرجى إدخال مبلغ تحصيل صحيح أكبر من صفر.');
-      }
       const paymentMethod = receiptData?.paymentMethod || 'كاش';
 
       // 1. Read current customer balance inside transaction
@@ -1384,15 +1369,8 @@ class SQLiteService {
         throw new Error('العميل غير موجود في قاعدة البيانات.');
       }
       const currentBalance = Number(custRows[0].balance) || 0;
-      if (currentBalance <= 0) {
-        throw new Error('لا توجد مديونية مستحقة على هذا العميل.');
-      }
-      if (parsedAmount > currentBalance + 0.001) {
-        throw new Error(`مبلغ التحصيل (${parsedAmount.toFixed(2)} ج.م) يتجاوز إجمالي المديونية المستحقة (${currentBalance.toFixed(2)} ج.م).`);
-      }
 
-      const effectiveAmount = Math.round(parsedAmount * 100) / 100;
-      const newBal = Math.max(0, Math.round((currentBalance - effectiveAmount) * 100) / 100);
+      const { amount: effectiveAmount, newBalance: newBal } = validateDebtCollection(currentBalance, amountPaid);
 
       // 2. Deduct customer balance using parameterized prepared statement
       const updateCustStmt = this.db.prepare(`
