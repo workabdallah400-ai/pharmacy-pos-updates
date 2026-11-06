@@ -817,16 +817,7 @@ export function POSView({
                 const inStock = totalUnits > 0;
                 const unitPriceCalc = med.price_unit > 0 ? med.price_unit : (med.price_strip ? med.price_strip / ups : med.price_box / (spb * ups));
 
-                const unitTypeName = (() => {
-                  switch (med.unit_type) {
-                    case 'ampoules': return 'أمبول';
-                    case 'spray': return 'بخاخ';
-                    case 'sachets': return 'كيس';
-                    case 'capsules': return 'كبسولة';
-                    case 'units': return 'وحدة';
-                    default: return 'قرص';
-                  }
-                })();
+                const unitTypeName = getUnitName(med.unit_type);
 
                 return (
                   <div
@@ -1055,16 +1046,7 @@ export function POSView({
                 const ups = Math.max(1, parseInt(item.units_per_strip, 10) || 10);
                 const uType = item.unitType || 'box';
 
-                const unitTypeName = (() => {
-                  switch (item.unit_type) {
-                    case 'ampoules': return 'أمبول';
-                    case 'spray': return 'بخاخ';
-                    case 'sachets': return 'كيس';
-                    case 'capsules': return 'كبسولة';
-                    case 'units': return 'وحدة';
-                    default: return 'قرص';
-                  }
-                })();
+                const unitTypeName = getUnitName(item.unit_type);
 
                 const unitLabel = uType === 'box' ? 'علبة' : (uType === 'strip' ? 'شريط' : unitTypeName);
 

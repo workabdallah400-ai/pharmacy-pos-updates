@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, Pill, Sparkles, Wand2, CheckCircle2, AlertCircle } from 'lucide-react';
+import { PHARMACY_DOSAGE_UNITS, getUnitDisplayInfo } from '../utils/pharmacyUnits';
 
 const CATEGORIES = [
   'مسكنات وخافض حرارة',
@@ -302,12 +303,11 @@ export function ProductModal({ isOpen = true, onClose, medicine, medicineToEdit,
                   onChange={(e) => setFormData({ ...formData, unit_type: e.target.value })}
                   className="h-7 bg-[#111A2B] border border-[#23324D] text-teal-300 text-xs rounded-lg px-2 outline-none font-bold"
                 >
-                  <option value="tablets">أقراص / حبوب (قرص)</option>
-                  <option value="ampoules">حقن وأمبولات (أمبول)</option>
-                  <option value="spray">بخاخ ومحاليل (بخاخ/زجاجة)</option>
-                  <option value="sachets">فوار وأكياس (كيس)</option>
-                  <option value="capsules">كبسولات (كبسولة)</option>
-                  <option value="units">وحدات مفردة (وحدة)</option>
+                  {PHARMACY_DOSAGE_UNITS.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.label}
+                    </option>
+                  ))}
                 </select>
               </div>
             </div>
@@ -360,7 +360,7 @@ export function ProductModal({ isOpen = true, onClose, medicine, medicineToEdit,
 
               <div>
                 <label className="block text-[11px] font-semibold text-slate-300 mb-1">
-                  سعر الحبة / الوحدة
+                  سعر {getUnitDisplayInfo(formData.unit_type).unitName} (ج.م)
                 </label>
                 <input
                   type="number"
@@ -374,7 +374,7 @@ export function ProductModal({ isOpen = true, onClose, medicine, medicineToEdit,
             </div>
 
             <div className="flex items-center gap-2 pt-1 border-t border-[#23324D]/40 text-[11px] text-slate-400">
-              <span>عدد الحبات/الوحدات في الشريط الواحد:</span>
+              <span>عدد ({getUnitDisplayInfo(formData.unit_type).unitName}) في الشريط / الجزء:</span>
               <input
                 type="number"
                 min="1"
