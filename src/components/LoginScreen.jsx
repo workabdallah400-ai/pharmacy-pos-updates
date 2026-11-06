@@ -89,9 +89,9 @@ export function LoginScreen({ onLoginSuccess }) {
   };
 
   const roleLabel = (role) => {
-    if (role === 'admin') return 'مدير الصيدلية';
-    if (role === 'pharmacist') return 'صيدلاني';
-    return 'كاشير / موظف';
+    if (role === 'admin') return 'المالك / المدير العام';
+    if (role === 'pharmacist') return 'مدير صيدلية';
+    return 'موظف';
   };
 
   return (
@@ -245,18 +245,6 @@ export function LoginScreen({ onLoginSuccess }) {
             </button>
 
           </form>
-
-          {/* Default credentials hint */}
-          <div className="mt-4 pt-3 border-t border-[#23324D]/60 text-center">
-            <p className="text-[11px] text-slate-500">
-              بيانات الدخول الافتراضية للمدير:
-              <span className="text-teal-400 font-mono font-bold mx-1">admin</span>
-              /
-              <span className="text-teal-400 font-mono font-bold mx-1">admin123</span>
-              <br />
-              <span className="text-amber-400/70">قم بتغييرها فور الدخول من الإعدادات ← إدارة المستخدمين</span>
-            </p>
-          </div>
         </div>
       </main>
 

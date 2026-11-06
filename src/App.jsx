@@ -13,6 +13,8 @@ import { ReportsView } from './components/ReportsView';
 import { SettingsView } from './components/SettingsView';
 import { PlaceholderView } from './components/PlaceholderView';
 import { ActivationScreen } from './components/ActivationScreen';
+import { FirstRunSetupScreen } from './components/FirstRunSetupScreen';
+import { ForcePasswordChangeScreen } from './components/ForcePasswordChangeScreen';
 import { OpenShiftModal } from './components/OpenShiftModal';
 import { checkLicenseStatus } from './utils/licenseManager';
 import {
@@ -304,6 +306,24 @@ export default function App() {
   const [licenseInfo, setLicenseInfo] = useState(null);
   const [isCheckingLicense, setIsCheckingLicense] = useState(true);
   const [settingsInitialTab, setSettingsInitialTab] = useState(() => resolveDeepLinkSettingsTab() || 'receipt');
+  const [setupState, setSetupState] = useState(null);
+  const [isCheckingSetup, setIsCheckingSetup] = useState(true);
+
+  // Check Setup State (Needs owner account creation?)
+  const refreshSetupState = async () => {
+    try {
+      const state = await sqliteService.getSetupState();
+      setSetupState(state);
+    } catch (e) {
+      console.warn('Setup state error:', e);
+    } finally {
+      setIsCheckingSetup(false);
+    }
+  };
+
+  useEffect(() => {
+    refreshSetupState();
+  }, []);
 
 
 
@@ -629,7 +649,7 @@ export default function App() {
   if (!licenseInfo || !licenseInfo.isLicensed || licenseInfo.isExpired) {
     return (
       <ActivationScreen
-        machineId={licenseInfo?.machineId || 'EGYP-B009-4237-53D2'}
+        machineId={licenseInfo?.machineId || ''}
         initialStatus={licenseInfo?.status || 'UNLICENSED'}
         expiresDate={licenseInfo?.expiresAt || ''}
         onActivationSuccess={async (status) => {
@@ -637,6 +657,7 @@ export default function App() {
           try {
             const fresh = await checkLicenseStatus();
             setLicenseInfo(fresh);
+            await refreshSetupState();
           } catch (e) {
             setLicenseInfo((prev) => ({
               ...prev,
@@ -659,13 +680,54 @@ export default function App() {
     );
   }
 
-  // 3. User Authentication Login Screen
+  // 3. First-Run Owner Setup Guard (After license activation)
+  if (setupState?.needsSetup) {
+    return (
+      <FirstRunSetupScreen
+        onSetupSuccess={async (ownerUser) => {
+          await refreshSetupState();
+          handleLoginSuccess(ownerUser);
+        }}
+      />
+    );
+  }
+
+  // 4. Missing Owner Account State (setup completed but 0 users remain)
+  if (setupState?.setupCompleted && setupState.userCount === 0) {
+    return (
+      <div className="h-screen w-screen bg-[#0B1220] flex flex-col items-center justify-center font-cairo select-none text-slate-200 p-4" dir="rtl">
+        <div className="max-w-md w-full bg-[#111A2B] border border-rose-500/30 rounded-3xl p-6 text-center space-y-4 shadow-2xl">
+          <div className="w-14 h-14 rounded-2xl bg-rose-500/20 text-rose-400 border border-rose-500/40 flex items-center justify-center mx-auto text-2xl font-black">
+            ⚠️
+          </div>
+          <h2 className="text-lg font-black text-white">لا يوجد حساب مالك مسجل</h2>
+          <p className="text-xs text-slate-400 leading-relaxed">
+            تم إعداد النظام مسبقاً ولكن لا توجد أي حسابات مستخدمين حالياً في قاعدة البيانات. لأسباب أمنية لا يمكن إنشاء حساب مالك جديد. يرجى استيراد نسخة احتياطية رسمية لقاعدة البيانات للمتابعة.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // 5. User Authentication Login Screen
   if (!currentUser) {
     return (
       <>
         {updateBannerNode}
         <LoginScreen onLoginSuccess={handleLoginSuccess} />
       </>
+    );
+  }
+
+  // 6. Force Password Change Guard (for users with must_change_password = 1)
+  if (currentUser?.must_change_password) {
+    return (
+      <ForcePasswordChangeScreen
+        currentUser={currentUser}
+        onPasswordChanged={() => {
+          setCurrentUser((prev) => ({ ...prev, must_change_password: 0 }));
+        }}
+      />
     );
   }
 

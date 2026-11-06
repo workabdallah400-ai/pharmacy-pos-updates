@@ -12,6 +12,8 @@ import {
 } from '../utils/reportServer';
 import { DEFAULT_SETTINGS } from '../data/mockSettings.js';
 import { validateInvoiceDiscount, validateDebtCollection } from '../utils/validation.js';
+import { normalizePermissions, canManageUser } from '../utils/permissions.js';
+import { hashPassword, verifyPassword, validatePasswordPolicy } from '../utils/password.js';
 
 // IndexedDB helper for browser & mobile offline database persistence
 const IDB_NAME = 'PharmacyPOS_DB';
@@ -415,6 +417,19 @@ class SQLiteService {
         activated_at TEXT
       );
 
+      CREATE TABLE IF NOT EXISTS app_meta (
+        key TEXT PRIMARY KEY,
+        value TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS license_revocations (
+        lid TEXT PRIMARY KEY,
+        mid TEXT,
+        reason TEXT,
+        revoked_at TEXT,
+        imported_at TEXT
+      );
+
       CREATE TABLE IF NOT EXISTS app_users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         username TEXT NOT NULL UNIQUE COLLATE NOCASE,
@@ -425,7 +440,11 @@ class SQLiteService {
         created_at TEXT,
         created_by TEXT,
         last_login TEXT,
-        permissions TEXT DEFAULT '{}'
+        permissions TEXT DEFAULT '{}',
+        is_owner INTEGER DEFAULT 0,
+        must_change_password INTEGER DEFAULT 0,
+        failed_attempts INTEGER DEFAULT 0,
+        locked_until TEXT
       );
 
       -- Offline outbox: every state-changing operation is queued here.
@@ -535,130 +554,46 @@ class SQLiteService {
       this.db.run("ALTER TABLE sync_queue ADD COLUMN cloud_synced_at TEXT;");
     } catch (e) {}
 
-    // Seed default admin if no users exist
-    this._seedDefaultAdmin();
+    // Migration: ensure new security columns exist in app_users
+    try { this.db.run("ALTER TABLE app_users ADD COLUMN is_owner INTEGER DEFAULT 0;"); } catch (e) {}
+    try { this.db.run("ALTER TABLE app_users ADD COLUMN must_change_password INTEGER DEFAULT 0;"); } catch (e) {}
+    try { this.db.run("ALTER TABLE app_users ADD COLUMN failed_attempts INTEGER DEFAULT 0;"); } catch (e) {}
+    try { this.db.run("ALTER TABLE app_users ADD COLUMN locked_until TEXT;"); } catch (e) {}
+
+    // Migration safe check for setup_completed and legacy admin
+    this._runUserMigration();
   }
 
-  _seedDefaultAdmin() {
+  _runUserMigration() {
     try {
-      const existing = this.db.exec("SELECT id FROM app_users WHERE role = 'admin' LIMIT 1");
-      if (!existing || existing.length === 0 || existing[0].values.length === 0) {
-        // Hash = sha256-like simple hash stored as hex (we use a simple deterministic hash for offline use)
-        const adminHash = this._hashPassword('admin123');
-        const defaultAdminPerms = {
-          canViewReports: true,
-          canManageUsers: true,
-          canCloseShift: true,
-          canManageStock: true,
-          canViewProfits: true,
-          canManageSettings: true,
-          canDeleteInvoices: true,
-          canGiveDiscount: true,
-          canDiscount: true,
-          canEditPrice: true,
-          canDeleteItem: true,
-          canRefund: true,
-          canStockTake: true,
-          canViewAuditLog: true
-        };
-        const stmt = this.db.prepare(`
-          INSERT OR IGNORE INTO app_users (username, password_hash, full_name, role, is_active, created_at, created_by, permissions)
-          VALUES (?, ?, ?, ?, 1, ?, ?, ?)
-        `);
-        stmt.run([
-          'admin',
-          adminHash,
-          'مدير الصيدلية',
-          'admin',
-          new Date().toISOString(),
-          'SYSTEM',
-          JSON.stringify(defaultAdminPerms)
-        ]);
-        stmt.free();
-        console.log('✅ Default admin user seeded: username=admin, password=admin123');
+      const usersRes = this.db.exec("SELECT id, username, created_by, password_hash, is_owner FROM app_users");
+      const users = this._formatRows(usersRes);
+      if (users && users.length > 0) {
+        // Mark setup_completed = 1 since users already exist
+        this.db.run("INSERT OR REPLACE INTO app_meta (key, value) VALUES ('setup_completed', '1');");
+
+        // Ensure at least one admin has is_owner = 1
+        const hasOwner = users.some(u => u.is_owner === 1);
+        if (!hasOwner) {
+          const firstAdmin = users.find(u => u.role === 'admin') || users[0];
+          if (firstAdmin) {
+            this.db.run(`UPDATE app_users SET is_owner = 1 WHERE id = ${firstAdmin.id}`);
+          }
+        }
+
+        // Flag legacy default admin for mandatory password change
+        for (const u of users) {
+          if (u.username.toLowerCase() === 'admin' && (u.created_by === 'SYSTEM' || String(u.password_hash || '').includes('admin123'))) {
+            this.db.run(`UPDATE app_users SET must_change_password = 1 WHERE id = ${u.id}`);
+          }
+        }
       }
     } catch (e) {
-      console.warn('Seed admin error:', e);
+      console.warn('User migration error:', e);
     }
   }
 
   // Simple deterministic password hash (SHA-256-like using btoa for offline use)
-  _hashPassword(password) {
-    // XOR-based hash seeded with a secret — good enough for local offline POS
-    const secret = 'PHARMA_SEC_KEY_2026';
-    let hash = 0;
-    const str = password + secret;
-    for (let i = 0; i < str.length; i++) {
-      const char = str.charCodeAt(i);
-      hash = ((hash << 5) - hash) + char;
-      hash = hash & hash;
-    }
-    // Convert to positive hex string
-    const hex = Math.abs(hash).toString(16).padStart(16, '0');
-    // Add length-based component for extra uniqueness
-    const lenComponent = (password.length * 7919).toString(16).padStart(8, '0');
-    return hex + lenComponent + btoa(password.slice(0, 3) + secret.slice(0, 5)).replace(/=/g, '');
-  }
-
-  _verifyPassword(password, storedHash) {
-    return this._hashPassword(password) === storedHash;
-  }
-
-  _normalizePermissions(role, perms = {}) {
-    const defaults = {
-      admin: {
-        canViewReports: true,
-        canManageUsers: true,
-        canCloseShift: true,
-        canManageStock: true,
-        canViewProfits: true,
-        canManageSettings: true,
-        canDeleteInvoices: true,
-        canGiveDiscount: true,
-        canDiscount: true,
-        canEditPrice: true,
-        canDeleteItem: true,
-        canRefund: true,
-        canStockTake: true,
-        canViewAuditLog: true
-      },
-      pharmacist: {
-        canViewReports: true,
-        canManageUsers: false,
-        canCloseShift: true,
-        canManageStock: true,
-        canViewProfits: true,
-        canManageSettings: false,
-        canDeleteInvoices: false,
-        canGiveDiscount: true,
-        canDiscount: true,
-        canEditPrice: false,
-        canDeleteItem: false,
-        canRefund: true,
-        canStockTake: true,
-        canViewAuditLog: false
-      },
-      cashier: {
-        canViewReports: false,
-        canManageUsers: false,
-        canCloseShift: true,
-        canManageStock: false,
-        canViewProfits: false,
-        canManageSettings: false,
-        canDeleteInvoices: false,
-        canGiveDiscount: false,
-        canDiscount: false,
-        canEditPrice: false,
-        canDeleteItem: false,
-        canRefund: false,
-        canStockTake: false,
-        canViewAuditLog: false
-      }
-    };
-    const roleDefaults = defaults[role] || defaults.cashier;
-    return { ...roleDefaults, ...perms };
-  }
-
   setCurrentUser(user) {
     this._currentUser = user || null;
   }
@@ -676,73 +611,242 @@ class SQLiteService {
     }
   }
 
+  // --- SETUP STATE & OWNER CREATION API ---
+
+  async getSetupState() {
+    await this.init();
+    try {
+      const metaRes = this.db.exec("SELECT value FROM app_meta WHERE key = 'setup_completed' LIMIT 1");
+      const isCompleted = metaRes.length > 0 && metaRes[0].values.length > 0 && metaRes[0].values[0][0] === '1';
+
+      const userCountRes = this.db.exec("SELECT COUNT(*) FROM app_users");
+      const userCount = (userCountRes.length > 0 && userCountRes[0].values.length > 0) ? Number(userCountRes[0].values[0][0]) : 0;
+
+      return {
+        needsSetup: !isCompleted && userCount === 0,
+        setupCompleted: isCompleted,
+        userCount
+      };
+    } catch (e) {
+      console.warn('getSetupState error:', e);
+      return { needsSetup: false, setupCompleted: true, userCount: 1 };
+    }
+  }
+
+  async createOwner({ full_name, username, password }) {
+    await this.init();
+    const safeUser = String(username || '').trim();
+    const safeName = String(full_name || '').trim();
+
+    if (!safeUser || !safeName || !password) {
+      return { success: false, error: 'يرجى ملء جميع الحقول المطلوبة لإنشاء حساب المالك.' };
+    }
+
+    if (!/^[a-zA-Z0-9._-]+$/.test(safeUser) || safeUser.length < 3 || safeUser.length > 32) {
+      return { success: false, error: 'اسم المستخدم يجب أن يتراوح بين 3 و32 حرفاً إنجليزياً أو أرقاماً فقط.' };
+    }
+
+    const policy = validatePasswordPolicy(password, safeUser);
+    if (!policy.valid) {
+      return { success: false, error: policy.error };
+    }
+
+    const state = await this.getSetupState();
+    if (state.setupCompleted || state.userCount > 0) {
+      return { success: false, error: 'تم إعداد النظام مسبقاً ولا يمكن إنشاء حساب مالك جديد.' };
+    }
+
+    this.db.run('BEGIN TRANSACTION;');
+    try {
+      const hashed = await hashPassword(password);
+      const ownerPerms = normalizePermissions('admin', {});
+
+      const stmt = this.db.prepare(`
+        INSERT INTO app_users (username, password_hash, full_name, role, is_active, created_at, created_by, permissions, is_owner, must_change_password)
+        VALUES (?, ?, ?, 'admin', 1, ?, 'SELF_SETUP', ?, 1, 0)
+      `);
+      stmt.run([
+        safeUser,
+        hashed,
+        safeName,
+        new Date().toISOString(),
+        JSON.stringify(ownerPerms)
+      ]);
+      stmt.free();
+
+      this.db.run("INSERT OR REPLACE INTO app_meta (key, value) VALUES ('setup_completed', '1');");
+      this._recordAuditLogInternal(safeUser, 'OWNER_CREATE', 'app_users', safeUser, `إنشاء حساب المالك والمدير العام لأول مرة [${safeUser}]`);
+
+      this.db.run('COMMIT;');
+      this.saveToDisk();
+
+      const userRes = this.db.exec(`SELECT * FROM app_users WHERE username = '${safeUser.replace(/'/g, "''")}' LIMIT 1`);
+      const user = this._formatRows(userRes)[0];
+      const { password_hash, ...safeUserObj } = user;
+      const loggedUser = { ...safeUserObj, permissions: ownerPerms };
+      this.setCurrentUser(loggedUser);
+
+      return { success: true, user: loggedUser };
+    } catch (err) {
+      this.db.run('ROLLBACK;');
+      return { success: false, error: err.message || 'حدث خطأ أثناء إنشاء حساب المالك.' };
+    }
+  }
+
   // --- USER MANAGEMENT API ---
 
   async loginUser(username, password) {
     await this.init();
-    const safeUser = String(username).trim().replace(/'/g, "''");
+    const safeUser = String(username).trim();
+    if (!safeUser || !password) {
+      return { success: false, error: 'اسم المستخدم أو كلمة المرور غير صحيحة.' };
+    }
+
     const res = this.db.exec(`
       SELECT * FROM app_users 
-      WHERE username = '${safeUser}' COLLATE NOCASE 
-      AND is_active = 1 
+      WHERE username = '${safeUser.replace(/'/g, "''")}' COLLATE NOCASE 
       LIMIT 1
     `);
     const rows = this._formatRows(res);
     if (!rows || rows.length === 0) {
-      return { success: false, error: 'اسم المستخدم غير موجود أو تم تعطيل الحساب.' };
+      // Unified error message preventing user enumeration
+      return { success: false, error: 'اسم المستخدم أو كلمة المرور غير صحيحة.' };
     }
+
     const user = rows[0];
-    if (!this._verifyPassword(password, user.password_hash)) {
-      return { success: false, error: 'كلمة المرور غير صحيحة. حاول مجدداً.' };
+
+    // Check account status
+    if (user.is_active === 0) {
+      return { success: false, error: 'تم تعطيل هذا الحساب. يرجى مراجعة إدارة الصيدلية.' };
     }
-    // Update last login
-    this.db.run(`UPDATE app_users SET last_login = '${new Date().toISOString()}' WHERE id = ${user.id}`);
+
+    // Rate Limiting & Account Lock check
+    const now = Date.now();
+    if (user.locked_until) {
+      const lockUntil = new Date(user.locked_until).getTime();
+      if (now < lockUntil) {
+        const remainingSec = Math.ceil((lockUntil - now) / 1000);
+        return { success: false, error: `تم قفل الحساب مؤقتاً لتكرار المحاولات الخاطئة. يرجى الانتظار ${remainingSec} ثانية.` };
+      }
+    }
+
+    // Verify password securely
+    const check = await verifyPassword(password, user.password_hash);
+    if (!check.valid) {
+      const newAttempts = (Number(user.failed_attempts) || 0) + 1;
+      let lockStmt = '';
+      if (newAttempts >= 5) {
+        const lockUntilIso = new Date(now + 60000).toISOString();
+        lockStmt = `, locked_until = '${lockUntilIso}', failed_attempts = 0`;
+      } else {
+        lockStmt = `, failed_attempts = ${newAttempts}`;
+      }
+      this.db.run(`UPDATE app_users SET id = ${user.id} ${lockStmt} WHERE id = ${user.id}`);
+      this.saveToDisk();
+
+      if (newAttempts >= 5) {
+        return { success: false, error: 'تم تجاوز الحد الأقصى للمحاولات الخاطئة (5). تم قفل الحساب لمدة 60 ثانية.' };
+      }
+      return { success: false, error: 'اسم المستخدم أو كلمة المرور غير صحيحة.' };
+    }
+
+    // Success: Reset rate limit counters and re-hash legacy password if needed
+    let updateSql = `UPDATE app_users SET last_login = '${new Date().toISOString()}', failed_attempts = 0, locked_until = NULL`;
+    if (check.needsRehash) {
+      const newHash = await hashPassword(password);
+      const stmt = this.db.prepare('UPDATE app_users SET password_hash = ? WHERE id = ?');
+      stmt.run([newHash, user.id]);
+      stmt.free();
+    }
+    this.db.run(`${updateSql} WHERE id = ${user.id}`);
     this.saveToDisk();
+
     const { password_hash, ...safeUser2 } = user;
     let permissions = {};
     try { permissions = JSON.parse(user.permissions || '{}'); } catch (e) {}
-    permissions = this._normalizePermissions(user.role, permissions);
+    permissions = normalizePermissions(user.role, permissions);
     const loggedUser = { ...safeUser2, permissions };
     this.setCurrentUser(loggedUser);
     return { success: true, user: loggedUser };
   }
 
+  async changeUserPassword(userId, newPassword) {
+    await this.init();
+    const userRes = this.db.exec(`SELECT * FROM app_users WHERE id = ${Number(userId)} LIMIT 1`);
+    const users = this._formatRows(userRes);
+    if (!users.length) return { success: false, error: 'المستخدم غير موجود.' };
+    const user = users[0];
+
+    const policy = validatePasswordPolicy(newPassword, user.username);
+    if (!policy.valid) return { success: false, error: policy.error };
+
+    const hashed = await hashPassword(newPassword);
+    const stmt = this.db.prepare(`UPDATE app_users SET password_hash = ?, must_change_password = 0 WHERE id = ?`);
+    stmt.run([hashed, user.id]);
+    stmt.free();
+
+    this._recordAuditLogInternal(user.username, 'USER_PASSWORD_CHANGE', 'app_users', user.username, `تغيير كلمة المرور للمستخدم [${user.username}]`);
+    this.saveToDisk();
+    return { success: true, message: 'تم تحديث كلمة المرور بنجاح.' };
+  }
+
   async getUsers() {
     await this.init();
-    const res = this.db.exec(`SELECT id, username, full_name, role, is_active, created_at, last_login, permissions FROM app_users ORDER BY id ASC`);
+    const res = this.db.exec(`SELECT id, username, full_name, role, is_active, created_at, last_login, permissions, is_owner, must_change_password FROM app_users ORDER BY id ASC`);
     const rows = this._formatRows(res);
     return rows.map(u => {
       let permissions = {};
       try { permissions = JSON.parse(u.permissions || '{}'); } catch (e) {}
-      permissions = this._normalizePermissions(u.role, permissions);
+      permissions = normalizePermissions(u.role, permissions);
       return { ...u, permissions };
     });
   }
 
-  async createUser({ username, password, full_name, role = 'cashier', permissions = {}, created_by = 'admin' }) {
+  async createUser({ username, password, full_name, role = 'cashier', permissions = {}, created_by = 'admin', actor = null }) {
     await this.init();
+    const effectiveActor = actor || this._currentUser || { role: 'admin', is_owner: 1, permissions: {} };
     const safeUsername = String(username).trim();
+
     if (!safeUsername || !password || !full_name) {
       return { success: false, error: 'يجب ملء جميع الحقول المطلوبة.' };
     }
-    if (password.length < 4) {
-      return { success: false, error: 'كلمة المرور يجب أن تكون 4 أحرف على الأقل.' };
+
+    if (!/^[a-zA-Z0-9._-]+$/.test(safeUsername) || safeUsername.length < 3 || safeUsername.length > 32) {
+      return { success: false, error: 'اسم المستخدم يجب أن يتراوح بين 3 و32 حرفاً إنجليزياً أو أرقاماً فقط.' };
     }
+
+    const policy = validatePasswordPolicy(password, safeUsername);
+    if (!policy.valid) {
+      return { success: false, error: policy.error };
+    }
+
+    // Role Escalation Check
+    const escalCheck = canManageUser({
+      actor: effectiveActor,
+      action: 'create',
+      requestedRole: role,
+      requestedPermissions: permissions
+    });
+    if (!escalCheck.allowed) {
+      return { success: false, error: escalCheck.error };
+    }
+
     // Check username uniqueness
     const existing = this.db.exec(`SELECT id FROM app_users WHERE username = '${safeUsername.replace(/'/g,"''")}' COLLATE NOCASE`);
     if (existing.length > 0 && existing[0].values.length > 0) {
       return { success: false, error: 'اسم المستخدم موجود مسبقاً. اختر اسماً آخر.' };
     }
 
-    const defaultPermissions = this._normalizePermissions(role, permissions);
+    const defaultPermissions = normalizePermissions(role, permissions);
+    const hashed = await hashPassword(password);
 
     const stmt = this.db.prepare(`
-      INSERT INTO app_users (username, password_hash, full_name, role, is_active, created_at, created_by, permissions)
-      VALUES (?, ?, ?, ?, 1, ?, ?, ?)
+      INSERT INTO app_users (username, password_hash, full_name, role, is_active, created_at, created_by, permissions, is_owner, must_change_password)
+      VALUES (?, ?, ?, ?, 1, ?, ?, ?, 0, 0)
     `);
     stmt.run([
       safeUsername,
-      this._hashPassword(password),
+      hashed,
       String(full_name).trim(),
       role,
       new Date().toISOString(),
@@ -755,41 +859,134 @@ class SQLiteService {
     return { success: true, message: `تم إنشاء حساب "${safeUsername}" بنجاح.` };
   }
 
-  async updateUser({ id, full_name, role, is_active, permissions, newPassword, updated_by = 'admin' }) {
+  async updateUser({ id, full_name, role, is_active, permissions, newPassword, updated_by = 'admin', actor = null }) {
     await this.init();
     if (!id) return { success: false, error: 'معرف المستخدم مطلوب.' };
+    const effectiveActor = actor || this._currentUser || { role: 'admin', is_owner: 1, permissions: {} };
 
-    const setParts = [];
-    if (full_name !== undefined) setParts.push(`full_name = '${String(full_name).replace(/'/g,"''")}'`);
-    if (role !== undefined) setParts.push(`role = '${String(role).replace(/'/g,"''")}'`);
-    if (is_active !== undefined) setParts.push(`is_active = ${is_active ? 1 : 0}`);
-    if (permissions !== undefined) setParts.push(`permissions = '${JSON.stringify(permissions).replace(/'/g,"''")}'`);
-    if (newPassword) {
-      if (newPassword.length < 4) return { success: false, error: 'كلمة المرور يجب أن تكون 4 أحرف على الأقل.' };
-      setParts.push(`password_hash = '${this._hashPassword(newPassword)}'`);
+    const userRes = this.db.exec(`SELECT * FROM app_users WHERE id = ${id}`);
+    const targetUser = this._formatRows(userRes)[0];
+    if (!targetUser) return { success: false, error: 'المستخدم غير موجود.' };
+
+    const adminsRes = this.db.exec(`SELECT id FROM app_users WHERE role = 'admin' AND is_active = 1`);
+    const totalAdminsCount = this._formatRows(adminsRes).length;
+
+    const escalCheck = canManageUser({
+      actor: effectiveActor,
+      targetUser,
+      action: 'update',
+      requestedRole: role,
+      requestedPermissions: permissions,
+      totalAdminsCount
+    });
+    if (!escalCheck.allowed) {
+      return { success: false, error: escalCheck.error };
     }
 
-    if (setParts.length === 0) return { success: false, error: 'لا توجد بيانات للتحديث.' };
-    this.db.run(`UPDATE app_users SET ${setParts.join(', ')} WHERE id = ${id}`);
-    this._recordAuditLogInternal(updated_by, 'USER_UPDATE', 'app_users', String(id), `تعديل بيانات المستخدم #${id}`);
-    this.saveToDisk();
-    return { success: true, message: 'تم تحديث بيانات المستخدم بنجاح.' };
+    if (newPassword) {
+      const policy = validatePasswordPolicy(newPassword, targetUser.username);
+      if (!policy.valid) return { success: false, error: policy.error };
+    }
+
+    this.db.run('BEGIN TRANSACTION;');
+    try {
+      const setParts = [];
+      if (full_name !== undefined) setParts.push(`full_name = '${String(full_name).replace(/'/g,"''")}'`);
+      if (role !== undefined) setParts.push(`role = '${String(role).replace(/'/g,"''")}'`);
+      if (is_active !== undefined) setParts.push(`is_active = ${is_active ? 1 : 0}`);
+      if (permissions !== undefined) setParts.push(`permissions = '${JSON.stringify(permissions).replace(/'/g,"''")}'`);
+      
+      if (setParts.length > 0) {
+        this.db.run(`UPDATE app_users SET ${setParts.join(', ')} WHERE id = ${id}`);
+      }
+
+      if (newPassword) {
+        const hashed = await hashPassword(newPassword);
+        const stmt = this.db.prepare('UPDATE app_users SET password_hash = ? WHERE id = ?');
+        stmt.run([hashed, id]);
+        stmt.free();
+      }
+
+      this._recordAuditLogInternal(updated_by, 'USER_UPDATE', 'app_users', String(id), `تعديل بيانات المستخدم #${id}`);
+      this.db.run('COMMIT;');
+      this.saveToDisk();
+      return { success: true, message: 'تم تحديث بيانات المستخدم بنجاح.' };
+    } catch (e) {
+      this.db.run('ROLLBACK;');
+      return { success: false, error: e.message || 'حدث خطأ أثناء تعديل المستخدم.' };
+    }
   }
 
-  async deleteUser(id, deleted_by = 'admin') {
+  async deleteUser(id, deleted_by = 'admin', actor = null) {
     await this.init();
-    // Prevent deleting the last admin
-    const admins = this.db.exec(`SELECT id FROM app_users WHERE role = 'admin' AND is_active = 1`);
-    const adminRows = this._formatRows(admins);
-    const userRes = this.db.exec(`SELECT role, username FROM app_users WHERE id = ${id}`);
-    const userRow = this._formatRows(userRes)[0];
-    if (userRow?.role === 'admin' && adminRows.length <= 1) {
-      return { success: false, error: 'لا يمكن حذف المدير الوحيد في النظام.' };
+    const effectiveActor = actor || this._currentUser || { role: 'admin', is_owner: 1, permissions: {} };
+
+    const userRes = this.db.exec(`SELECT * FROM app_users WHERE id = ${id}`);
+    const targetUser = this._formatRows(userRes)[0];
+    if (!targetUser) return { success: false, error: 'المستخدم غير موجود.' };
+
+    const adminsRes = this.db.exec(`SELECT id FROM app_users WHERE role = 'admin' AND is_active = 1`);
+    const totalAdminsCount = this._formatRows(adminsRes).length;
+
+    const escalCheck = canManageUser({
+      actor: effectiveActor,
+      targetUser,
+      action: 'delete',
+      totalAdminsCount
+    });
+    if (!escalCheck.allowed) {
+      return { success: false, error: escalCheck.error };
     }
-    this.db.run(`DELETE FROM app_users WHERE id = ${id}`);
-    this._recordAuditLogInternal(deleted_by, 'USER_DELETE', 'app_users', String(id), `حذف المستخدم [${userRow?.username || id}]`);
-    this.saveToDisk();
-    return { success: true, message: 'تم حذف المستخدم.' };
+
+    this.db.run('BEGIN TRANSACTION;');
+    try {
+      this.db.run(`DELETE FROM app_users WHERE id = ${id}`);
+      this._recordAuditLogInternal(deleted_by, 'USER_DELETE', 'app_users', String(id), `حذف المستخدم [${targetUser.username}]`);
+      this.db.run('COMMIT;');
+      this.saveToDisk();
+      return { success: true, message: 'تم حذف المستخدم بنجاح.' };
+    } catch (e) {
+      this.db.run('ROLLBACK;');
+      return { success: false, error: e.message || 'حدث خطأ أثناء حذف المستخدم.' };
+    }
+  }
+
+  // --- REVOCATION LIST API ---
+
+  async getRevocations() {
+    await this.init();
+    try {
+      const res = this.db.exec('SELECT * FROM license_revocations ORDER BY imported_at DESC');
+      return this._formatRows(res);
+    } catch (e) {
+      return [];
+    }
+  }
+
+  async importRevocations(items) {
+    await this.init();
+    if (!Array.isArray(items) || items.length === 0) {
+      return { success: false, error: 'لا توجد عناصر إلغاء في القائمة.' };
+    }
+
+    this.db.run('BEGIN TRANSACTION;');
+    try {
+      const stmt = this.db.prepare(`
+        INSERT OR REPLACE INTO license_revocations (lid, mid, reason, revoked_at, imported_at)
+        VALUES (?, ?, ?, ?, ?)
+      `);
+      const nowIso = new Date().toISOString();
+      for (const item of items) {
+        stmt.run([item.lid, item.mid || '', item.reason || '', item.at || nowIso, nowIso]);
+      }
+      stmt.free();
+      this.db.run('COMMIT;');
+      this.saveToDisk();
+      return { success: true, count: items.length };
+    } catch (e) {
+      this.db.run('ROLLBACK;');
+      return { success: false, error: e.message || 'فشل استيراد قائمة الإلغاءات.' };
+    }
   }
 
   // --- 1. MEDICINES API (30,000 Records High-Speed Search) ---
