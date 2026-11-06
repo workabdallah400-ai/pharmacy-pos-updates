@@ -167,7 +167,21 @@ export function TopHeader({
     day: 'numeric'
   });
 
-  
+  // License badge label derived from the real license state (not a fixed text)
+  const licenseStatus = licenseInfo?.status || 'UNLICENSED';
+  const isLicensed = !!licenseInfo?.isLicensed;
+  let licenseLabel = 'نسخة رسمية مفعلة ✓';
+  let licenseClasses = 'bg-teal-500/10 border-teal-500/30 text-teal-300';
+  let licenseIconClass = 'text-teal-400';
+  if (!isLicensed) {
+    licenseLabel = licenseStatus === 'REVOKED' ? 'الترخيص ملغي 🚫' : 'الترخيص غير مفعل ⚠️';
+    licenseClasses = 'bg-rose-500/10 border-rose-500/30 text-rose-300';
+    licenseIconClass = 'text-rose-400';
+  } else if (licenseStatus === 'DURATION' || licenseStatus === 'ANNUAL') {
+    licenseLabel = `مرخص حتى ${licenseInfo?.expiresAt || '—'}${licenseInfo?.daysRemaining != null ? ` (${licenseInfo.daysRemaining} يوم)` : ''}`;
+    licenseClasses = 'bg-amber-500/10 border-amber-500/30 text-amber-300';
+    licenseIconClass = 'text-amber-400';
+  }
 
   return (
     <header className="h-14 w-full bg-[#111A2B] border-b border-[#23324D] px-4 flex items-center justify-between text-slate-200 select-none z-30 shrink-0 relative">
@@ -265,7 +279,16 @@ export function TopHeader({
           </div>
         </button>
 
-        
+        {/* Official License Badge */}
+        <button
+          type="button"
+          onClick={() => { if (typeof onOpenActivation === 'function') onOpenActivation(); }}
+          title={licenseInfo?.licenseKey || 'إدارة الترخيص'}
+          className={`flex items-center gap-1.5 border px-2.5 py-1 rounded-xl text-xs font-semibold transition-all hover:brightness-125 cursor-pointer ${licenseClasses}`}
+        >
+          <Sparkles className={`w-3.5 h-3.5 ${licenseIconClass}`} />
+          <span>{licenseLabel}</span>
+        </button>
 
         {/* Windows Desktop Control Buttons */}
         <div className="flex items-center gap-1 mr-2 border-r border-[#23324D] pr-3">
