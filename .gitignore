@@ -3,3 +3,6 @@ dist/
 dist-installer/
 *.db
 *.exe
+private/
+*.enc.json
+

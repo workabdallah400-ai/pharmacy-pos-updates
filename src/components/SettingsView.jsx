@@ -39,6 +39,8 @@ import {
 import { DEFAULT_SETTINGS } from '../data/mockSettings';
 import { playBarcodeBeep, playCashDrawerSound } from '../utils/sound';
 import { activateLicenseKey, getMachineId, checkLicenseStatus, revokeLicense } from '../utils/licenseManager';
+import { LICENSE_PUBLIC_KEYS } from '../utils/licensePublicKey';
+import { verifyRevocationList } from '../utils/revocationList';
 import { UsersManagementView } from './UsersManagementView';
 import { sqliteService } from '../db/sqliteService';
 import { hasPermission } from '../utils/permissions';
@@ -153,6 +155,9 @@ export function SettingsView({ onUpdatePharmacyName, onRevokeDevice, currentUser
     setActiveTab(initialTab);
   }, [initialTab]);
 
+  const [revocationsCount, setRevocationsCount] = useState(0);
+  const [importingRevocations, setImportingRevocations] = useState(false);
+
   useEffect(() => {
     async function loadLicense() {
       try {
@@ -161,6 +166,8 @@ export function SettingsView({ onUpdatePharmacyName, onRevokeDevice, currentUser
         if (res.licenseKey && !enteredLicenseKey) {
           setEnteredLicenseKey(res.licenseKey);
         }
+        const revs = await sqliteService.getRevocations();
+        setRevocationsCount(revs ? revs.length : 0);
       } catch (e) {}
     }
     loadLicense();
@@ -385,14 +392,14 @@ export function SettingsView({ onUpdatePharmacyName, onRevokeDevice, currentUser
     if (res.success) {
       setSettings((prev) => ({
         ...prev,
-        licenseKey: enteredLicenseKey.trim().toUpperCase(),
+        licenseKey: enteredLicenseKey.trim(),
         licenseStatus: res.status
       }));
       setLicenseState({
         isLicensed: true,
         status: res.status,
         machineId: getMachineId(),
-        licenseKey: enteredLicenseKey.trim().toUpperCase()
+        licenseKey: enteredLicenseKey.trim()
       });
 
       playCashDrawerSound();
@@ -400,6 +407,36 @@ export function SettingsView({ onUpdatePharmacyName, onRevokeDevice, currentUser
     } else {
       playBarcodeBeep();
       showToast(res.error || 'مفتاح الترخيص غير صالح');
+    }
+  };
+
+  // Import Signed Revocations List (revocations.json)
+  const handleImportRevocations = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+
+    setImportingRevocations(true);
+    try {
+      const text = await file.text();
+      const verified = await verifyRevocationList(text, LICENSE_PUBLIC_KEYS);
+      const res = await sqliteService.importRevocations(verified.items);
+      if (res.success) {
+        setRevocationsCount(res.count);
+        playCashDrawerSound();
+        showToast(`✅ تم استيراد وتحديث ${res.count} ترخيص ملغى وموقع رقمياً.`);
+        // Re-check current license in case it was revoked
+        const status = await checkLicenseStatus();
+        setLicenseState(status);
+      } else {
+        playBarcodeBeep();
+        showToast(res.error || 'فشل حفظ قائمة الإلغاءات في قاعدة البيانات.');
+      }
+    } catch (err) {
+      playBarcodeBeep();
+      showToast(err.message || 'فشل التحقق من قائمة الإلغاءات.');
+    } finally {
+      setImportingRevocations(false);
+      e.target.value = '';
     }
   };
 
@@ -1089,26 +1126,70 @@ export function SettingsView({ onUpdatePharmacyName, onRevokeDevice, currentUser
 
                 {/* Form to Upgrade/Re-enter License Key */}
                 <form onSubmit={handleActivateLicense} className="pt-2 border-t border-[#23324D] space-y-2.5">
-                  <label className="block text-xs font-bold text-slate-300">
-                    إدخال مفتاح ترخيص جديد أو تجديد:
-                  </label>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="text"
-                      value={enteredLicenseKey}
-                      onChange={(e) => setEnteredLicenseKey(e.target.value.toUpperCase())}
-                      placeholder="LIC-LIFE-XXXX-XXXX-XXXX"
-                      className="flex-1 bg-[#0B1220] border border-[#23324D] focus:border-teal-400 rounded-xl px-3.5 py-2.5 text-xs text-white font-mono font-bold focus:outline-none uppercase"
-                    />
+                  <div className="flex items-center justify-between">
+                    <label className="block text-xs font-bold text-slate-300">
+                      إدخال مفتاح ترخيص جديد أو تجديد (LIC2...):
+                    </label>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          const text = await navigator.clipboard.readText();
+                          if (text) {
+                            setEnteredLicenseKey(text.trim());
+                            showToast('تم لصق المفتاح من الحافظة 📋');
+                          }
+                        } catch (e) {
+                          showToast('تعذر الوصول للحافظة، الصق يدوياً.');
+                        }
+                      }}
+                      className="text-[11px] text-teal-400 hover:text-teal-300 flex items-center gap-1 font-bold cursor-pointer"
+                    >
+                      <Copy className="w-3 h-3" />
+                      <span>لصق من الحافظة</span>
+                    </button>
+                  </div>
+                  <textarea
+                    rows={3}
+                    value={enteredLicenseKey}
+                    onChange={(e) => setEnteredLicenseKey(e.target.value.trim())}
+                    placeholder="الصق كود التفعيل هنا (يبدأ بـ LIC2. أو المفتاح الكلاسيكي)..."
+                    className="w-full bg-[#0B1220] border border-[#23324D] focus:border-teal-400 rounded-xl px-3.5 py-2 text-xs text-white font-mono leading-relaxed focus:outline-none resize-none break-all"
+                  />
+                  <div className="flex justify-end">
                     <button
                       type="submit"
-                      className="px-5 py-2.5 rounded-xl bg-teal-500 hover:bg-teal-400 text-slate-950 text-xs font-black shadow-lg shadow-teal-500/20 flex items-center gap-1.5 transition-all shrink-0 cursor-pointer"
+                      className="px-5 py-2.5 rounded-xl bg-teal-500 hover:bg-teal-400 text-slate-950 text-xs font-black shadow-lg shadow-teal-500/20 flex items-center gap-1.5 transition-all cursor-pointer"
                     >
                       <Key className="w-4 h-4" />
-                      <span>تحديث الترخيص 🔑</span>
+                      <span>تحديث وتفعيل الترخيص 🔑</span>
                     </button>
                   </div>
                 </form>
+
+                {/* Revocation List Section */}
+                <div className="pt-3 border-t border-[#23324D] space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="block text-xs font-bold text-slate-200">قائمة التراخيص الملغاة (Signed Revocations):</span>
+                      <span className="text-[11px] text-slate-400">
+                        {revocationsCount > 0
+                          ? `يوجد حالياً ${revocationsCount} ترخيص ملغى ومسجل في قاعدة البيانات.`
+                          : 'لا توجد تراخيص ملغاة مسجلة حالياً.'}
+                      </span>
+                    </div>
+                    <label className={`px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-teal-300 text-xs font-bold flex items-center gap-2 cursor-pointer transition-all ${importingRevocations ? 'opacity-50 pointer-events-none' : ''}`}>
+                      <Upload className="w-3.5 h-3.5" />
+                      <span>{importingRevocations ? 'جارٍ الاستيراد...' : 'استيراد قائمة الإلغاءات (JSON)'}</span>
+                      <input
+                        type="file"
+                        accept=".json"
+                        onChange={handleImportRevocations}
+                        className="hidden"
+                      />
+                    </label>
+                  </div>
+                </div>
 
                 {/* 🔥 Supervisory Action: Revoke & Deactivate Device Button */}
                 <div className="pt-3 border-t border-[#23324D] flex flex-wrap items-center justify-between gap-3">

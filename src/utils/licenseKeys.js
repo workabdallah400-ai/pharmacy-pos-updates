@@ -3,6 +3,7 @@
  * plain Node (scripts/generate-license-key.mjs) as well as in the app.
  */
 
+// LEGACY VERIFICATION ONLY — Do not use for any new licenses
 export const MASTER_SECRET = 'PHARMACY_POS_MASTER_SECRET_2026';
 
 /**
@@ -31,11 +32,11 @@ export async function sha256Hex(str) {
 }
 
 function cleanMachineId(machineId) {
-  return String(machineId || 'EGYP-B009-4237-53D2').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+  return String(machineId || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
 }
 
 /**
- * Generate official Activation Key matching Machine ID & Duration
+ * Generate legacy Activation Key matching Machine ID & Duration (LEGACY ONLY)
  */
 export async function generateActivationKey(machineId, daysOrDate = 'LIFETIME') {
   const cleanMid = cleanMachineId(machineId);
@@ -59,22 +60,4 @@ export async function generateActivationKey(machineId, daysOrDate = 'LIFETIME') 
 
   const expHash = await sha256Hex(cleanMid + '-EXP-' + ymd + '-' + MASTER_SECRET);
   return 'LIC-EXP-' + ymd + '-' + expHash.substring(0, 4) + '-' + expHash.substring(4, 8);
-}
-
-/**
- * Generate Master Admin PIN Reset Code
- */
-export async function generateResetCode(machineId) {
-  const cleanMid = cleanMachineId(machineId);
-  const rstHash = await sha256Hex(cleanMid + '-RESET-' + MASTER_SECRET);
-  return 'RST-ADMIN-' + rstHash.substring(0, 4) + '-' + rstHash.substring(4, 8);
-}
-
-/**
- * Generate Revoke / Kill Code
- */
-export async function generateRevokeCode(machineId) {
-  const cleanMid = cleanMachineId(machineId);
-  const revHash = await sha256Hex(cleanMid + '-REVOKE-' + MASTER_SECRET);
-  return 'REV-KILL-' + revHash.substring(0, 4) + '-' + revHash.substring(4, 8);
 }

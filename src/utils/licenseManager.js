@@ -2,32 +2,81 @@ import { sqliteService } from '../db/sqliteService.js';
 import {
   MASTER_SECRET,
   sha256Hex,
-  generateActivationKey,
-  generateResetCode,
-  generateRevokeCode
+  generateActivationKey
 } from './licenseKeys.js';
+import { CURRENT_KID, LICENSE_PUBLIC_KEYS } from './licensePublicKey.js';
+import { verifyLicenseToken, decodeToken } from './licenseToken.js';
+import {
+  normalizeMacList,
+  parseWindowsMachineGuid,
+  buildMachineId,
+  resolveMachineIdentity
+} from './machineId.js';
 
-export { MASTER_SECRET, sha256Hex, generateActivationKey, generateResetCode, generateRevokeCode };
+export { MASTER_SECRET, sha256Hex, generateActivationKey };
 
 const LICENSE_STORAGE_KEY = 'PHARMACY_LICENSE_DATA';
 const MACHINE_ID_STORAGE_KEY = 'PHARMACY_MACHINE_ID';
 const LAST_TIME_STORAGE_KEY = 'PHARMACY_SYS_CLOCK_TIMESTAMP';
 
-// Keys issued by the developer that are valid regardless of the machine ID.
-const MASTER_LIFETIME_KEYS = [
-  'LIC-LIFE-7729-9941-EGYP',
-  'LIC-LIFE-0120-1395-2430', // Developer Eng. Abdullah Gamil
-  'LIC-LIFE-2026-PHAR-EGYP'
-];
+/**
+ * Computes hardware-bound Machine ID without storing a static default.
+ * In Electron, network interfaces are read from Node 'os' and MachineGuid from Windows Registry.
+ */
+export function getMachineId() {
+  let hardwareMid = '';
+  let source = 'WEB';
+
+  // Check Electron environment
+  if (typeof window !== 'undefined' && window.require) {
+    try {
+      const os = window.require('os');
+      const interfaces = os.networkInterfaces();
+      const macs = normalizeMacList(interfaces);
+
+      let guid = '';
+      if (!macs.length) {
+        try {
+          const cp = window.require('child_process');
+          const rawReg = cp.execSync('reg query "HKLM\\SOFTWARE\\Microsoft\\Cryptography" /v MachineGuid', { encoding: 'utf8' });
+          guid = parseWindowsMachineGuid(rawReg);
+        } catch (e) {}
+      }
+
+      hardwareMid = buildMachineId(macs, guid);
+      source = macs.length ? 'MAC' : 'GUID';
+    } catch (e) {
+      console.warn('Hardware identification error in Electron:', e);
+    }
+  }
+
+  // Web Browser Fallback
+  if (!hardwareMid) {
+    try {
+      const stored = localStorage.getItem(MACHINE_ID_STORAGE_KEY);
+      if (stored && stored.startsWith('EGYP-')) {
+        return stored;
+      }
+      // Generate synthetic ID for browser development session
+      const rand = Array.from({ length: 12 }, () => Math.floor(Math.random() * 16).toString(16).toUpperCase()).join('');
+      hardwareMid = `EGYP-${rand.slice(0, 4)}-${rand.slice(4, 8)}-${rand.slice(8, 12)}`;
+      localStorage.setItem(MACHINE_ID_STORAGE_KEY, hardwareMid);
+      return hardwareMid;
+    } catch (e) {
+      throw new Error('تعذر تحديد هوية العتاد للجهاز. لا توجد بيئة تخزين صالحة.');
+    }
+  }
+
+  return hardwareMid;
+}
 
 /**
- * Verify that a stored license key really belongs to this machine.
- * Prevents copying a license record from another computer.
+ * Checks if a stored legacy v1 key is valid for this machine.
+ * LEGACY MIGRATION USE ONLY.
  */
-export async function isLicenseKeyValidForMachine(key, machineId) {
+export async function isLegacyKeyValid(key, machineId) {
   const cleanKey = String(key || '').trim().toUpperCase();
   if (!cleanKey) return false;
-  if (MASTER_LIFETIME_KEYS.includes(cleanKey)) return true;
 
   const expectedLife = await generateActivationKey(machineId, 'LIFETIME');
   if (cleanKey === expectedLife) return true;
@@ -52,50 +101,11 @@ export async function isLicenseKeyValidForMachine(key, machineId) {
 }
 
 /**
- * Deterministic SHA-256 Hex Generator using standard Web Crypto API
- */
-/**
- * Get or generate a persistent unique Machine ID for this computer
- * Format: EGYP-XXXX-YYYY-ZZZZ
- */
-export function getMachineId() {
-  try {
-    const existing = localStorage.getItem(MACHINE_ID_STORAGE_KEY);
-    if (existing && existing.startsWith('EGYP-')) return existing;
-
-    let seed = 'POS-NODE-PRODUCTION';
-    if (typeof window !== 'undefined' && window.require) {
-      try {
-        const os = window.require('os');
-        seed = `${os.hostname()}-${os.platform()}-${os.arch()}`;
-      } catch (e) {}
-    }
-
-    let h1 = 0xdeadbeef, h2 = 0x41c64e6d;
-    const str = seed + 'PHARMACY-PRO-NODE-2026';
-    for (let i = 0; i < str.length; i++) {
-      const ch = str.charCodeAt(i);
-      h1 = Math.imul(h1 ^ ch, 2654435761);
-      h2 = Math.imul(h2 ^ ch, 1597334677);
-    }
-    const combined = (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(16).toUpperCase();
-    const part1 = (combined.substring(0, 4) || 'B009').toUpperCase();
-    const part2 = (combined.substring(4, 8) || '4237').toUpperCase();
-    const part3 = (combined.substring(8, 12) || '53D2').toUpperCase();
-    const machineId = `EGYP-${part1}-${part2}-${part3}`;
-
-    localStorage.setItem(MACHINE_ID_STORAGE_KEY, machineId);
-    return machineId;
-  } catch (e) {
-    return 'EGYP-B009-4237-53D2';
-  }
-}
-
-/**
- * Check current license state from SQLite & LocalStorage
+ * Check current license state from SQLite & LocalStorage.
+ * Runs on every startup without bypass.
  */
 export async function checkLicenseStatus() {
-  const machineId = getMachineId();
+  const hardwareId = getMachineId();
 
   // 1. Anti-Tamper Clock Check
   const nowMs = Date.now();
@@ -120,17 +130,22 @@ export async function checkLicenseStatus() {
       isExpired: true,
       status: 'CLOCK_TAMPER',
       trialDaysRemaining: 0,
-      machineId,
+      machineId: hardwareId,
       licenseKey: '',
       activatedAt: '',
       expiresAt: ''
     };
   }
 
-  // 2. Fetch records
+  // 2. Fetch records from SQLite and localStorage
   let dbLicense = null;
+  let revokedLids = new Set();
   try {
     dbLicense = await sqliteService.getLicenseInfo();
+    const revs = await sqliteService.getRevocations();
+    if (Array.isArray(revs)) {
+      revs.forEach((r) => revokedLids.add(r.lid));
+    }
   } catch (e) {
     console.warn('SQLite license fetch error, falling back to localStorage:', e);
   }
@@ -141,11 +156,12 @@ export async function checkLicenseStatus() {
     if (saved) localLicense = JSON.parse(saved);
   } catch (e) {}
 
-  const activeStatus = dbLicense?.license_status || localLicense?.license_status || 'UNLICENSED';
-  const activeKey = dbLicense?.license_key || localLicense?.license_key || '';
+  const activeKey = String(dbLicense?.license_key || localLicense?.license_key || '').trim();
   const activatedAt = dbLicense?.activated_at || localLicense?.activated_at || '';
+  const storedMachineId = dbLicense?.machine_id || localLicense?.machine_id || '';
+  const activeStatus = dbLicense?.license_status || localLicense?.license_status || 'UNLICENSED';
 
-  // 3. Check if Revoked
+  // 3. Status check: REVOKED
   if (activeStatus === 'REVOKED') {
     return {
       isLicensed: false,
@@ -153,109 +169,161 @@ export async function checkLicenseStatus() {
       isExpired: true,
       status: 'REVOKED',
       trialDaysRemaining: 0,
-      machineId,
+      machineId: hardwareId,
       licenseKey: '',
       activatedAt,
       expiresAt: ''
     };
   }
 
-  // 4. Check if Expired Key (LIC-EXP-YYYYMMDD-...) or ANNUAL
-  if (activeKey.startsWith('LIC-EXP-') || activeStatus === 'ANNUAL' || activeStatus === 'DURATION') {
-    // Reject a duration key copied from another machine
-    if (activeKey.startsWith('LIC-EXP-') && !(await isLicenseKeyValidForMachine(activeKey, machineId))) {
+  // 4. Case: LIC2 Modern Token (Ed25519)
+  if (activeKey.startsWith('LIC2.')) {
+    try {
+      const decoded = decodeToken(activeKey);
+
+      // Check if this specific lid was revoked in DB
+      if (decoded.payload.lid && revokedLids.has(decoded.payload.lid)) {
+        await revokeLicense(hardwareId, 'REVOKED_BY_LIST');
+        return {
+          isLicensed: false,
+          isExpired: true,
+          status: 'REVOKED',
+          machineId: hardwareId,
+          licenseKey: activeKey,
+          activatedAt
+        };
+      }
+
+      const res = await verifyLicenseToken(activeKey, {
+        machineId: hardwareId,
+        publicKeys: LICENSE_PUBLIC_KEYS,
+        now: nowMs,
+        revokedLids
+      });
+
+      if (res.valid) {
+        if (res.type === 'REVOKE') {
+          await revokeLicense(hardwareId, 'SIGNED_REVOKE_TOKEN');
+          return {
+            isLicensed: false,
+            isExpired: true,
+            status: 'REVOKED',
+            machineId: hardwareId,
+            licenseKey: activeKey,
+            activatedAt
+          };
+        }
+
+        if (res.type === 'TIMED') {
+          const expMs = new Date(res.expiresAt).getTime();
+          const daysRemaining = Math.max(0, Math.ceil((expMs - nowMs) / (1000 * 60 * 60 * 24)));
+          if (daysRemaining <= 0) {
+            return {
+              isLicensed: false,
+              isExpired: true,
+              status: 'EXPIRED',
+              machineId: hardwareId,
+              licenseKey: activeKey,
+              activatedAt,
+              expiresAt: res.expiresAt,
+              daysRemaining: 0
+            };
+          }
+
+          return {
+            isLicensed: true,
+            isExpired: false,
+            status: 'DURATION',
+            machineId: hardwareId,
+            licenseKey: activeKey,
+            activatedAt: activatedAt ? activatedAt.slice(0, 10) : '',
+            expiresAt: res.expiresAt.slice(0, 10),
+            daysRemaining,
+            lid: res.lid
+          };
+        }
+
+        // LIFETIME
+        return {
+          isLicensed: true,
+          isExpired: false,
+          status: 'LIFETIME',
+          machineId: hardwareId,
+          licenseKey: activeKey,
+          activatedAt: activatedAt ? activatedAt.slice(0, 10) : new Date().toISOString().slice(0, 10),
+          expiresAt: 'مدى الحياة (دائم)',
+          daysRemaining: 'دائم (غير محدود)',
+          lid: res.lid
+        };
+      }
+    } catch (err) {
+      console.warn('LIC2 verification failed:', err.message);
       return {
         isLicensed: false,
-        isTrial: false,
         isExpired: true,
         status: 'UNLICENSED',
-        trialDaysRemaining: 0,
-        machineId,
+        machineId: hardwareId,
         licenseKey: '',
         activatedAt: '',
-        expiresAt: ''
+        expiresAt: '',
+        error: err.message
       };
     }
-
-    let expiresAt = '';
-    let daysRemaining = 0;
-
-    if (activeKey.startsWith('LIC-EXP-')) {
-      const ymd = activeKey.substring(8, 16);
-      if (ymd.length === 8) {
-        const y = parseInt(ymd.substring(0, 4), 10);
-        const m = parseInt(ymd.substring(4, 6), 10) - 1;
-        const d = parseInt(ymd.substring(6, 8), 10);
-        const expDate = new Date(y, m, d, 23, 59, 59);
-        expiresAt = `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-        const diffMs = expDate.getTime() - nowMs;
-        daysRemaining = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
-      }
-    } else if (activatedAt) {
-      const actDate = new Date(activatedAt);
-      const expDate = new Date(actDate.getTime() + 365 * 24 * 60 * 60 * 1000);
-      expiresAt = expDate.toISOString().slice(0, 10);
-      const diffMs = expDate.getTime() - nowMs;
-      daysRemaining = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
-    }
-
-    if (daysRemaining <= 0) {
-      return {
-        isLicensed: false,
-        isTrial: false,
-        isExpired: true,
-        status: 'EXPIRED',
-        trialDaysRemaining: 0,
-        machineId,
-        licenseKey: activeKey,
-        activatedAt,
-        expiresAt,
-        daysRemaining: 0
-      };
-    }
-
-    return {
-      isLicensed: true,
-      isTrial: false,
-      isExpired: false,
-      status: 'DURATION',
-      trialDaysRemaining: 0,
-      machineId,
-      licenseKey: activeKey,
-      activatedAt: activatedAt ? activatedAt.slice(0, 10) : '',
-      expiresAt,
-      daysRemaining
-    };
   }
 
-  // 5. Check if Lifetime
-  if (activeStatus === 'LIFETIME' || activeKey.startsWith('LIC-LIFE-')) {
-    // Verify the key was issued for this machine (empty legacy keys are tolerated)
-    if (activeKey && !(await isLicenseKeyValidForMachine(activeKey, machineId))) {
-      return {
-        isLicensed: false,
-        isTrial: false,
-        isExpired: true,
-        status: 'UNLICENSED',
-        trialDaysRemaining: 0,
-        machineId,
-        licenseKey: '',
-        activatedAt: '',
-        expiresAt: ''
-      };
+  // 5. Case: Legacy grandfathered v1 license (Only tolerated if already stored and activated)
+  if (activatedAt && (activeKey.startsWith('LIC-LIFE-') || activeKey.startsWith('LIC-EXP-') || activeKey.startsWith('LIC-ANNUAL-'))) {
+    // Check if key is valid for hardwareId or storedMachineId
+    const keyValidForHardware = await isLegacyKeyValid(activeKey, hardwareId);
+    const keyValidForStored = storedMachineId ? await isLegacyKeyValid(activeKey, storedMachineId) : false;
+
+    if (keyValidForHardware || keyValidForStored) {
+      const resolved = resolveMachineIdentity({
+        hardwareId,
+        storedMachineId,
+        storedStatus: activeStatus,
+        keyValidForStoredId: keyValidForStored
+      });
+
+      if (activeKey.startsWith('LIC-LIFE-') || activeStatus === 'LIFETIME') {
+        return {
+          isLicensed: true,
+          isExpired: false,
+          status: 'LIFETIME',
+          isLegacy: true,
+          machineId: resolved.machineId,
+          licenseKey: activeKey,
+          activatedAt: activatedAt.slice(0, 10),
+          expiresAt: 'مدى الحياة (توافق قديم)',
+          daysRemaining: 'دائم'
+        };
+      }
+
+      if (activeKey.startsWith('LIC-EXP-')) {
+        const ymd = activeKey.substring(8, 16);
+        if (ymd.length === 8) {
+          const y = parseInt(ymd.substring(0, 4), 10);
+          const m = parseInt(ymd.substring(4, 6), 10) - 1;
+          const d = parseInt(ymd.substring(6, 8), 10);
+          const expDate = new Date(y, m, d, 23, 59, 59);
+          const diffMs = expDate.getTime() - nowMs;
+          const daysRemaining = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
+          if (daysRemaining > 0) {
+            return {
+              isLicensed: true,
+              isExpired: false,
+              status: 'DURATION',
+              isLegacy: true,
+              machineId: resolved.machineId,
+              licenseKey: activeKey,
+              activatedAt: activatedAt.slice(0, 10),
+              expiresAt: `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`,
+              daysRemaining
+            };
+          }
+        }
+      }
     }
-    return {
-      isLicensed: true,
-      isTrial: false,
-      isExpired: false,
-      status: 'LIFETIME',
-      trialDaysRemaining: 0,
-      machineId,
-      licenseKey: activeKey || 'LIC-LIFE-7729-9941-EGYP',
-      activatedAt: activatedAt ? activatedAt.slice(0, 10) : '2026-11-02',
-      expiresAt: 'مدى الحياة (غير محدد)',
-      daysRemaining: 'دائم (غير محدود)'
-    };
   }
 
   // 6. Unlicensed fresh install
@@ -265,7 +333,7 @@ export async function checkLicenseStatus() {
     isExpired: true,
     status: 'UNLICENSED',
     trialDaysRemaining: 0,
-    machineId,
+    machineId: hardwareId,
     licenseKey: '',
     activatedAt: '',
     expiresAt: ''
@@ -273,154 +341,83 @@ export async function checkLicenseStatus() {
 }
 
 /**
- * Validate and Activate License Key
- * Full support for:
- * 1. LIFETIME keys
- * 2. DURATION / EXPIRY keys (LIC-EXP-YYYYMMDD-XXXX-YYYY)
- * 3. Master Admin Reset Code (RST-ADMIN-...)
- * 4. Revocation / Kill Code (REV-KILL-... or REVOKE-...)
+ * Validates and activates license key.
+ * Only accepts LIC2 signed tokens for new activations.
  */
 export async function activateLicenseKey(rawKey) {
-  const cleanKey = (rawKey || '').trim().toUpperCase();
+  const cleanKey = String(rawKey || '').trim();
   const machineId = getMachineId();
-  const cleanMid = machineId.replace(/[^A-Z0-9]/g, '');
 
-  // 1. Support Master Admin PIN Reset Code (RST)
-  const expectedResetCode = await generateResetCode(machineId);
-
-  if (cleanKey.startsWith('RST')) {
-    if (cleanKey === expectedResetCode || cleanKey === 'RST-0120-1395-2430' || cleanKey === 'RST-ADMIN-0120') {
-      try {
-        const curSettings = JSON.parse(localStorage.getItem('PHARMACY_SETTINGS') || '{}');
-        localStorage.setItem(
-          'PHARMACY_SETTINGS',
-          JSON.stringify({ ...curSettings, adminPin: '1234' })
-        );
-      } catch (e) {}
-
-      return {
-        success: false,
-        isResetPin: true,
-        message: 'تم بنجاح استعادة وإعادة تعيين رمز مدير الصيدلية (Admin PIN) إلى: 1234 🔑'
-      };
-    }
+  if (!cleanKey) {
+    return { success: false, error: 'يرجى إدخال رمز الترخيص.' };
   }
 
-  // 2. Support Revoke / Kill Code (REV / REVOKE)
-  const expectedRevokeCode = await generateRevokeCode(machineId);
-  if (cleanKey.startsWith('REV')) {
-    const isRevokeMatch =
-      cleanKey === expectedRevokeCode ||
-      cleanKey === `REVOKE-${machineId}` ||
-      cleanKey === `REVOKE-${cleanMid}` ||
-      cleanKey === 'REV-KILL-0120-1395' ||
-      cleanKey === 'REVOKE-0120-1395-2430' ||
-      cleanKey === 'REVOKE-MASTER-2026' ||
-      cleanKey === 'REVOKE-ALL';
-
-    if (isRevokeMatch) {
-      await revokeLicense(machineId);
-      return {
-        success: false,
-        isRevoked: true,
-        status: 'REVOKED',
-        error: 'تم إلغاء وسحب ترخيص هذا الجهاز بنجاح بناءً على كود الإلغاء الأمني (Revoked) 🚫'
-      };
-    }
-  }
-
-  // 3. Support Expiry / Duration Keys (LIC-EXP-YYYYMMDD-XXXX-YYYY)
-  if (cleanKey.startsWith('LIC-EXP-')) {
-    const parts = cleanKey.split('-');
-    if (parts.length >= 5) {
-      const ymd = parts[2];
-      const providedSig = parts[3] + '-' + parts[4];
-      const expHash = await sha256Hex(cleanMid + '-EXP-' + ymd + '-' + MASTER_SECRET);
-      const expectedSig = expHash.substring(0, 4) + '-' + expHash.substring(4, 8);
-
-      if (providedSig === expectedSig) {
-        const y = parseInt(ymd.substring(0, 4), 10);
-        const m = parseInt(ymd.substring(4, 6), 10) - 1;
-        const d = parseInt(ymd.substring(6, 8), 10);
-        const expDate = new Date(y, m, d, 23, 59, 59);
-
-        if (Date.now() > expDate.getTime()) {
-          return {
-            success: false,
-            error: `مفتاح التفعيل منتهي الصلاحية بتاريخ (${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')})!`
-          };
-        }
-
-        const status = 'DURATION';
-        const nowIso = new Date().toISOString();
-
-        try {
-          localStorage.setItem(LAST_TIME_STORAGE_KEY, String(Date.now()));
-        } catch (e) {}
-
-        const licenseRecord = {
-          machine_id: machineId,
-          license_status: status,
-          license_key: cleanKey,
-          first_install_date: nowIso,
-          trial_days: 0,
-          activated_at: nowIso
-        };
-
-        try {
-          await sqliteService.saveLicenseInfo(licenseRecord);
-        } catch (e) {}
-
-        try {
-          localStorage.setItem(LICENSE_STORAGE_KEY, JSON.stringify(licenseRecord));
-          const currentSettings = JSON.parse(localStorage.getItem('PHARMACY_SETTINGS') || '{}');
-          localStorage.setItem(
-            'PHARMACY_SETTINGS',
-            JSON.stringify({
-              ...currentSettings,
-              licenseStatus: status,
-              licenseKey: cleanKey
-            })
-          );
-        } catch (e) {}
-
-        const days = Math.ceil((expDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
-        return {
-          success: true,
-          status,
-          message: `مبروك! تم تفعيل ترخيص البرنامج بنجاح حتى (${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}) — متبقي ${days} يوماً 🔑`
-        };
-      }
-    }
-  }
-
-  // 4. Support Lifetime Keys (LIC-LIFE-...)
-  // IMPORTANT: a key is only valid when its signature matches THIS machine.
-  // Previously any key matching the generic shape (e.g. LIC-LIFE-0000-0000-XXXX)
-  // was accepted, which let anyone bypass activation.
-  const expectedLifetimeKey = await generateActivationKey(machineId, 'LIFETIME');
-  const isMasterLifetime = MASTER_LIFETIME_KEYS.includes(cleanKey);
-  const isMachineLifetime = cleanKey === expectedLifetimeKey;
-
-  // Legacy annual keys still need a signature tied to this machine.
-  const isLegacyAnnual =
-    (cleanKey.startsWith('LIC-ANNUAL-') || cleanKey.startsWith('LIC-YEAR-')) &&
-    (cleanKey === expectedLifetimeKey.replace('LIC-LIFE-', 'LIC-ANNUAL-') ||
-      cleanKey === expectedLifetimeKey.replace('LIC-LIFE-', 'LIC-YEAR-'));
-
-  if (!isMasterLifetime && !isMachineLifetime && !isLegacyAnnual) {
+  // Reject legacy v1 keys from being submitted as new activations
+  if (
+    cleanKey.startsWith('LIC-LIFE-') ||
+    cleanKey.startsWith('LIC-EXP-') ||
+    cleanKey.startsWith('LIC-ANNUAL-') ||
+    cleanKey.startsWith('RST-') ||
+    cleanKey.startsWith('REV-')
+  ) {
     return {
       success: false,
-      error: 'مفتاح التفعيل غير صحيح أو لا يخص هذا الجهاز! يرجى إدخال مفتاح صادر من أداة المطور.'
+      error: 'هذا مفتاح قديم غير مدعوم. يرجى طلب رمز ترخيص رسمي جديد (LIC2) من المطور.'
     };
   }
 
-  const status = isLegacyAnnual ? 'ANNUAL' : 'LIFETIME';
-  const nowIso = new Date().toISOString();
+  // Modern LIC2 verification
+  if (!cleanKey.startsWith('LIC2.')) {
+    return {
+      success: false,
+      error: 'صيغة رمز الترخيص غير صحيحة. يجب أن يبدأ الرمز بـ LIC2.'
+    };
+  }
 
+  let verified;
   try {
-    localStorage.setItem(LAST_TIME_STORAGE_KEY, String(Date.now()));
-  } catch (e) {}
+    let revokedLids = new Set();
+    try {
+      const revs = await sqliteService.getRevocations();
+      if (Array.isArray(revs)) revs.forEach((r) => revokedLids.add(r.lid));
+    } catch (e) {}
+
+    verified = await verifyLicenseToken(cleanKey, {
+      machineId,
+      publicKeys: LICENSE_PUBLIC_KEYS,
+      now: Date.now(),
+      revokedLids
+    });
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+
+  // Special Token Types
+  if (verified.type === 'RESET_PIN') {
+    try {
+      const curSettings = JSON.parse(localStorage.getItem('PHARMACY_SETTINGS') || '{}');
+      localStorage.setItem('PHARMACY_SETTINGS', JSON.stringify({ ...curSettings, adminPin: '1234' }));
+    } catch (e) {}
+    return {
+      success: false,
+      isResetPin: true,
+      message: 'تم بنجاح التحقق من الرمز وإعادة تعيين رمز مدير الصيدلية (Admin PIN) إلى: 1234 🔑'
+    };
+  }
+
+  if (verified.type === 'REVOKE') {
+    await revokeLicense(machineId, 'SIGNED_REVOKE_TOKEN');
+    return {
+      success: false,
+      isRevoked: true,
+      status: 'REVOKED',
+      error: 'تم إلغاء وسحب ترخيص هذا الجهاز بنجاح بناءً على رمز الإلغاء الأمني الموقع 🚫'
+    };
+  }
+
+  // Activation of LIFETIME or TIMED
+  const status = verified.type === 'LIFETIME' ? 'LIFETIME' : 'DURATION';
+  const nowIso = new Date().toISOString();
 
   const licenseRecord = {
     machine_id: machineId,
@@ -428,7 +425,8 @@ export async function activateLicenseKey(rawKey) {
     license_key: cleanKey,
     first_install_date: nowIso,
     trial_days: 0,
-    activated_at: nowIso
+    activated_at: nowIso,
+    lid: verified.lid
   };
 
   try {
@@ -454,15 +452,15 @@ export async function activateLicenseKey(rawKey) {
     success: true,
     status,
     message: status === 'LIFETIME'
-      ? 'مبروك! تم تفعيل ترخيص البرنامج بنجاح مدى الحياة (LIFETIME) 🔑'
-      : 'مبروك! تم تفعيل الترخيص السنوي للبرنامج بنجاح 🔑'
+      ? 'مبروك! تم تفعيل ترخيص البرنامج بنجاح مدى الحياة (Ed25519 Verified) 🔑'
+      : `مبروك! تم تفعيل الترخيص بنجاح حتى تاريخ (${verified.expiresAt?.slice(0, 10)}) 🔑`
   };
 }
 
 /**
  * Revoke and deactivate license for this machine
  */
-export async function revokeLicense(machineId) {
+export async function revokeLicense(machineId, reason = 'REVOKED_MANUAL') {
   const mid = machineId || getMachineId();
   const record = {
     machine_id: mid,

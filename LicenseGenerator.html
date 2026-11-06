@@ -1,0 +1,912 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>بوابة المطور لإدارة وتوليد تراخيص صيدليتي | م/ عبد الله جميل</title>
+  <style>
+    :root {
+      --bg: #0B1220;
+      --card-bg: #111A2B;
+      --card-border: #23324D;
+      --primary: #14B8A6;
+      --primary-hover: #0D9488;
+      --accent: #10B981;
+      --danger: #EF4444;
+      --warning: #F59E0B;
+      --text: #F8FAFC;
+      --text-muted: #94A3B8;
+      --font-stack: 'Segoe UI', Tahoma, Arial, sans-serif;
+      --mono-stack: Consolas, 'Courier New', monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: var(--font-stack);
+      background-color: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 24px 16px;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 980px;
+    }
+
+    /* Key Management Header Bar */
+    .key-bar {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 16px;
+      padding: 16px 20px;
+      margin-bottom: 20px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .key-status {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 12px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .badge-locked {
+      background: rgba(239, 68, 68, 0.15);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      color: #F87171;
+    }
+
+    .badge-unlocked {
+      background: rgba(16, 185, 129, 0.15);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      color: #34D399;
+    }
+
+    .key-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    /* Main Card */
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 24px;
+      padding: 32px;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+      position: relative;
+    }
+
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      border-bottom: 1px solid var(--card-border);
+      padding-bottom: 20px;
+      margin-bottom: 24px;
+    }
+
+    .header-icon {
+      width: 56px;
+      height: 56px;
+      border-radius: 16px;
+      background: linear-gradient(135deg, var(--primary), var(--accent));
+      color: #0B1220;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 28px;
+      font-weight: 900;
+      shrink: 0;
+    }
+
+    .header-text h1 {
+      font-size: 20px;
+      font-weight: 900;
+      color: #FFFFFF;
+    }
+
+    .header-text p {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+
+    /* Navigation Tabs */
+    .tabs {
+      display: flex;
+      gap: 8px;
+      border-bottom: 1px solid var(--card-border);
+      margin-bottom: 24px;
+      padding-bottom: 12px;
+    }
+
+    .tab-btn {
+      background: transparent;
+      border: 1px solid transparent;
+      color: var(--text-muted);
+      padding: 10px 18px;
+      border-radius: 12px;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      font-family: inherit;
+      transition: all 0.2s;
+    }
+
+    .tab-btn:hover {
+      background: rgba(255, 255, 255, 0.05);
+      color: #FFFFFF;
+    }
+
+    .tab-btn.active {
+      background: rgba(20, 184, 166, 0.15);
+      border-color: rgba(20, 184, 166, 0.4);
+      color: #2DD4BF;
+    }
+
+    .tab-content {
+      display: none;
+    }
+
+    .tab-content.active {
+      display: block;
+    }
+
+    /* Form Controls */
+    .form-group {
+      margin-bottom: 20px;
+    }
+
+    label {
+      display: block;
+      font-size: 13px;
+      font-weight: 700;
+      color: #CBD5E1;
+      margin-bottom: 8px;
+    }
+
+    input[type="text"], input[type="password"], input[type="number"], textarea, select {
+      width: 100%;
+      background: #0B1220;
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      padding: 12px 16px;
+      font-size: 13px;
+      font-weight: 600;
+      color: #FFFFFF;
+      font-family: inherit;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    input[type="text"]:focus, input[type="password"]:focus, textarea:focus, select:focus {
+      border-color: var(--primary);
+    }
+
+    .code-input {
+      font-family: var(--mono-stack) !important;
+      font-weight: 800 !important;
+      letter-spacing: 1px;
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 12px 20px;
+      border-radius: 12px;
+      font-size: 13px;
+      font-weight: 800;
+      font-family: inherit;
+      cursor: pointer;
+      transition: all 0.2s;
+      border: none;
+    }
+
+    .btn-primary {
+      background: var(--primary);
+      color: #0B1220;
+    }
+
+    .btn-primary:hover {
+      background: var(--primary-hover);
+    }
+
+    .btn-secondary {
+      background: #17233A;
+      border: 1px solid var(--card-border);
+      color: #FFFFFF;
+    }
+
+    .btn-secondary:hover {
+      background: #23324D;
+    }
+
+    .btn-danger {
+      background: rgba(239, 68, 68, 0.15);
+      border: 1px solid rgba(239, 68, 68, 0.4);
+      color: #F87171;
+    }
+
+    .btn-danger:hover {
+      background: rgba(239, 68, 68, 0.25);
+    }
+
+    /* Output Results Box */
+    .result-box {
+      margin-top: 24px;
+      background: #0B1220;
+      border: 1px solid var(--card-border);
+      border-radius: 16px;
+      padding: 20px;
+      display: none;
+    }
+
+    .token-display {
+      background: #080D17;
+      border: 1px solid #1C283F;
+      border-radius: 10px;
+      padding: 14px;
+      font-family: var(--mono-stack);
+      font-size: 12px;
+      color: #2DD4BF;
+      word-break: break-all;
+      margin: 10px 0;
+    }
+
+    /* Customers Table */
+    .table-container {
+      overflow-x: auto;
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+      text-align: right;
+    }
+
+    th {
+      background: #0B1220;
+      padding: 12px;
+      color: var(--text-muted);
+      border-bottom: 1px solid var(--card-border);
+      font-weight: 700;
+    }
+
+    td {
+      padding: 12px;
+      border-bottom: 1px solid #1C283F;
+      color: #CBD5E1;
+    }
+
+    tr:hover td {
+      background: rgba(255, 255, 255, 0.02);
+    }
+
+    .notice {
+      padding: 12px 16px;
+      border-radius: 12px;
+      font-size: 12px;
+      line-height: 1.6;
+      margin-bottom: 20px;
+    }
+
+    .notice-info {
+      background: rgba(20, 184, 166, 0.1);
+      border: 1px solid rgba(20, 184, 166, 0.25);
+      color: #2DD4BF;
+    }
+
+    .notice-warning {
+      background: rgba(245, 158, 11, 0.1);
+      border: 1px solid rgba(245, 158, 11, 0.25);
+      color: #FBBF24;
+    }
+
+    /* Modal */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.75);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      z-index: 1000;
+    }
+
+    .modal {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 20px;
+      max-width: 480px;
+      width: 100%;
+      padding: 24px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- Key Management Bar -->
+    <div class="key-bar">
+      <div class="key-status">
+        <span>مفتاح التوقيع الرقمي (Ed25519):</span>
+        <span id="keyBadge" class="status-badge badge-locked">🔒 مغلق / غير محمل</span>
+        <span id="keyKid" style="color: var(--text-muted); font-family: var(--mono-stack); font-size: 11px;"></span>
+      </div>
+      <div class="key-actions">
+        <button id="btnLoadKey" class="btn btn-secondary" style="padding: 8px 14px; font-size: 12px;" onclick="openLoadKeyModal()">
+          🔑 تحميل المفتاح الخاص
+        </button>
+        <button id="btnLockKey" class="btn btn-danger" style="padding: 8px 14px; font-size: 12px; display: none;" onclick="lockPrivateKey()">
+          قفل وتفريغ الذاكرة ✕
+        </button>
+      </div>
+    </div>
+
+    <!-- Main Card -->
+    <div class="card">
+      <div class="header">
+        <div class="header-icon">💊</div>
+        <div class="header-text">
+          <h1>بوابة المطور — نظام تراخيص صيدليتي 2026</h1>
+          <p>توليد تراخيص مشفرة برمجياً بتقنية Ed25519 وإدارة العملاء وقوائم الإلغاء (Offline 100%)</p>
+        </div>
+      </div>
+
+      <!-- Navigation Tabs -->
+      <div class="tabs">
+        <button class="tab-btn active" onclick="switchTab('issue')">➕ إصدار وتجديد ترخيص</button>
+        <button class="tab-btn" onclick="switchTab('customers')">👥 سجل العملاء والتراخيص</button>
+        <button class="tab-btn" onclick="switchTab('revocations')">🚫 إدارة وتصدير الإلغاءات</button>
+      </div>
+
+      <!-- TAB 1: ISSUE LICENSE -->
+      <div id="tab-issue" class="tab-content active">
+        <div class="grid-2">
+          <div class="form-group">
+            <label>اسم الصيدلية / العميل:</label>
+            <input type="text" id="custName" placeholder="صيدلية الأمل - د. أحمد">
+          </div>
+          <div class="form-group">
+            <label>رقم هاتف الواتساب:</label>
+            <input type="text" id="custPhone" placeholder="01012345678">
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>كود الجهاز (Hardware Machine ID):</label>
+          <input type="text" id="custMid" class="code-input" placeholder="EGYP-XXXX-YYYY-ZZZZ">
+        </div>
+
+        <div class="grid-2">
+          <div class="form-group">
+            <label>نوع الترخيص:</label>
+            <select id="licenseType" onchange="toggleDurationGroup()">
+              <option value="LIFETIME">دائم مدى الحياة (LIFETIME)</option>
+              <option value="TIMED">محدد المدة (TIMED)</option>
+            </select>
+          </div>
+          <div class="form-group" id="durationGroup" style="display: none;">
+            <label>مدة الترخيص (بالأيام):</label>
+            <input type="number" id="licenseDays" value="365">
+          </div>
+        </div>
+
+        <div style="margin-top: 10px;">
+          <button class="btn btn-primary" onclick="generateTokenForCustomer()">
+            توليد وتوقيع التوكن الرقمي 🚀
+          </button>
+        </div>
+
+        <!-- Result Box -->
+        <div id="resultBox" class="result-box">
+          <h4 style="font-size: 14px; font-weight: 800; color: #FFFFFF; margin-bottom: 6px;">كود الترخيص المعتمد (Ed25519 Token):</h4>
+          <div id="displayToken" class="token-display"></div>
+          <div style="display: flex; gap: 10px; margin-top: 12px;">
+            <button class="btn btn-secondary" style="font-size: 12px; padding: 8px 14px;" onclick="copyResultToken()">
+              📋 نسخ الكود
+            </button>
+            <button class="btn btn-secondary" style="font-size: 12px; padding: 8px 14px;" onclick="copyWhatsAppTemplate()">
+              💬 نسخ رسالة الواتساب
+            </button>
+            <button class="btn btn-primary" style="font-size: 12px; padding: 8px 14px; background: #25D366; color: #0B1220;" onclick="openWhatsAppChat()">
+              إرسال واتساب مباشر ↗
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- TAB 2: CUSTOMERS REGISTRY -->
+      <div id="tab-customers" class="tab-content">
+        <div class="notice notice-info">
+          يتم حفظ بيانات العملاء والتراخيص محلياً في المتصفح، مع إمكانية تجديد الترخيص أو إلغائه فوراً.
+        </div>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>العميل</th>
+                <th>كود الجهاز</th>
+                <th>النوع</th>
+                <th>تاريخ الإصدار</th>
+                <th>الحالة</th>
+                <th>إجراءات</th>
+              </tr>
+            </thead>
+            <tbody id="customersTableBody">
+              <tr>
+                <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 24px;">لا يوجد عملاء مسجلين حتى الآن.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- TAB 3: REVOCATION EXPORT -->
+      <div id="tab-revocations" class="tab-content">
+        <div class="notice notice-warning">
+          قائمة الإلغاءات الموقعة رقمياً (revocations.json) تتيح إلغاء تراخيص منتهية أو مسحوبة بدون اتصال بالإنترنت، بمجرد استيراد الملف في برنامج الصيدلية.
+        </div>
+        <div style="margin-bottom: 20px;">
+          <button class="btn btn-danger" onclick="exportSignedRevocations()">
+            📥 تصدير قائمة الإلغاءات الموقعة (revocations.json)
+          </button>
+        </div>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>معرف الترخيص (LID)</th>
+                <th>كود الجهاز</th>
+                <th>سبب الإلغاء</th>
+                <th>تاريخ الإلغاء</th>
+              </tr>
+            </thead>
+            <tbody id="revocationsTableBody">
+              <tr>
+                <td colspan="4" style="text-align: center; color: var(--text-muted); padding: 24px;">لا توجد تراخيص ملغاة حالياً.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- LOAD KEY MODAL -->
+  <div id="loadKeyModal" class="modal-overlay">
+    <div class="modal">
+      <h3 style="font-size: 16px; font-weight: 800; margin-bottom: 14px;">فك تشفير المفتاح الخاص في الذاكرة</h3>
+      <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 16px; line-height: 1.6;">
+        اختر ملف المفتاح المشفر (license-private-key.enc.json) ثم أدخل كلمة المرور. يتم فك التشفير محلياً 100% ولا يُخزن المفتاح بعد إغلاق المتصفح.
+      </p>
+
+      <div class="form-group">
+        <label>ملف المفتاح المشفر (.enc.json):</label>
+        <input type="file" id="encFileInput" accept=".json">
+      </div>
+
+      <div class="form-group">
+        <label>كلمة مرور فك التشفير:</label>
+        <input type="password" id="passphraseInput" placeholder="أدخل كلمة المرور">
+      </div>
+
+      <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px;">
+        <button class="btn btn-secondary" onclick="closeLoadKeyModal()">إلغاء</button>
+        <button class="btn btn-primary" onclick="unlockPrivateKey()">فك التشفير وتفعيل المفتاح</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // State in memory
+    let activePrivateKey = null;
+    let activeKid = '2026-01';
+    let loadedEncData = null;
+
+    // Database of customers and revocations (localStorage backed)
+    function getStoredData() {
+      try {
+        return JSON.parse(localStorage.getItem('PHARMACY_LICENSE_DB') || '{"customers":[],"revocations":[]}');
+      } catch (e) {
+        return { customers: [], revocations: [] };
+      }
+    }
+
+    function saveStoredData(data) {
+      localStorage.setItem('PHARMACY_LICENSE_DB', JSON.stringify(data));
+      renderTables();
+    }
+
+    // Modal controls
+    function openLoadKeyModal() {
+      document.getElementById('loadKeyModal').style.display = 'flex';
+    }
+
+    function closeLoadKeyModal() {
+      document.getElementById('loadKeyModal').style.display = 'none';
+      document.getElementById('passphraseInput').value = '';
+    }
+
+    // Clear key on unload
+    window.addEventListener('beforeunload', () => {
+      activePrivateKey = null;
+    });
+
+    function lockPrivateKey() {
+      activePrivateKey = null;
+      document.getElementById('keyBadge').className = 'status-badge badge-locked';
+      document.getElementById('keyBadge').innerText = '🔒 مغلق / غير محمل';
+      document.getElementById('keyKid').innerText = '';
+      document.getElementById('btnLoadKey').style.display = 'inline-flex';
+      document.getElementById('btnLockKey').style.display = 'none';
+      alert('تم قفل المفتاح ومسح بياناته من الذاكرة.');
+    }
+
+    // Base64Url helpers
+    function base64UrlEncode(bytes) {
+      let binary = '';
+      const len = bytes.byteLength;
+      for (let i = 0; i < len; i++) {
+        binary += String.fromCharCode(bytes[i]);
+      }
+      return btoa(binary)
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=+$/, '');
+    }
+
+    function base64DecodeToBytes(b64) {
+      const bin = atob(b64);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) {
+        bytes[i] = bin.charCodeAt(i);
+      }
+      return bytes;
+    }
+
+    // Handle Encrypted Key Load
+    document.getElementById('encFileInput').addEventListener('change', async (e) => {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      try {
+        const text = await file.text();
+        loadedEncData = JSON.parse(text);
+      } catch (err) {
+        alert('ملف غير صالح.');
+        loadedEncData = null;
+      }
+    });
+
+    async function unlockPrivateKey() {
+      if (!loadedEncData) {
+        alert('يرجى اختيار ملف المفتاح المشفر (.enc.json)');
+        return;
+      }
+      const passphrase = document.getElementById('passphraseInput').value;
+      if (!passphrase) {
+        alert('يرجى إدخال كلمة المرور');
+        return;
+      }
+
+      try {
+        const salt = base64DecodeToBytes(loadedEncData.salt);
+        const iv = base64DecodeToBytes(loadedEncData.iv);
+        const tag = base64DecodeToBytes(loadedEncData.tag);
+        const ciphertext = base64DecodeToBytes(loadedEncData.ciphertext);
+        const iterations = loadedEncData.iterations || 600000;
+
+        // PBKDF2 derive key
+        const enc = new TextEncoder();
+        const baseKey = await crypto.subtle.importKey(
+          'raw',
+          enc.encode(passphrase),
+          { name: 'PBKDF2' },
+          false,
+          ['deriveKey']
+        );
+
+        const aesKey = await crypto.subtle.deriveKey(
+          {
+            name: 'PBKDF2',
+            salt: salt,
+            iterations: iterations,
+            hash: 'SHA-256'
+          },
+          baseKey,
+          { name: 'AES-GCM', length: 256 },
+          false,
+          ['decrypt']
+        );
+
+        // Concat ciphertext + tag for WebCrypto AES-GCM decrypt
+        const combined = new Uint8Array(ciphertext.length + tag.length);
+        combined.set(ciphertext);
+        combined.set(tag, ciphertext.length);
+
+        const decryptedDer = await crypto.subtle.decrypt(
+          { name: 'AES-GCM', iv: iv, tagLength: 128 },
+          aesKey,
+          combined
+        );
+
+        // Import private key as Ed25519
+        activePrivateKey = await crypto.subtle.importKey(
+          'pkcs8',
+          decryptedDer,
+          { name: 'Ed25519' },
+          false,
+          ['sign']
+        );
+
+        activeKid = loadedEncData.kid || '2026-01';
+
+        document.getElementById('keyBadge').className = 'status-badge badge-unlocked';
+        document.getElementById('keyBadge').innerText = '🔓 نشط وجاهز للتوقيع';
+        document.getElementById('keyKid').innerText = `(KID: ${activeKid})`;
+        document.getElementById('btnLoadKey').style.display = 'none';
+        document.getElementById('btnLockKey').style.display = 'inline-flex';
+
+        closeLoadKeyModal();
+        alert('✅ تم فك تشفير المفتاح الخاص بنجاح في الذاكرة.');
+      } catch (err) {
+        alert('❌ فشل فك التشفير. تأكد من صحة كلمة المرور والملف.');
+      }
+    }
+
+    // Tabs
+    function switchTab(tabId) {
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+      event.target.classList.add('active');
+      document.getElementById('tab-' + tabId).classList.add('active');
+    }
+
+    function toggleDurationGroup() {
+      const type = document.getElementById('licenseType').value;
+      document.getElementById('durationGroup').style.display = type === 'TIMED' ? 'block' : 'none';
+    }
+
+    // Token Generation
+    async function generateTokenForCustomer() {
+      if (!activePrivateKey) {
+        alert('⚠️ يجب تحميل وفك تشفير المفتاح الخاص أولاً لتوقيع الترخيص.');
+        openLoadKeyModal();
+        return;
+      }
+
+      const name = document.getElementById('custName').value.trim();
+      const phone = document.getElementById('custPhone').value.trim();
+      const mid = document.getElementById('custMid').value.trim().toUpperCase();
+      const type = document.getElementById('licenseType').value;
+      const days = parseInt(document.getElementById('licenseDays').value, 10) || 365;
+
+      if (!mid || !mid.startsWith('EGYP-')) {
+        alert('يرجى إدخال Machine ID صحيح يبدأ بـ EGYP-');
+        return;
+      }
+
+      const iat = Math.floor(Date.now() / 1000);
+      const exp = type === 'TIMED' ? iat + (days * 86400) : null;
+      const lid = 'LID-' + Math.random().toString(36).substring(2, 10).toUpperCase();
+
+      const payloadObj = {
+        v: 2,
+        kid: activeKid,
+        lid: lid,
+        mid: mid,
+        typ: type,
+        iat: iat,
+        exp: exp
+      };
+
+      const canonicalStr = JSON.stringify(payloadObj, ['v', 'kid', 'lid', 'mid', 'typ', 'iat', 'exp']);
+      const payloadBase64Url = base64UrlEncode(new TextEncoder().encode(canonicalStr));
+      const msgBytes = new TextEncoder().encode(`LIC2.${payloadBase64Url}`);
+
+      const sigBuffer = await crypto.subtle.sign({ name: 'Ed25519' }, activePrivateKey, msgBytes);
+      const sigBase64Url = base64UrlEncode(new Uint8Array(sigBuffer));
+
+      const fullToken = `LIC2.${payloadBase64Url}.${sigBase64Url}`;
+
+      // Update UI
+      document.getElementById('displayToken').innerText = fullToken;
+      document.getElementById('resultBox').style.display = 'block';
+
+      // Save to customer registry
+      const db = getStoredData();
+      db.customers.unshift({
+        lid,
+        name: name || 'بدون اسم',
+        phone: phone || '',
+        mid,
+        typ: type,
+        exp,
+        iat,
+        token: fullToken
+      });
+      saveStoredData(db);
+    }
+
+    function copyResultToken() {
+      const token = document.getElementById('displayToken').innerText;
+      navigator.clipboard.writeText(token);
+      alert('تم نسخ التوكن بنجاح 📋');
+    }
+
+    function buildWhatsAppText() {
+      const name = document.getElementById('custName').value.trim() || 'العميل';
+      const mid = document.getElementById('custMid').value.trim().toUpperCase();
+      const token = document.getElementById('displayToken').innerText;
+      const type = document.getElementById('licenseType').value;
+      const days = document.getElementById('licenseDays').value;
+
+      return `أهلاً بك د. ${name}،
+تم بنجاح إصدار كود تفعيل وتشغيل نظام «صيدليتي» لإدارة الصيدليات ونقاط البيع:
+
+🔹 كود الجهاز: ${mid}
+🔹 نوع الترخيص: ${type === 'LIFETIME' ? 'دائم مدى الحياة' : days + ' يوم'}
+🔹 مفتاح التفعيل الرقمي (Ed25519):
+${token}
+
+طريقة التفعيل: انسخ الكود كاملاً والصقه في شاشة التفعيل واضغط "تفعيل الترخيص".
+لأي دعم فني واستفسار: م/ عبد الله جميل — 01201395243.
+نتمنى لكم تجارة مباركة ودوام التوفيق! 💊`;
+    }
+
+    function copyWhatsAppTemplate() {
+      navigator.clipboard.writeText(buildWhatsAppText());
+      alert('تم نسخ رسالة الواتساب 📋');
+    }
+
+    function openWhatsAppChat() {
+      let phone = document.getElementById('custPhone').value.trim().replace(/\D/g, '');
+      if (phone.startsWith('01')) phone = '2' + phone;
+      const text = encodeURIComponent(buildWhatsAppText());
+      window.open(phone ? `https://wa.me/${phone}?text=${text}` : `https://wa.me/?text=${text}`, '_blank');
+    }
+
+    // Tables rendering
+    function renderTables() {
+      const db = getStoredData();
+      const cBody = document.getElementById('customersTableBody');
+      const rBody = document.getElementById('revocationsTableBody');
+
+      if (!db.customers || db.customers.length === 0) {
+        cBody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: var(--text-muted); padding: 24px;">لا يوجد عملاء مسجلين حتى الآن.</td></tr>';
+      } else {
+        cBody.innerHTML = db.customers.map(c => `
+          <tr>
+            <td><strong>${c.name}</strong><br><span style="font-size: 11px; color: var(--text-muted);">${c.phone || ''}</span></td>
+            <td style="font-family: var(--mono-stack); font-size: 11px;">${c.mid}</td>
+            <td>${c.typ === 'LIFETIME' ? 'مدى الحياة' : 'محدد'}</td>
+            <td>${new Date(c.iat * 1000).toLocaleDateString('ar-EG')}</td>
+            <td><span style="color: #34D399; font-weight: 700;">نشط</span></td>
+            <td>
+              <button class="btn btn-secondary" style="padding: 4px 8px; font-size: 11px;" onclick="copyCustomerToken('${c.token}')">نسخ</button>
+              <button class="btn btn-danger" style="padding: 4px 8px; font-size: 11px;" onclick="revokeCustomer('${c.lid}', '${c.mid}')">إلغاء</button>
+            </td>
+          </tr>
+        `).join('');
+      }
+
+      if (!db.revocations || db.revocations.length === 0) {
+        rBody.innerHTML = '<tr><td colspan="4" style="text-align: center; color: var(--text-muted); padding: 24px;">لا توجد تراخيص ملغاة حالياً.</td></tr>';
+      } else {
+        rBody.innerHTML = db.revocations.map(r => `
+          <tr>
+            <td style="font-family: var(--mono-stack);">${r.lid}</td>
+            <td style="font-family: var(--mono-stack);">${r.mid}</td>
+            <td>${r.reason}</td>
+            <td>${new Date(r.at).toLocaleDateString('ar-EG')}</td>
+          </tr>
+        `).join('');
+      }
+    }
+
+    function copyCustomerToken(token) {
+      navigator.clipboard.writeText(token);
+      alert('تم نسخ كود التفعيل.');
+    }
+
+    function revokeCustomer(lid, mid) {
+      const reason = prompt('سبب الإلغاء (مثال: انتهاء الاشتراك / استبدال جهاز):', 'سحب الترخيص');
+      if (!reason) return;
+
+      const db = getStoredData();
+      db.revocations.push({
+        lid,
+        mid,
+        reason,
+        at: new Date().toISOString()
+      });
+      saveStoredData(db);
+      alert('تمت إضافة الترخيص لقائمة الإلغاءات بنجاح.');
+    }
+
+    async function exportSignedRevocations() {
+      if (!activePrivateKey) {
+        alert('⚠️ يجب تحميل وفك تشفير المفتاح الخاص أولاً لتوقيع قائمة الإلغاءات.');
+        openLoadKeyModal();
+        return;
+      }
+
+      const db = getStoredData();
+      const normItems = (db.revocations || []).map(r => ({
+        lid: String(r.lid || '').trim(),
+        mid: String(r.mid || '').trim().toUpperCase(),
+        reason: String(r.reason || '').trim(),
+        at: String(r.at || new Date().toISOString())
+      })).sort((a, b) => a.lid.localeCompare(b.lid));
+
+      const payload = {
+        v: 1,
+        kid: activeKid,
+        generatedAt: new Date().toISOString(),
+        count: normItems.length,
+        items: normItems
+      };
+
+      const canonicalJson = JSON.stringify(payload);
+      const msgBytes = new TextEncoder().encode(canonicalJson);
+
+      const sigBuffer = await crypto.subtle.sign({ name: 'Ed25519' }, activePrivateKey, msgBytes);
+      const sigBase64Url = base64UrlEncode(new Uint8Array(sigBuffer));
+
+      const finalObj = {
+        ...payload,
+        sig: sigBase64Url
+      };
+
+      const blob = new Blob([JSON.stringify(finalObj, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'revocations.json';
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    // Initialize tables on load
+    renderTables();
+  </script>
+</body>
+</html>

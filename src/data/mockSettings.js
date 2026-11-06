@@ -25,7 +25,7 @@ export const DEFAULT_SETTINGS = {
   autoDetectUsbFlash: true,
 
   // 4. Licensing (Unlicensed by default on fresh install)
-  machineId: 'EGYP-B009-4237-53D2',
+  machineId: '',
   licenseStatus: 'UNLICENSED', // Requires explicit activation key
   licenseKey: '',
   trialDaysRemaining: 0,
