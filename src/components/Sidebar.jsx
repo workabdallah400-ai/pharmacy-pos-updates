@@ -1,4 +1,5 @@
 import React from 'react';
+import { hasPermission } from '../utils/permissions';
 import {
   ShoppingCart,
   Pill,
@@ -28,12 +29,9 @@ export const NAV_ITEMS = [
 ];
 
 export function Sidebar({ activeTab, onSelectTab, currentUser, onLogout }) {
-  const isAdmin = currentUser?.role === 'admin';
-  const permissions = currentUser?.permissions || {};
   const visibleItems = NAV_ITEMS.filter((item) => {
     if (!item.permission) return true;
-    if (isAdmin) return true;
-    return permissions[item.permission] === true;
+    return hasPermission(currentUser, item.permission);
   });
 
   return (

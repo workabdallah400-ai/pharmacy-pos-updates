@@ -34,7 +34,7 @@ function safeId(value) {
 }
 
 function emptySnapshot() {
-  return { shifts: [], invoices: [], purchases: [], expenses: [], returns: [], capturedAt: null };
+  return { shifts: [], invoices: [], purchases: [], expenses: [], returns: [], refunds: [], capturedAt: null };
 }
 
 // A human readable timestamp for the "last sync" line.
@@ -121,6 +121,16 @@ function snapshotOps(snapshot) {
       data: { ...r, supplierName: r.supplier_name || r.supplierName, shiftId: r.shift_id }
     });
   }
+  for (const rf of snapshot.refunds || []) {
+    ops.push({
+      entityType: 'sale_refund',
+      entityId: rf.id,
+      action: 'CREATE',
+      shiftId: rf.shift_id,
+      createdAt: rf.date_time || null,
+      data: { ...rf, cashierName: rf.cashier_name || rf.cashierName, shiftId: rf.shift_id }
+    });
+  }
   return ops;
 }
 
@@ -158,6 +168,7 @@ function buildShift(store, shiftId) {
   const purchases = relevant.filter((op) => op.entityType === 'purchase' && op.action === 'CREATE').map(dataOf);
   const returns = relevant.filter((op) => op.entityType === 'supplier_return').map(dataOf);
   const expenses = relevant.filter((op) => op.entityType === 'expense').map(dataOf);
+  const refunds = relevant.filter((op) => op.entityType === 'sale_refund').map(dataOf);
 
   const paymentTotals = { 'كاش': 0, 'فيزا': 0, 'إنستاباي': 0, 'آجل': 0 };
   let salesTotal = 0;
@@ -166,6 +177,16 @@ function buildShift(store, shiftId) {
     salesTotal += amount;
     const method = String(inv.payment_method || 'كاش');
     paymentTotals[method] = (paymentTotals[method] || 0) + amount;
+  }
+
+  // Deduct sale refunds from salesTotal and cash if shift has not already recorded it
+  let refundTotal = 0;
+  for (const rf of refunds) {
+    const rfAmt = Number(rf.refund_amount || rf.amount || 0);
+    refundTotal += rfAmt;
+  }
+  if (shift.total_sales == null) {
+    salesTotal = Math.max(0, salesTotal - refundTotal);
   }
 
   const itemsMap = new Map();
@@ -186,7 +207,8 @@ function buildShift(store, shiftId) {
   const expensesTotal = expenses.reduce((s, e) => s + Number(e.amount || 0), 0);
 
   const openingCash = Number(shift.opening_cash || 0);
-  const cashSales = Number(shift.cash_sales != null ? shift.cash_sales : paymentTotals['كاش'] || 0);
+  const rawCashSales = paymentTotals['كاش'] || 0;
+  const cashSales = Number(shift.cash_sales != null ? shift.cash_sales : Math.max(0, rawCashSales - refundTotal));
   const debtCollections = Number(shift.debt_collections || 0);
   const expected = shift.expected_cash != null
     ? Number(shift.expected_cash)
@@ -209,11 +231,12 @@ function buildShift(store, shiftId) {
     purchases,
     returns,
     expenses,
+    refunds,
     items: Array.from(itemsMap.values()).sort((a, b) => b.amount - a.amount),
     hasData: relevant.length > 0,
-    // Any real activity (sale, purchase, expense, return/disposal). A shift
+    // Any real activity (sale, purchase, expense, return/disposal, refund). A shift
     // that is still open and has no activity yet is probably not uploaded.
-    hasActivity: invoices.length + purchases.length + expenses.length + returns.length > 0,
+    hasActivity: invoices.length + purchases.length + expenses.length + returns.length + refunds.length > 0,
     totals: {
       salesTotal: shift.total_sales != null ? Number(shift.total_sales) : salesTotal,
       cash: cashSales,
@@ -336,12 +359,25 @@ function normReturn(raw) {
   };
 }
 
+function normSaleRefund(raw) {
+  return {
+    id: raw.id,
+    shift_id: raw.shift_id || raw.shiftId || '',
+    original_shift_id: raw.original_shift_id || '',
+    date_time: raw.date_time || null,
+    amount: Number(raw.refund_amount || raw.amount || 0),
+    invoice_id: raw.invoice_id || '',
+    reason: raw.reason || '',
+    cashier_name: raw.cashier_name || raw.cashierName || ''
+  };
+}
+
 // Merge the authoritative snapshot with the live outbox into one flat set of
 // rows so the daily / monthly summaries can be computed for any period.
 function collectRows(store) {
-  const rows = { shifts: [], invoices: [], purchases: [], expenses: [], returns: [] };
+  const rows = { shifts: [], invoices: [], purchases: [], expenses: [], returns: [], refunds: [] };
   const snapshot = store.snapshot || {};
-  const seen = { invoice: new Set(), purchase: new Set(), expense: new Set(), return: new Set() };
+  const seen = { invoice: new Set(), purchase: new Set(), expense: new Set(), return: new Set(), refund: new Set() };
 
   for (const s of snapshot.shifts || []) {
     if (s && s.id) rows.shifts.push(normShift(s));
@@ -365,6 +401,11 @@ function collectRows(store) {
     const row = normReturn(r);
     seen.return.add(`${row.shift_id}|${row.amount}|${row.kind}|${row.details}`);
     rows.returns.push(row);
+  }
+  for (const rf of snapshot.refunds || []) {
+    const row = normSaleRefund(rf);
+    seen.refund.add(String(row.id || `${row.shift_id}|${row.amount}|${row.invoice_id}`));
+    rows.refunds.push(row);
   }
 
   const shiftMap = new Map(rows.shifts.map((s) => [String(s.id), s]));
@@ -402,6 +443,12 @@ function collectRows(store) {
       if (seen.return.has(key)) continue;
       seen.return.add(key);
       rows.returns.push(row);
+    } else if (op.entityType === 'sale_refund') {
+      const row = normSaleRefund({ ...d, id: op.entityId, shift_id: op.shiftId || d.shift_id });
+      const key = String(row.id || `${row.shift_id}|${row.amount}|${row.invoice_id}`);
+      if (seen.refund.has(key)) continue;
+      seen.refund.add(key);
+      rows.refunds.push(row);
     }
   }
 
@@ -414,6 +461,7 @@ function aggregateRange(rows, predicate) {
   const purchases = rows.purchases.filter(predicate);
   const expenses = rows.expenses.filter(predicate);
   const returns = rows.returns.filter(predicate);
+  const refunds = (rows.refunds || []).filter(predicate);
 
   const payments = { 'كاش': 0, 'فيزا': 0, 'إنستاباي': 0, 'آجل': 0 };
   let salesTotal = 0;
@@ -445,6 +493,10 @@ function aggregateRange(rows, predicate) {
       const method = String(inv.payment_method || 'كاش');
       payments[method] = (payments[method] || 0) + amount;
     }
+    // If no shifts, deduct standalone refunds
+    const refundsTotal = refunds.reduce((s, r) => s + Number(r.amount || 0), 0);
+    salesTotal = Math.max(0, salesTotal - refundsTotal);
+    payments['كاش'] = Math.max(0, payments['كاش'] - refundsTotal);
   }
   if (shifts.length > 0) invoiceCount = invoices.length;
 
@@ -472,12 +524,14 @@ function aggregateRange(rows, predicate) {
     purchases,
     expenses,
     returns,
+    refunds,
     totals: {
       salesTotal,
       cash: payments['كاش'],
       visa: payments['فيزا'],
       instapay: payments['إنستاباي'],
       credit: payments['آجل'],
+      refundsTotal: refunds.reduce((s, r) => s + Number(r.amount || 0), 0),
       invoiceCount,
       shiftCount: shifts.length,
       purchasesTotal: purchases.reduce((s, p) => s + p.net_total, 0),
@@ -508,7 +562,7 @@ function buildMonthly(store, month) {
   const key = month || monthKey(new Date());
   const days = [];
   const allDates = new Set();
-  for (const r of [...rows.shifts, ...rows.invoices, ...rows.purchases, ...rows.expenses, ...rows.returns]) {
+  for (const r of [...rows.shifts, ...rows.invoices, ...rows.purchases, ...rows.expenses, ...rows.returns, ...(rows.refunds || [])]) {
     const d = dateKey(r.date_time || r.closed_at || r.opened_at);
     if (d && d.slice(0, 7) === key) allDates.add(d);
   }
@@ -876,6 +930,7 @@ module.exports = {
   normPurchase,
   normExpense,
   normReturn,
+  normSaleRefund,
   collectRows,
   aggregateRange,
   buildDaily,

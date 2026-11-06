@@ -463,6 +463,7 @@ class SQLiteService {
         id TEXT PRIMARY KEY,
         invoice_id TEXT,
         shift_id TEXT,
+        original_shift_id TEXT,
         cashier_name TEXT,
         date_time TEXT,
         refund_amount REAL DEFAULT 0,
@@ -518,6 +519,9 @@ class SQLiteService {
     // Migration safe check for shift_id in purchases
     try {
       this.db.run("ALTER TABLE purchases ADD COLUMN shift_id TEXT;");
+    } catch (e) {}
+    try {
+      this.db.run("ALTER TABLE sale_refunds ADD COLUMN original_shift_id TEXT;");
     } catch (e) {}
 
     // Migration: the cloud copy of the outbox is tracked separately from the
@@ -599,6 +603,78 @@ class SQLiteService {
     return this._hashPassword(password) === storedHash;
   }
 
+  _normalizePermissions(role, perms = {}) {
+    const defaults = {
+      admin: {
+        canViewReports: true,
+        canManageUsers: true,
+        canCloseShift: true,
+        canManageStock: true,
+        canViewProfits: true,
+        canManageSettings: true,
+        canDeleteInvoices: true,
+        canGiveDiscount: true,
+        canDiscount: true,
+        canEditPrice: true,
+        canDeleteItem: true,
+        canRefund: true,
+        canStockTake: true,
+        canViewAuditLog: true
+      },
+      pharmacist: {
+        canViewReports: true,
+        canManageUsers: false,
+        canCloseShift: true,
+        canManageStock: true,
+        canViewProfits: true,
+        canManageSettings: false,
+        canDeleteInvoices: false,
+        canGiveDiscount: true,
+        canDiscount: true,
+        canEditPrice: false,
+        canDeleteItem: false,
+        canRefund: true,
+        canStockTake: true,
+        canViewAuditLog: false
+      },
+      cashier: {
+        canViewReports: false,
+        canManageUsers: false,
+        canCloseShift: true,
+        canManageStock: false,
+        canViewProfits: false,
+        canManageSettings: false,
+        canDeleteInvoices: false,
+        canGiveDiscount: false,
+        canDiscount: false,
+        canEditPrice: false,
+        canDeleteItem: false,
+        canRefund: false,
+        canStockTake: false,
+        canViewAuditLog: false
+      }
+    };
+    const roleDefaults = defaults[role] || defaults.cashier;
+    return { ...roleDefaults, ...perms };
+  }
+
+  setCurrentUser(user) {
+    this._currentUser = user || null;
+  }
+
+  clearCurrentUser() {
+    this._currentUser = null;
+  }
+
+  _requirePermission(key) {
+    if (!this._currentUser) return; // Legacy mode (no user session set)
+    if (this._currentUser.role === 'admin') return;
+    const perms = this._currentUser.permissions || {};
+    if (perms[key] !== true) {
+      throw new Error(`عذراً، ليس لديك الصلاحية الكافية لتنفيذ هذه العملية (${key}).`);
+    }
+  }
+
   // --- USER MANAGEMENT API ---
 
   async loginUser(username, password) {
@@ -624,7 +700,10 @@ class SQLiteService {
     const { password_hash, ...safeUser2 } = user;
     let permissions = {};
     try { permissions = JSON.parse(user.permissions || '{}'); } catch (e) {}
-    return { success: true, user: { ...safeUser2, permissions } };
+    permissions = this._normalizePermissions(user.role, permissions);
+    const loggedUser = { ...safeUser2, permissions };
+    this.setCurrentUser(loggedUser);
+    return { success: true, user: loggedUser };
   }
 
   async getUsers() {
@@ -634,6 +713,7 @@ class SQLiteService {
     return rows.map(u => {
       let permissions = {};
       try { permissions = JSON.parse(u.permissions || '{}'); } catch (e) {}
+      permissions = this._normalizePermissions(u.role, permissions);
       return { ...u, permissions };
     });
   }
@@ -653,58 +733,7 @@ class SQLiteService {
       return { success: false, error: 'اسم المستخدم موجود مسبقاً. اختر اسماً آخر.' };
     }
 
-    const defaultPermissions = role === 'admin'
-      ? {
-          canViewReports: true,
-          canManageUsers: true,
-          canCloseShift: true,
-          canManageStock: true,
-          canViewProfits: true,
-          canManageSettings: true,
-          canDeleteInvoices: true,
-          canGiveDiscount: true,
-          canDiscount: true,
-          canEditPrice: true,
-          canDeleteItem: true,
-          canRefund: true,
-          canStockTake: true,
-          canViewAuditLog: true
-        }
-      : role === 'pharmacist'
-      ? {
-          canViewReports: true,
-          canManageUsers: false,
-          canCloseShift: true,
-          canManageStock: true,
-          canViewProfits: true,
-          canManageSettings: false,
-          canDeleteInvoices: false,
-          canGiveDiscount: true,
-          canDiscount: true,
-          canEditPrice: false,
-          canDeleteItem: false,
-          canRefund: true,
-          canStockTake: true,
-          canViewAuditLog: false,
-          ...permissions
-        }
-      : {
-          canViewReports: false,
-          canManageUsers: false,
-          canCloseShift: true,
-          canManageStock: false,
-          canViewProfits: false,
-          canManageSettings: false,
-          canDeleteInvoices: false,
-          canGiveDiscount: false,
-          canDiscount: false,
-          canEditPrice: false,
-          canDeleteItem: false,
-          canRefund: false,
-          canStockTake: false,
-          canViewAuditLog: false,
-          ...permissions
-        };
+    const defaultPermissions = this._normalizePermissions(role, permissions);
 
     const stmt = this.db.prepare(`
       INSERT INTO app_users (username, password_hash, full_name, role, is_active, created_at, created_by, permissions)
@@ -720,11 +749,12 @@ class SQLiteService {
       JSON.stringify(defaultPermissions)
     ]);
     stmt.free();
+    this._recordAuditLogInternal(created_by, 'USER_CREATE', 'app_users', safeUsername, `إنشاء مستخدم جديد [${safeUsername}] بدور [${role}]`);
     this.saveToDisk();
     return { success: true, message: `تم إنشاء حساب "${safeUsername}" بنجاح.` };
   }
 
-  async updateUser({ id, full_name, role, is_active, permissions, newPassword }) {
+  async updateUser({ id, full_name, role, is_active, permissions, newPassword, updated_by = 'admin' }) {
     await this.init();
     if (!id) return { success: false, error: 'معرف المستخدم مطلوب.' };
 
@@ -740,21 +770,23 @@ class SQLiteService {
 
     if (setParts.length === 0) return { success: false, error: 'لا توجد بيانات للتحديث.' };
     this.db.run(`UPDATE app_users SET ${setParts.join(', ')} WHERE id = ${id}`);
+    this._recordAuditLogInternal(updated_by, 'USER_UPDATE', 'app_users', String(id), `تعديل بيانات المستخدم #${id}`);
     this.saveToDisk();
     return { success: true, message: 'تم تحديث بيانات المستخدم بنجاح.' };
   }
 
-  async deleteUser(id) {
+  async deleteUser(id, deleted_by = 'admin') {
     await this.init();
     // Prevent deleting the last admin
     const admins = this.db.exec(`SELECT id FROM app_users WHERE role = 'admin' AND is_active = 1`);
     const adminRows = this._formatRows(admins);
-    const userRes = this.db.exec(`SELECT role FROM app_users WHERE id = ${id}`);
+    const userRes = this.db.exec(`SELECT role, username FROM app_users WHERE id = ${id}`);
     const userRow = this._formatRows(userRes)[0];
     if (userRow?.role === 'admin' && adminRows.length <= 1) {
       return { success: false, error: 'لا يمكن حذف المدير الوحيد في النظام.' };
     }
     this.db.run(`DELETE FROM app_users WHERE id = ${id}`);
+    this._recordAuditLogInternal(deleted_by, 'USER_DELETE', 'app_users', String(id), `حذف المستخدم [${userRow?.username || id}]`);
     this.saveToDisk();
     return { success: true, message: 'تم حذف المستخدم.' };
   }
@@ -828,9 +860,26 @@ class SQLiteService {
   async saveMedicine(med) {
     await this.init();
     const id = med.id || Date.now();
-    const existing = this.db.exec(`SELECT id FROM medicines WHERE id = ${id}`);
+    const existingRows = this._formatRows(this.db.exec(`SELECT * FROM medicines WHERE id = ${id} LIMIT 1`));
+    const isUpdate = existingRows.length > 0;
 
-    if (existing.length > 0 && existing[0].values.length > 0) {
+    let priceChanged = false;
+    let oldPriceBox = 0;
+    let oldPriceStrip = 0;
+
+    if (isUpdate) {
+      const old = existingRows[0];
+      oldPriceBox = Number(old.price_box) || 0;
+      oldPriceStrip = Number(old.price_strip) || 0;
+      const newPriceBox = Number(med.price_box) || 0;
+      const newPriceStrip = Number(med.price_strip) || 0;
+      if (Math.abs(oldPriceBox - newPriceBox) > 0.001 || Math.abs(oldPriceStrip - newPriceStrip) > 0.001) {
+        priceChanged = true;
+        this._requirePermission('canEditPrice');
+      }
+    }
+
+    if (isUpdate) {
       // Update
       const stmt = this.db.prepare(`
         UPDATE medicines SET
@@ -846,6 +895,17 @@ class SQLiteService {
         med.preferred_supplier, id
       ]);
       stmt.free();
+
+      if (priceChanged) {
+        const userName = this._currentUser?.full_name || this._currentUser?.name || 'النظام';
+        this._recordAuditLogInternal(
+          userName,
+          'PRICE_CHANGE',
+          'medicine',
+          String(id),
+          `تغيير سعر [${med.trade_name_ar || med.trade_name}]: علبة من ${oldPriceBox} إلى ${med.price_box} ج.م`
+        );
+      }
     } else {
       // Insert
       const stmt = this.db.prepare(`
@@ -870,7 +930,13 @@ class SQLiteService {
 
   async deleteMedicine(id) {
     await this.init();
-    this.db.run(`DELETE FROM medicines WHERE id = ${id}`);
+    this._requirePermission('canDeleteItem');
+    const safeId = Number(id);
+    const existingRows = this._formatRows(this.db.exec(`SELECT trade_name, trade_name_ar FROM medicines WHERE id = ${safeId} LIMIT 1`));
+    const name = existingRows[0]?.trade_name_ar || existingRows[0]?.trade_name || String(id);
+    this.db.run(`DELETE FROM medicines WHERE id = ${safeId}`);
+    const userName = this._currentUser?.full_name || this._currentUser?.name || 'النظام';
+    this._recordAuditLogInternal(userName, 'DELETE_MEDICINE', 'medicine', String(id), `حذف الصنف الدوائي [${name}] من المخزن`);
     this.saveToDisk();
   }
 
@@ -987,6 +1053,34 @@ class SQLiteService {
     const discount = Number(invoiceData.discount) || 0;
     const cashierName = invoiceData.cashier_name || 'الكاشير';
 
+    let paidCash = 0;
+    let paidCredit = 0;
+    let paidCard = 0;
+
+    if (paymentMethod === 'كاش') {
+      paidCash = Math.max(0, totalRetail);
+    } else if (paymentMethod === 'فيزا' || paymentMethod === 'إنستاباي') {
+      paidCard = Math.max(0, totalRetail);
+    } else if (paymentMethod === 'آجل') {
+      paidCredit = Math.max(0, totalRetail);
+    } else if (paymentMethod === 'مختلط') {
+      paidCash = Number(invoiceData.paid_cash);
+      paidCredit = Number(invoiceData.paid_credit);
+      paidCard = Number(invoiceData.paid_card) || 0;
+
+      if (!Number.isFinite(paidCash) || !Number.isFinite(paidCredit) || !Number.isFinite(paidCard) ||
+          paidCash < 0 || paidCredit < 0 || paidCard < 0) {
+        throw new Error('قيم الدفع المختلط يجب أن تكون أرقاماً موجبة وصحيحة.');
+      }
+      if (paidCash <= 0 || paidCash >= totalRetail) {
+        throw new Error('في الدفع المختلط، يجب أن يكون المبلغ المدفوع كاش أكبر من صفر وأقل من إجمالي الفاتورة.');
+      }
+      const sumSplit = paidCash + paidCredit + paidCard;
+      if (Math.abs(sumSplit - totalRetail) > 0.01) {
+        throw new Error(`مجموع مبالغ الدفع المختلط (${sumSplit.toFixed(2)}) لا يطابق إجمالي الفاتورة (${totalRetail.toFixed(2)}).`);
+      }
+    }
+
     // Make sure the invoice id is unique even if the caller sends a stale one
     let invoiceId = String(invoiceData.id || '').trim();
     if (!invoiceId) invoiceId = this.generateInvoiceId();
@@ -999,22 +1093,6 @@ class SQLiteService {
 
     try {
       // 1. Insert Invoice Header
-      let paidCash = 0;
-      let paidCredit = 0;
-      let paidCard = 0;
-
-      if (paymentMethod === 'كاش') {
-        paidCash = totalRetail;
-      } else if (paymentMethod === 'فيزا' || paymentMethod === 'إنستاباي') {
-        paidCard = totalRetail;
-      } else if (paymentMethod === 'آجل') {
-        paidCredit = totalRetail;
-      } else if (paymentMethod === 'مختلط') {
-        paidCash = Number(invoiceData.paid_cash) || 0;
-        paidCredit = Number(invoiceData.paid_credit) || Math.max(0, totalRetail - paidCash);
-        paidCard = Number(invoiceData.paid_card) || 0;
-      }
-
       const invStmt = this.db.prepare(`
         INSERT INTO invoices (
           id, shift_id, cashier_name, date_time, time_str, customer_name,
@@ -1161,6 +1239,16 @@ class SQLiteService {
         );
       }
 
+      if (discount > 0) {
+        this._recordAuditLogInternal(
+          cashierName,
+          'DISCOUNT',
+          'invoice',
+          invoiceId,
+          `منح خصم بقيمة ${discount} ج.م على الفاتورة #${invoiceId} (الإجمالي قبل الخصم: ${(totalRetail + discount).toFixed(2)} ج.م)`
+        );
+      }
+
       this.db.run('COMMIT;');
       this.saveToDisk();
       this._enqueueSync('invoice', invoiceId, 'CREATE', {
@@ -1173,6 +1261,9 @@ class SQLiteService {
         total_cost: totalCost,
         total_profit: totalProfit,
         discount,
+        paid_cash: paidCash,
+        paid_credit: paidCredit,
+        paid_card: paidCard,
         items_count: items.length,
         date_time: dateTime,
         items
@@ -1360,28 +1451,37 @@ class SQLiteService {
 
   // --- 4.b CUSTOMER SALE REFUND & AUDIT LOG ---
 
-  async getInvoiceRefunds(invoiceId) {
+  async getAllRefunds(limit = 200) {
     await this.init();
-    const safeId = String(invoiceId).replace(/'/g, "''");
-    const res = this.db.exec(`SELECT * FROM sale_refunds WHERE invoice_id = '${safeId}' ORDER BY date_time ASC`);
+    const res = this.db.exec(`
+      SELECT 
+        sr.*,
+        inv.payment_method,
+        inv.paid_cash,
+        inv.paid_credit,
+        inv.paid_card,
+        inv.total_retail as invoice_total
+      FROM sale_refunds sr
+      LEFT JOIN invoices inv ON sr.invoice_id = inv.id
+      ORDER BY sr.date_time DESC
+      LIMIT ${Number(limit) || 200}
+    `);
     return this._formatRows(res);
   }
 
   async refundInvoice(refundData) {
     await this.init();
+    this._requirePermission('canRefund');
+
     const invoiceId = String(refundData.invoice_id || '').trim();
-    const itemsToRefund = Array.isArray(refundData.items) ? refundData.items : [];
-    const refundAmount = parseFloat(refundData.refund_amount) || 0;
-    const reason = String(refundData.reason || 'طلب العميل').trim();
-    const cashierName = String(refundData.cashier_name || 'الكاشير').trim();
+    if (!invoiceId) {
+      throw new Error('رقم الفاتورة مطلوب لإتمام المرتجع.');
+    }
 
     const currentShift = await this.getCurrentShift();
     const shiftId = refundData.shift_id || currentShift?.id || '';
     if (!shiftId) {
       throw new Error('لا يمكن تسجيل مرتجع بيع بدون وجود وردية مفتوحة!');
-    }
-    if (refundAmount <= 0) {
-      throw new Error('مبلغ المرتجع يجب أن يكون أكبر من صفر');
     }
 
     const safeInvId = invoiceId.replace(/'/g, "''");
@@ -1390,34 +1490,120 @@ class SQLiteService {
       throw new Error(`الفاتورة رقم #${invoiceId} غير موجودة في قاعدة البيانات.`);
     }
     const origInvoice = invRows[0];
+    if (origInvoice.status === 'REFUNDED') {
+      throw new Error(`الفاتورة #${invoiceId} تم استرجاعها بالكامل مسبقاً.`);
+    }
+
     const origTotal = Number(origInvoice.total_retail) || 0;
     const paymentMethod = origInvoice.payment_method || 'كاش';
 
     // Verify previously refunded amount
-    const prevRefundsRes = this.db.exec(`SELECT SUM(refund_amount) as total_refunded FROM sale_refunds WHERE invoice_id = '${safeInvId}'`);
-    const prevRefunded = Number(this._formatRows(prevRefundsRes)[0]?.total_refunded) || 0;
-    const remainingEligible = Math.max(0, origTotal - prevRefunded);
+    const prevRefundsRes = this.db.exec(`SELECT refund_amount, items_json FROM sale_refunds WHERE invoice_id = '${safeInvId}'`);
+    const prevRefunds = this._formatRows(prevRefundsRes);
+    const prevRefundedAmount = prevRefunds.reduce((sum, r) => sum + (Number(r.refund_amount) || 0), 0);
+    const remainingEligibleAmount = Math.max(0, origTotal - prevRefundedAmount);
 
-    if (refundAmount > (remainingEligible + 0.01)) {
-      throw new Error(`مبلغ المرتجع المطلوب (${refundAmount.toFixed(2)}) يتجاوز المتبقي القابل للاسترجاع للفاتورة (${remainingEligible.toFixed(2)} ج.م)`);
+    if (remainingEligibleAmount <= 0.009) {
+      throw new Error(`تم استرجاع كامل قيمة الفاتورة #${invoiceId} مسبقاً.`);
     }
 
-    const refundId = `REF-${Date.now()}`;
+    const refundAmount = parseFloat(refundData.refund_amount) || 0;
+    if (refundAmount <= 0) {
+      throw new Error('مبلغ المرتجع يجب أن يكون أكبر من صفر.');
+    }
+    if (refundAmount > (remainingEligibleAmount + 0.01)) {
+      throw new Error(`مبلغ المرتجع المطلوب (${refundAmount.toFixed(2)}) يتجاوز المتبقي القابل للاسترجاع للفاتورة (${remainingEligibleAmount.toFixed(2)} ج.م)`);
+    }
+
+    const reason = String(refundData.reason || 'طلب العميل').trim();
+    const cashierName = String(refundData.cashier_name || this._currentUser?.full_name || 'الكاشير').trim();
+
+    // Fetch original items from invoice_items directly — never trust client list blindly
+    const origItemsRes = this.db.exec(`SELECT * FROM invoice_items WHERE invoice_id = '${safeInvId}'`);
+    const origInvoiceItems = this._formatRows(origItemsRes);
+
+    // Sum previously refunded quantities per (medicine_id, is_strip)
+    const previouslyRefundedQtyMap = new Map(); // key: `${medicine_id}_${is_strip}` => total qty
+    for (const pr of prevRefunds) {
+      let prItems = [];
+      try { prItems = JSON.parse(pr.items_json || '[]'); } catch (e) {}
+      for (const pi of prItems) {
+        const key = `${Number(pi.medicine_id)}_${pi.is_strip ? 1 : 0}`;
+        previouslyRefundedQtyMap.set(key, (previouslyRefundedQtyMap.get(key) || 0) + (Number(pi.quantity) || 0));
+      }
+    }
+
+    // Determine items to refund
+    const incomingItems = Array.isArray(refundData.items) && refundData.items.length > 0 ? refundData.items : origInvoiceItems;
+    const isFullRemainingRequested = Math.abs(refundAmount - remainingEligibleAmount) <= 0.01;
+
+    const validatedItemsToRefund = [];
+    for (const inc of incomingItems) {
+      const medId = Number(inc.medicine_id);
+      const isStrip = inc.is_strip ? 1 : 0;
+      const key = `${medId}_${isStrip}`;
+
+      const origLine = origInvoiceItems.find((oi) => Number(oi.medicine_id) === medId && (oi.is_strip ? 1 : 0) === isStrip);
+      if (!origLine) {
+        throw new Error(`الصنف رقم #${medId} لا ينتمي إلى الفاتورة الأصلية #${invoiceId}.`);
+      }
+
+      const origQty = Number(origLine.quantity) || 0;
+      const alreadyReturned = previouslyRefundedQtyMap.get(key) || 0;
+      const remainingQty = Math.max(0, origQty - alreadyReturned);
+
+      let qtyToReturn = Number(inc.quantity) || 0;
+      if (isFullRemainingRequested && (qtyToReturn <= 0 || qtyToReturn > remainingQty)) {
+        qtyToReturn = remainingQty;
+      }
+
+      if (qtyToReturn > (remainingQty + 0.0001)) {
+        throw new Error(`الكمية المرتجعة من [${origLine.trade_name_ar || origLine.trade_name}] (${qtyToReturn}) تتجاوز الكمية المتبقية القابلة للإرجاع (${remainingQty}).`);
+      }
+
+      if (qtyToReturn > 0) {
+        validatedItemsToRefund.push({
+          medicine_id: medId,
+          is_strip: isStrip === 1,
+          quantity: qtyToReturn,
+          trade_name: origLine.trade_name || '',
+          trade_name_ar: origLine.trade_name_ar || ''
+        });
+      }
+    }
+
+    // Unique refund ID using timestamp + random crypto/hex
+    const randSuffix = Math.floor(Math.random() * 900000 + 100000);
+    const refundId = `REF-${Date.now()}-${randSuffix}`;
     const nowIso = new Date().toISOString();
+    const originalShiftId = origInvoice.shift_id || '';
 
     this.db.run('BEGIN TRANSACTION;');
     try {
-      // 1. Insert Refund Record
+      // 1. Insert Refund Record (storing only clean items array)
+      const cleanItemsJson = JSON.stringify(
+        validatedItemsToRefund.map((v) => ({
+          medicine_id: v.medicine_id,
+          is_strip: v.is_strip,
+          quantity: v.quantity
+        }))
+      );
+
       const stmt = this.db.prepare(`
-        INSERT INTO sale_refunds (id, invoice_id, shift_id, cashier_name, date_time, refund_amount, reason, items_json)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO sale_refunds (
+          id, invoice_id, shift_id, original_shift_id, cashier_name,
+          date_time, refund_amount, reason, items_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
-      stmt.run([refundId, invoiceId, shiftId, cashierName, nowIso, refundAmount, reason, JSON.stringify(itemsToRefund)]);
+      stmt.run([
+        refundId, invoiceId, shiftId, originalShiftId, cashierName,
+        nowIso, refundAmount, reason, cleanItemsJson
+      ]);
       stmt.free();
 
-      // 2. Restock medicines in inventory
+      // 2. Restock medicines in inventory with naturalization
       const stockStmt = this.db.prepare('UPDATE medicines SET stock_boxes = ?, stock_strips = ? WHERE id = ?');
-      for (const item of itemsToRefund) {
+      for (const item of validatedItemsToRefund) {
         const medId = Number(item.medicine_id);
         const qty = Number(item.quantity) || 0;
         if (!medId || qty <= 0) continue;
@@ -1430,7 +1616,7 @@ class SQLiteService {
         let strips = Math.max(0, parseInt(medRows[0].stock_strips, 10) || 0);
 
         if (item.is_strip) {
-          let totalStrips = (boxes * spb) + strips + qty;
+          const totalStrips = (boxes * spb) + strips + qty;
           boxes = Math.floor(totalStrips / spb);
           strips = totalStrips % spb;
         } else {
@@ -1441,6 +1627,7 @@ class SQLiteService {
       stockStmt.free();
 
       // 3. Deduct from Shift and/or Customer Balance according to original payment method
+      // Note: Drawer cash is deducted from the CURRENT open shift because actual cash is given out now.
       if (paymentMethod === 'كاش') {
         this.db.run(`
           UPDATE shifts 
@@ -1477,17 +1664,33 @@ class SQLiteService {
           );
         }
       } else if (paymentMethod === 'مختلط') {
-        // Proportionate or direct split based on paid_cash and paid_credit
-        const invPaidCash = Number(origInvoice.paid_cash) || 0;
-        const invPaidCredit = Number(origInvoice.paid_credit) || 0;
-        const cashRatio = origTotal > 0 ? (invPaidCash / origTotal) : 1;
-        const refundCash = Math.min(invPaidCash, Math.round(refundAmount * cashRatio * 100) / 100);
-        const refundCredit = Math.max(0, Math.round((refundAmount - refundCash) * 100) / 100);
+        // Proportionate 3-way split across paid_cash, paid_credit, paid_card
+        const invPaidCash = Math.max(0, Number(origInvoice.paid_cash) || 0);
+        const invPaidCredit = Math.max(0, Number(origInvoice.paid_credit) || 0);
+        const invPaidCard = Math.max(0, Number(origInvoice.paid_card) || 0);
+        const denom = (invPaidCash + invPaidCredit + invPaidCard) || origTotal || 1;
+
+        let refundCash = Math.round((refundAmount * (invPaidCash / denom)) * 100) / 100;
+        let refundCredit = Math.round((refundAmount * (invPaidCredit / denom)) * 100) / 100;
+        let refundCard = Math.round((refundAmount * (invPaidCard / denom)) * 100) / 100;
+
+        // Ensure sum matches refundAmount exactly (absorb rounding into largest allocation)
+        const diffRounding = Math.round((refundAmount - (refundCash + refundCredit + refundCard)) * 100) / 100;
+        if (diffRounding !== 0) {
+          if (refundCash >= refundCredit && refundCash >= refundCard) {
+            refundCash = Math.max(0, Math.round((refundCash + diffRounding) * 100) / 100);
+          } else if (refundCredit >= refundCash && refundCredit >= refundCard) {
+            refundCredit = Math.max(0, Math.round((refundCredit + diffRounding) * 100) / 100);
+          } else {
+            refundCard = Math.max(0, Math.round((refundCard + diffRounding) * 100) / 100);
+          }
+        }
 
         this.db.run(`
           UPDATE shifts 
           SET cash_sales = CASE WHEN cash_sales >= ${refundCash} THEN cash_sales - ${refundCash} ELSE 0 END,
               credit_sales = CASE WHEN credit_sales >= ${refundCredit} THEN credit_sales - ${refundCredit} ELSE 0 END,
+              visa_sales = CASE WHEN visa_sales >= ${refundCard} THEN visa_sales - ${refundCard} ELSE 0 END,
               total_sales = CASE WHEN total_sales >= ${refundAmount} THEN total_sales - ${refundAmount} ELSE 0 END,
               expected_cash = opening_cash + cash_sales + debt_collections - petty_expenses
           WHERE id = '${shiftId}'
@@ -1502,17 +1705,31 @@ class SQLiteService {
       }
 
       // 4. Update Invoice Status if fully refunded
-      if (prevRefunded + refundAmount >= (origTotal - 0.01)) {
+      if ((prevRefundedAmount + refundAmount) >= (origTotal - 0.01)) {
         this.db.run(`UPDATE invoices SET status = 'REFUNDED' WHERE id = '${safeInvId}'`);
       }
 
       // 5. Record Audit Log
-      this._recordAuditLogInternal(cashierName, 'REFUND', 'invoice', invoiceId, `استرجاع مبيعات بقيمة ${refundAmount} ج.م [طريقة الدفع: ${paymentMethod}] - السبب: ${reason}`);
+      this._recordAuditLogInternal(
+        cashierName,
+        'REFUND',
+        'invoice',
+        invoiceId,
+        `استرجاع مبيعات بقيمة ${refundAmount.toFixed(2)} ج.م [طريقة الدفع: ${paymentMethod}] - السبب: ${reason}`
+      );
 
       this.db.run('COMMIT;');
       this.saveToDisk();
       this._enqueueSync('sale_refund', refundId, 'CREATE', {
-        id: refundId, invoiceId, shiftId, refundAmount, reason, cashierName, date_time: nowIso
+        id: refundId,
+        invoice_id: invoiceId,
+        shift_id: shiftId,
+        original_shift_id: originalShiftId,
+        refund_amount: refundAmount,
+        reason,
+        cashier_name: cashierName,
+        date_time: nowIso,
+        items: cleanItemsJson
       }, shiftId);
 
       return { success: true, refundId, refundAmount };
@@ -1549,11 +1766,27 @@ class SQLiteService {
   }
 
   // Stock Take / Physical Inventory Audits
+  async getMedicinesForStockTake(page = 1, pageSize = 500) {
+    await this.init();
+    const offset = (Math.max(1, page) - 1) * pageSize;
+    const res = this.db.exec(`
+      SELECT id, trade_name, trade_name_ar, barcode, stock_boxes, stock_strips, strips_per_box, price_box, price_strip, shelf, category
+      FROM medicines
+      ORDER BY id ASC
+      LIMIT ${pageSize} OFFSET ${offset}
+    `);
+    const totalRes = this.db.exec('SELECT COUNT(*) as count FROM medicines');
+    const total = this._formatRows(totalRes)[0]?.count || 0;
+    return { items: this._formatRows(res), total, hasMore: offset + pageSize < total };
+  }
+
   async saveStockTake(stockTakeData) {
     await this.init();
+    this._requirePermission('canStockTake');
+
     const title = stockTakeData.title || `جرد مخزون - ${new Date().toLocaleDateString('ar-EG')}`;
     const items = Array.isArray(stockTakeData.items) ? stockTakeData.items : [];
-    const auditor = stockTakeData.auditor_name || 'مدير الصيدلية';
+    const auditor = stockTakeData.auditor_name || this._currentUser?.full_name || 'مدير الصيدلية';
     const notes = stockTakeData.notes || '';
 
     this.db.run('BEGIN TRANSACTION;');
@@ -1565,30 +1798,81 @@ class SQLiteService {
 
       for (const item of items) {
         const medId = Number(item.id);
-        const actualBoxes = Number(item.actual_boxes);
-        const actualStrips = Number(item.actual_strips || 0);
-        const currentBoxes = Number(item.stock_boxes || 0);
+        if (!Number.isFinite(medId) || medId <= 0) continue;
 
-        if (actualBoxes !== currentBoxes) {
+        // Fetch current stock from the database directly
+        const currentRows = this._formatRows(
+          this.db.exec(`SELECT stock_boxes, stock_strips, strips_per_box, price_box FROM medicines WHERE id = ${medId} LIMIT 1`)
+        );
+        if (currentRows.length === 0) continue;
+
+        const currentMed = currentRows[0];
+        const spb = Math.max(1, parseInt(currentMed.strips_per_box, 10) || 1);
+        const priceBox = Number(currentMed.price_box) || 0;
+
+        const rawActualBoxes = Number(item.actual_boxes);
+        const rawActualStrips = Number(item.actual_strips != null ? item.actual_strips : 0);
+
+        if (!Number.isFinite(rawActualBoxes) || rawActualBoxes < 0 ||
+            !Number.isFinite(rawActualStrips) || rawActualStrips < 0) {
+          throw new Error(`قيم الجرد للصنف #${medId} غير صالحة (NaN أو سالبة).`);
+        }
+
+        // Naturalize input actual count: convert strips into whole boxes if strips >= spb
+        const actualTotalStrips = Math.round((Math.floor(rawActualBoxes) * spb) + Math.floor(rawActualStrips));
+        const finalBoxes = Math.floor(actualTotalStrips / spb);
+        const finalStrips = actualTotalStrips % spb;
+
+        const currentBoxes = Math.max(0, parseInt(currentMed.stock_boxes, 10) || 0);
+        const currentStrips = Math.max(0, parseInt(currentMed.stock_strips, 10) || 0);
+        const currentTotalStrips = (currentBoxes * spb) + currentStrips;
+
+        const diffStrips = actualTotalStrips - currentTotalStrips;
+        if (diffStrips !== 0) {
           discrepancyCount++;
-          const diffBoxes = actualBoxes - currentBoxes;
-          netDiffValue += diffBoxes * (Number(item.price_box) || 0);
-          updateMedStmt.run([actualBoxes, actualStrips, medId]);
+          const diffBoxesEquiv = diffStrips / spb;
+          netDiffValue += diffBoxesEquiv * priceBox;
+          updateMedStmt.run([finalBoxes, finalStrips, medId]);
         }
       }
       updateMedStmt.free();
 
+      netDiffValue = Math.round(netDiffValue * 100) / 100;
+
+      const nowIso = new Date().toISOString();
       const stmt = this.db.prepare(`
         INSERT INTO stock_takes (title, created_at, total_items, discrepancy_count, net_difference_value, auditor_name, notes)
         VALUES (?, ?, ?, ?, ?, ?, ?)
       `);
-      stmt.run([title, new Date().toISOString(), items.length, discrepancyCount, netDiffValue, auditor, notes]);
+      stmt.run([title, nowIso, items.length, discrepancyCount, netDiffValue, auditor, notes]);
       stmt.free();
 
-      this._recordAuditLogInternal(auditor, 'STOCK_TAKE', 'inventory', `${items.length} items`, `إجراء جرد مخزون فعلي: فروقات في ${discrepancyCount} صنف بقيمة ${netDiffValue.toFixed(2)} ج.م`);
+      // Retrieve inserted stock take id
+      const lastIdRes = this.db.exec('SELECT last_insert_rowid() as id');
+      const stockTakeId = this._formatRows(lastIdRes)[0]?.id || Date.now();
+
+      this._recordAuditLogInternal(
+        auditor,
+        'STOCK_TAKE',
+        'inventory',
+        `${items.length} items`,
+        `إجراء جرد مخزون فعلي: فروقات في ${discrepancyCount} صنف بقيمة ${netDiffValue.toFixed(2)} ج.م`
+      );
 
       this.db.run('COMMIT;');
       this.saveToDisk();
+
+      this._enqueueSync('stock_take', String(stockTakeId), 'CREATE', {
+        id: stockTakeId,
+        title,
+        created_at: nowIso,
+        total_items: items.length,
+        discrepancy_count: discrepancyCount,
+        net_difference_value: netDiffValue,
+        auditor_name: auditor,
+        notes
+      });
+
       return { success: true, discrepancyCount, netDiffValue };
     } catch (e) {
       this.db.run('ROLLBACK;');
@@ -2271,6 +2555,11 @@ class SQLiteService {
       LEFT JOIN shifts s ON s.id = r.shift_id
       ORDER BY r.date_time DESC LIMIT 5000
     `)).filter((r) => !r.shift_id || shiftIds.has(String(r.shift_id)));
+    const refunds = this._formatRows(this.db.exec(`
+      SELECT rf.* FROM sale_refunds rf
+      LEFT JOIN shifts s ON s.id = rf.shift_id
+      ORDER BY rf.date_time DESC LIMIT 5000
+    `)).filter((rf) => !rf.shift_id || shiftIds.has(String(rf.shift_id)));
 
     const itemsByInvoice = new Map();
     for (const item of invoiceItems) {
@@ -2318,6 +2607,7 @@ class SQLiteService {
       purchases: purchaseRows.map((p) => ({ ...p, items: itemsByPurchase.get(String(p.id)) || [] })),
       expenses,
       returns,
+      refunds,
       outOfStock: outOfStockMeds
     };
 

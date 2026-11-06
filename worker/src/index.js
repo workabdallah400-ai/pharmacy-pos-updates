@@ -112,6 +112,7 @@ async function mergeSnapshot(env, pharmacyId, snapshot, pharmacyName) {
     purchases: Array.isArray(snapshot.purchases) ? snapshot.purchases : [],
     expenses: Array.isArray(snapshot.expenses) ? snapshot.expenses : [],
     returns: Array.isArray(snapshot.returns) ? snapshot.returns : [],
+    refunds: Array.isArray(snapshot.refunds) ? snapshot.refunds : [],
     outOfStock: Array.isArray(snapshot.outOfStock) ? snapshot.outOfStock : [],
     capturedAt: new Date().toISOString()
   };
@@ -121,7 +122,8 @@ async function mergeSnapshot(env, pharmacyId, snapshot, pharmacyName) {
     invoices: store.snapshot.invoices.length,
     purchases: store.snapshot.purchases.length,
     expenses: store.snapshot.expenses.length,
-    returns: store.snapshot.returns.length
+    returns: store.snapshot.returns.length,
+    refunds: store.snapshot.refunds.length
   };
 }
 

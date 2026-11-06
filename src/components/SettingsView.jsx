@@ -41,6 +41,7 @@ import { playBarcodeBeep, playCashDrawerSound } from '../utils/sound';
 import { activateLicenseKey, getMachineId, checkLicenseStatus, revokeLicense } from '../utils/licenseManager';
 import { UsersManagementView } from './UsersManagementView';
 import { sqliteService } from '../db/sqliteService';
+import { hasPermission } from '../utils/permissions';
 import { initReportServer, getReportPreviewBaseUrl, getPermanentReportBaseUrl, buildLiveReportsUrl, buildDailySummaryUrl, buildMonthlySummaryUrl } from '../utils/reportServer';
 import {
   checkForUpdates,
@@ -480,7 +481,7 @@ export function SettingsView({ onUpdatePharmacyName, onRevokeDevice, currentUser
   const [loadingAuditLogs, setLoadingAuditLogs] = useState(false);
 
   useEffect(() => {
-    if (activeTab === 'users' || activeTab === 'audit') {
+    if (activeTab === 'audit') {
       setLoadingAuditLogs(true);
       sqliteService.getAuditLogs(100)
         .then((logs) => setAuditLogsList(logs || []))
@@ -489,16 +490,21 @@ export function SettingsView({ onUpdatePharmacyName, onRevokeDevice, currentUser
     }
   }, [activeTab]);
 
-  const navTabs = [
+  const allNavTabs = [
     { id: 'receipt', label: 'هوية الصيدلية والفاتورة', icon: Store },
     { id: 'hardware', label: 'الأجهزة والطباعة والدرج', icon: Printer },
     { id: 'backup', label: 'النسخ الاحتياطي والأمان', icon: HardDrive },
     { id: 'license', label: 'التراخيص وبوابة المطور', icon: Key },
-    { id: 'users', label: 'إدارة المستخدمين والحسابات', icon: Shield },
-    { id: 'audit', label: 'سجل العمليات والتدقيق (Audit Log)', icon: Eye },
+    { id: 'users', label: 'إدارة المستخدمين والحسابات', icon: Shield, permission: 'canManageUsers' },
+    { id: 'audit', label: 'سجل العمليات والتدقيق (Audit Log)', icon: Eye, permission: 'canViewAuditLog' },
     { id: 'security', label: 'صلاحيات PIN التقليدية', icon: Lock },
     { id: 'cloud', label: 'المزامنة وبوابة الموبايل', icon: Cloud }
   ];
+
+  const navTabs = allNavTabs.filter((tab) => {
+    if (!tab.permission) return true;
+    return hasPermission(currentUser, tab.permission);
+  });
 
   return (
     <div className="flex-1 flex flex-col h-full bg-[#0B1220] overflow-hidden select-none p-4 space-y-4 font-cairo">
@@ -1250,21 +1256,6 @@ export function SettingsView({ onUpdatePharmacyName, onRevokeDevice, currentUser
           {activeTab === 'security' && (
             <div className="max-w-3xl space-y-8">
 
-              {/* ======= USER ACCOUNTS MANAGEMENT ======= */}
-              <div>
-                <div className="text-xs font-bold text-teal-400 flex items-center gap-2 mb-4">
-                  <Shield className="w-4 h-4" />
-                  إدارة حسابات المستخدمين وصلاحياتهم (نظام يوزرنيم وباسورد):
-                </div>
-                <UsersManagementView currentUser={currentUser} />
-              </div>
-
-              {/* Divider */}
-              <div className="border-t border-[#23324D] pt-6">
-                <div className="text-xs font-bold text-slate-400 flex items-center gap-2 mb-4">
-                  <Lock className="w-4 h-4" />
-                  إعدادات PIN التقليدية (الرمز السريع القديم - للتوافق فقط):
-                </div>
               {/* PIN Settings */}
               <div className="grid grid-cols-2 gap-4">
                 
@@ -1372,8 +1363,6 @@ export function SettingsView({ onUpdatePharmacyName, onRevokeDevice, currentUser
                 </div>
 
               </div>
-
-              </div>{/* close border-t div */}
 
             </div>
           )}

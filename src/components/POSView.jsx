@@ -29,6 +29,7 @@ import { ParkedBillsModal } from './ParkedBillsModal';
 import { QuickExpenseModal } from './QuickExpenseModal';
 import { MobileQRModal } from './MobileQRModal';
 import { sqliteService } from '../db/sqliteService';
+import { hasPermission } from '../utils/permissions';
 
 export function POSView({
   currentUser,
@@ -1074,8 +1075,8 @@ export function POSView({
                     min="0"
                     placeholder="0"
                     disabled={
-                      (currentUser?.role === 'cashier' || currentUser?.role === 'pharmacist') &&
-                      !(currentUser?.permissions?.canDiscount ?? currentUser?.permissions?.canGiveDiscount ?? currentUser?.canDiscount)
+                      !hasPermission(currentUser, 'canDiscount') &&
+                      !hasPermission(currentUser, 'canGiveDiscount')
                     }
                     value={discount || ''}
                     onChange={(e) => setDiscount(e.target.value)}
@@ -1125,14 +1126,18 @@ export function POSView({
             <div className="grid grid-cols-2 gap-2 text-xs">
               <div className="bg-[#17233A] border border-[#23324D] p-1.5 px-2.5 rounded-xl flex items-center justify-between">
                 <span className="text-slate-400 text-[11px]">المستلم:</span>
-                <input
-                  type="number"
-                  placeholder={currentTotal.toFixed(0)}
-                  value={paidAmount}
-                  onChange={(e) => setPaidAmount(e.target.value)}
-                  className="w-20 text-left bg-transparent text-white font-mono font-bold outline-none text-xs"
-                  dir="ltr"
-                />
+                {paymentMethod === 'مختلط' ? (
+                  <span className="text-[11px] text-amber-300 font-medium">انظر تفصيل المختلط أعلاه</span>
+                ) : (
+                  <input
+                    type="number"
+                    placeholder={currentTotal.toFixed(0)}
+                    value={paidAmount}
+                    onChange={(e) => setPaidAmount(e.target.value)}
+                    className="w-20 text-left bg-transparent text-white font-mono font-bold outline-none text-xs"
+                    dir="ltr"
+                  />
+                )}
               </div>
 
               <div className="bg-[#17233A] border border-[#23324D] p-1.5 px-2.5 rounded-xl flex items-center justify-between">

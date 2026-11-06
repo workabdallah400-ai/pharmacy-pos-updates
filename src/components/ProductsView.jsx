@@ -29,6 +29,7 @@ import { ProductModal } from './ProductModal';
 import { BarcodeStickerModal } from './BarcodeStickerModal';
 import { StockTakeModal } from './StockTakeModal';
 import { sqliteService } from '../db/sqliteService';
+import { hasPermission } from '../utils/permissions';
 
 export function ProductsView({ currentUser, medicines = [], onSaveMedicine, onDeleteMedicine }) {
   // Search & Filter State
@@ -391,7 +392,7 @@ export function ProductsView({ currentUser, medicines = [], onSaveMedicine, onDe
   // Start Quick Inline Edit
   const startQuickEdit = (med) => {
     if (!med) return;
-    const canEdit = !currentUser || currentUser?.role === 'admin' || currentUser?.permissions?.canEditPrice !== false;
+    const canEdit = hasPermission(currentUser, 'canEditPrice');
     if (!canEdit) {
       showToast('ليس لديك صلاحية لتعديل أسعار الأدوية ⚠️', 'warning');
       return;
@@ -621,7 +622,7 @@ export function ProductsView({ currentUser, medicines = [], onSaveMedicine, onDe
               </button>
 
               {/* Physical Stock Take / Audit Button */}
-              {(!currentUser || currentUser?.role === 'admin' || currentUser?.permissions?.canStockTake !== false) && (
+              {hasPermission(currentUser, 'canStockTake') && (
                 <button
                   type="button"
                   onClick={() => setShowStockTakeModal(true)}
@@ -878,7 +879,7 @@ export function ProductsView({ currentUser, medicines = [], onSaveMedicine, onDe
                               </button>
 
                               {/* Delete */}
-                              {(!currentUser || currentUser?.role === 'admin' || currentUser?.permissions?.canDeleteItem !== false) && (
+                              {hasPermission(currentUser, 'canDeleteItem') && (
                                 <button
                                   type="button"
                                   onClick={async () => {

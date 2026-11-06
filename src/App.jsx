@@ -31,6 +31,7 @@ import {
 } from './utils/tunnel';
 import { checkForUpdates, downloadUpdate, installUpdate, onUpdateStatus } from './utils/updater';
 import { sqliteService } from './db/sqliteService';
+import { hasPermission } from './utils/permissions';
 import { INITIAL_MEDICINES } from './data/mockMedicines';
 import { INITIAL_SUPPLIERS, INITIAL_PURCHASES } from './data/mockPurchases';
 
@@ -421,14 +422,15 @@ export default function App() {
 
   const handleLoginSuccess = (user) => {
     setCurrentUser(user);
+    try {
+      sqliteService.setCurrentUser(user);
+    } catch (e) {}
     // Respect a deep-linked screen (e.g. #tab=settings&settingsTab=cloud).
     setActiveTab(resolveDeepLinkTab() || 'pos');
   };
 
   // Only admins (or users explicitly granted settings access) may open Settings.
-  const canManageSettings =
-    currentUser?.role === 'admin' ||
-    currentUser?.permissions?.canManageSettings === true;
+  const canManageSettings = hasPermission(currentUser, 'canManageSettings');
 
   const handleOpenLicenseSettings = () => {
     if (!canManageSettings) return;
@@ -437,6 +439,9 @@ export default function App() {
   };
 
   const handleLogout = () => {
+    try {
+      sqliteService.clearCurrentUser();
+    } catch (e) {}
     setCurrentUser(null);
   };
 

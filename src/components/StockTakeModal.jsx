@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Layers,
   Search,
@@ -18,11 +18,15 @@ export function StockTakeModal({ isOpen, onClose, currentUser, onComplete }) {
   const [title, setTitle] = useState(`جرد دوري - ${new Date().toLocaleDateString('ar-EG')}`);
   const [notes, setNotes] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
-  const [medicines, setMedicines] = useState([]);
+  const [displayedMedicines, setDisplayedMedicines] = useState([]);
+  const [medicinesById, setMedicinesById] = useState(new Map());
   const [countedData, setCountedData] = useState({}); // { [medId]: { boxes: number, strips: number } }
   const [historyList, setHistoryList] = useState([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
+  const [isLoadingAll, setIsLoadingAll] = useState(false);
+
+  const searchDebounceRef = useRef(null);
 
   const showToast = (msg) => {
     setToastMessage(msg);
@@ -34,19 +38,52 @@ export function StockTakeModal({ isOpen, onClose, currentUser, onComplete }) {
     if (!isOpen) return;
     let isCurrent = true;
 
-    const loadData = async () => {
+    const loadInitialData = async () => {
+      setIsLoadingAll(true);
       try {
-        const meds = await sqliteService.searchMedicines('', 300);
-        if (isCurrent && meds) {
-          setMedicines(meds);
-          const initialCounts = {};
-          meds.forEach((m) => {
-            initialCounts[m.id] = {
-              boxes: Number(m.stock_boxes) || 0,
-              strips: Number(m.stock_strips) || 0
-            };
+        // Load in batches to populate medicinesById map without freezing the UI
+        let page = 1;
+        let hasMore = true;
+        const allMap = new Map();
+        const initialCounts = {};
+
+        // Fetch first batch quickly for immediate display
+        const firstBatch = await sqliteService.getMedicinesForStockTake(1, 500);
+        if (!isCurrent) return;
+        (firstBatch.items || []).forEach((m) => {
+          allMap.set(Number(m.id), m);
+          initialCounts[m.id] = {
+            boxes: Number(m.stock_boxes) || 0,
+            strips: Number(m.stock_strips) || 0
+          };
+        });
+
+        setMedicinesById(new Map(allMap));
+        setDisplayedMedicines(firstBatch.items || []);
+        setCountedData(initialCounts);
+
+        // Fetch remaining in background if any
+        hasMore = firstBatch.hasMore;
+        page = 2;
+        while (hasMore && isCurrent) {
+          const batch = await sqliteService.getMedicinesForStockTake(page, 500);
+          if (!isCurrent) break;
+          (batch.items || []).forEach((m) => {
+            allMap.set(Number(m.id), m);
+            if (!initialCounts[m.id]) {
+              initialCounts[m.id] = {
+                boxes: Number(m.stock_boxes) || 0,
+                strips: Number(m.stock_strips) || 0
+              };
+            }
           });
-          setCountedData(initialCounts);
+          hasMore = batch.hasMore;
+          page++;
+        }
+
+        if (isCurrent) {
+          setMedicinesById(new Map(allMap));
+          setCountedData((prev) => ({ ...initialCounts, ...prev }));
         }
 
         const hist = await sqliteService.getStockTakes(30);
@@ -55,34 +92,44 @@ export function StockTakeModal({ isOpen, onClose, currentUser, onComplete }) {
         }
       } catch (e) {
         console.warn('Error loading stock take data:', e);
+      } finally {
+        if (isCurrent) setIsLoadingAll(false);
       }
     };
 
-    loadData();
+    loadInitialData();
     return () => { isCurrent = false; };
   }, [isOpen]);
 
-  const handleSearch = async (val) => {
+  const handleSearchChange = (val) => {
     setSearchQuery(val);
-    try {
-      const results = await sqliteService.searchMedicines(val, 200);
-      setMedicines(results || []);
-      // preserve already modified counts, fill missing with defaults
-      setCountedData((prev) => {
-        const updated = { ...prev };
-        (results || []).forEach((m) => {
-          if (!updated[m.id]) {
-            updated[m.id] = {
-              boxes: Number(m.stock_boxes) || 0,
-              strips: Number(m.stock_strips) || 0
-            };
-          }
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+
+    searchDebounceRef.current = setTimeout(async () => {
+      try {
+        const results = await sqliteService.searchMedicines(val, 250);
+        setDisplayedMedicines(results || []);
+        setMedicinesById((prevMap) => {
+          const nextMap = new Map(prevMap);
+          (results || []).forEach((m) => nextMap.set(Number(m.id), m));
+          return nextMap;
         });
-        return updated;
-      });
-    } catch (e) {
-      console.warn('Search error in stock take:', e);
-    }
+        setCountedData((prevCounts) => {
+          const nextCounts = { ...prevCounts };
+          (results || []).forEach((m) => {
+            if (!nextCounts[m.id]) {
+              nextCounts[m.id] = {
+                boxes: Number(m.stock_boxes) || 0,
+                strips: Number(m.stock_strips) || 0
+              };
+            }
+          });
+          return nextCounts;
+        });
+      } catch (e) {
+        console.warn('Search error in stock take:', e);
+      }
+    }, 350);
   };
 
   const handleBoxChange = (id, val) => {
@@ -98,7 +145,8 @@ export function StockTakeModal({ isOpen, onClose, currentUser, onComplete }) {
 
   const handleStripChange = (id, val, stripsPerBox = 1) => {
     const maxStrips = Math.max(0, stripsPerBox - 1);
-    const num = Math.min(maxStrips, Math.max(0, parseInt(val, 10) || 0));
+    const parsed = Math.max(0, parseInt(val, 10) || 0);
+    const num = Math.min(maxStrips, parsed);
     setCountedData((prev) => ({
       ...prev,
       [id]: {
@@ -108,16 +156,21 @@ export function StockTakeModal({ isOpen, onClose, currentUser, onComplete }) {
     }));
   };
 
-  // Discrepancy analysis
+  // Discrepancy analysis: evaluated across ALL counted items in medicinesById,
+  // NOT just the currently filtered/displayed search results.
   const discrepancies = useMemo(() => {
     const list = [];
-    medicines.forEach((med) => {
-      const counted = countedData[med.id];
-      if (!counted) return;
+    for (const [medId, counted] of Object.entries(countedData)) {
+      const med = medicinesById.get(Number(medId));
+      if (!med || !counted) continue;
 
       const spb = Math.max(1, parseInt(med.strips_per_box, 10) || 1);
       const systemTotalStrips = ((parseInt(med.stock_boxes, 10) || 0) * spb) + (parseInt(med.stock_strips, 10) || 0);
-      const countedTotalStrips = (counted.boxes * spb) + counted.strips;
+
+      // Normalize actual strips: if actual strips >= spb, roll into boxes
+      const rawBoxes = Math.max(0, parseInt(counted.boxes, 10) || 0);
+      const rawStrips = Math.max(0, parseInt(counted.strips, 10) || 0);
+      const countedTotalStrips = (rawBoxes * spb) + rawStrips;
 
       if (systemTotalStrips !== countedTotalStrips) {
         const diffStrips = countedTotalStrips - systemTotalStrips;
@@ -126,17 +179,17 @@ export function StockTakeModal({ isOpen, onClose, currentUser, onComplete }) {
 
         list.push({
           med,
-          actual_boxes: counted.boxes,
-          actual_strips: counted.strips,
+          actual_boxes: Math.floor(countedTotalStrips / spb),
+          actual_strips: countedTotalStrips % spb,
           stock_boxes: Number(med.stock_boxes) || 0,
           stock_strips: Number(med.stock_strips) || 0,
           diffStrips,
-          diffValue
+          diffValue: Math.round(diffValue * 100) / 100
         });
       }
-    });
+    }
     return list;
-  }, [medicines, countedData]);
+  }, [medicinesById, countedData]);
 
   const totalDiscrepancyValue = discrepancies.reduce((sum, d) => sum + d.diffValue, 0);
 
@@ -199,6 +252,11 @@ export function StockTakeModal({ isOpen, onClose, currentUser, onComplete }) {
                 <span className="text-[10px] px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 font-bold border border-purple-500/30">
                   تدقيق دقيق
                 </span>
+                {isLoadingAll && (
+                  <span className="text-[10px] text-purple-300 animate-pulse">
+                    (جاري فهرسة الأصناف...)
+                  </span>
+                )}
               </h3>
               <p className="text-xs text-slate-400">
                 تسجيل العلب والشرائط الفعلية على الرف ومقارنتها برصيد النظام مع احتساب الفروقات المالية
@@ -276,7 +334,7 @@ export function StockTakeModal({ isOpen, onClose, currentUser, onComplete }) {
                   <input
                     type="text"
                     value={searchQuery}
-                    onChange={(e) => handleSearch(e.target.value)}
+                    onChange={(e) => handleSearchChange(e.target.value)}
                     placeholder="ابحث بالاسم أو الباركود..."
                     className="w-full h-9 bg-[#0B1220] border border-[#23324D] focus:border-purple-400 rounded-xl pr-9 pl-3 text-xs text-white outline-none"
                   />
@@ -288,10 +346,10 @@ export function StockTakeModal({ isOpen, onClose, currentUser, onComplete }) {
             <div className="bg-[#0B1220] border border-[#23324D] rounded-2xl p-3 flex items-center justify-between shrink-0 text-xs">
               <div className="flex items-center gap-4">
                 <span className="text-slate-400">
-                  الأصناف المعروضة: <strong className="text-white font-mono">{medicines.length}</strong>
+                  المعروض للعد: <strong className="text-white font-mono">{displayedMedicines.length}</strong>
                 </span>
                 <span className="text-slate-400">
-                  أصناف بها فروقات:{' '}
+                  إجمالي الأصناف التي بها فروقات:{' '}
                   <strong className={`font-mono ${discrepancies.length > 0 ? 'text-amber-400' : 'text-emerald-400'}`}>
                     {discrepancies.length}
                   </strong>
@@ -329,7 +387,7 @@ export function StockTakeModal({ isOpen, onClose, currentUser, onComplete }) {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#23324D]/60 font-medium">
-                  {medicines.map((med) => {
+                  {displayedMedicines.map((med) => {
                     const spb = Math.max(1, parseInt(med.strips_per_box, 10) || 1);
                     const sysBoxes = Number(med.stock_boxes) || 0;
                     const sysStrips = Number(med.stock_strips) || 0;

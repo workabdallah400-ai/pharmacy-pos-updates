@@ -17,10 +17,12 @@ import {
   Wallet,
   Coins
 } from 'lucide-react';
+import { hasPermission } from '../utils/permissions';
 import { sqliteService } from '../db/sqliteService';
 
 export function ReportsView({ currentUser }) {
   const [invoices, setInvoices] = useState([]);
+  const [refunds, setRefunds] = useState([]);
   const [topSellers, setTopSellers] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [paymentFilter, setPaymentFilter] = useState('ALL');
@@ -28,32 +30,35 @@ export function ReportsView({ currentUser }) {
   const [modalInvoiceRefunds, setModalInvoiceRefunds] = useState([]);
   const [toastMessage, setToastMessage] = useState('');
 
-  const canRefund = currentUser?.role === 'admin' || currentUser?.permissions?.canRefund === true;
+  const canRefund = hasPermission(currentUser, 'canRefund');
 
   const showToast = (msg) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(''), 3000);
   };
 
-  // Load Invoices from SQLite on mount
+  // Load Invoices and Refunds from SQLite on mount
   useEffect(() => {
     let isCurrent = true;
-    const fetchInvoices = async () => {
+    const fetchData = async () => {
       try {
-        const dbInvoices = await sqliteService.getInvoices(100);
-        if (isCurrent && dbInvoices && dbInvoices.length > 0) {
-          setInvoices(dbInvoices);
+        const [dbInvoices, dbRefunds] = await Promise.all([
+          sqliteService.getInvoices(200),
+          sqliteService.getAllRefunds(300)
+        ]);
+        if (isCurrent) {
+          if (dbInvoices) setInvoices(dbInvoices);
+          if (dbRefunds) setRefunds(dbRefunds);
         }
       } catch (err) {
-        console.warn('SQLite invoices fetch error:', err);
+        console.warn('SQLite data fetch error:', err);
       }
     };
-    fetchInvoices();
+    fetchData();
     return () => { isCurrent = false; };
   }, []);
 
   // Financial Stats Computations
-  // getInvoices() now aliases total/net_total/created_at for the UI.
   const getInvoiceTotal = (inv) => Number(inv.total_retail ?? inv.net_total ?? inv.total ?? 0) || 0;
   const getInvoiceCost = (inv) => {
     const explicit = Number(inv.total_cost ?? inv.cost_total);
@@ -64,24 +69,71 @@ export function ReportsView({ currentUser }) {
     return Number.isFinite(explicit) && explicit !== 0 ? explicit : Math.max(0, getInvoiceTotal(inv) - getInvoiceCost(inv));
   };
 
-  const totalSales = invoices.reduce((acc, inv) => acc + getInvoiceTotal(inv), 0);
+  // Compute refunds breakdown by payment method
+  let totalRefundsAmount = 0;
+  let cashRefunds = 0;
+  let visaRefunds = 0;
+  let instapayRefunds = 0;
+  let creditRefunds = 0;
+
+  for (const ref of refunds) {
+    const refAmount = Number(ref.refund_amount) || 0;
+    totalRefundsAmount += refAmount;
+    const method = String(ref.payment_method || 'كاش');
+
+    if (method === 'كاش') {
+      cashRefunds += refAmount;
+    } else if (method === 'فيزا') {
+      visaRefunds += refAmount;
+    } else if (method === 'إنستاباي') {
+      instapayRefunds += refAmount;
+    } else if (method === 'آجل') {
+      creditRefunds += refAmount;
+    } else if (method === 'مختلط') {
+      const invPaidCash = Math.max(0, Number(ref.paid_cash) || 0);
+      const invPaidCredit = Math.max(0, Number(ref.paid_credit) || 0);
+      const invPaidCard = Math.max(0, Number(ref.paid_card) || 0);
+      const denom = (invPaidCash + invPaidCredit + invPaidCard) || Number(ref.invoice_total) || 1;
+
+      cashRefunds += refAmount * (invPaidCash / denom);
+      creditRefunds += refAmount * (invPaidCredit / denom);
+      visaRefunds += refAmount * (invPaidCard / denom);
+    } else {
+      cashRefunds += refAmount;
+    }
+  }
+
+  // Gross invoice totals
+  const grossSales = invoices.reduce((acc, inv) => acc + getInvoiceTotal(inv), 0);
   const totalCost = invoices.reduce((acc, inv) => acc + getInvoiceCost(inv), 0);
-  const netProfit = Math.max(0, invoices.reduce((acc, inv) => acc + getInvoiceProfit(inv), 0));
+  const grossProfit = invoices.reduce((acc, inv) => acc + getInvoiceProfit(inv), 0);
+
+  // Net totals (gross invoices minus all refunds)
+  const totalSales = Math.max(0, grossSales - totalRefundsAmount);
+  // Profit after deducting refunded profit proportion
+  const profitMargin = grossSales > 0 ? (grossProfit / grossSales) : 0.25;
+  const netProfit = grossProfit - (totalRefundsAmount * profitMargin);
+
   const invoicesCount = invoices.length;
   const avgInvoiceValue = invoicesCount > 0 ? totalSales / invoicesCount : 0;
 
-  const cashSales = invoices.reduce((acc, i) => {
+  const grossCash = invoices.reduce((acc, i) => {
     if (i.payment_method === 'كاش') return acc + getInvoiceTotal(i);
     if (i.payment_method === 'مختلط') return acc + (Number(i.paid_cash) || 0);
     return acc;
   }, 0);
-  const visaSales = invoices.filter((i) => i.payment_method === 'فيزا').reduce((acc, i) => acc + getInvoiceTotal(i), 0);
-  const instapaySales = invoices.filter((i) => i.payment_method === 'إنستاباي').reduce((acc, i) => acc + getInvoiceTotal(i), 0);
-  const creditSales = invoices.reduce((acc, i) => {
+  const grossVisa = invoices.filter((i) => i.payment_method === 'فيزا').reduce((acc, i) => acc + getInvoiceTotal(i), 0);
+  const grossInstapay = invoices.filter((i) => i.payment_method === 'إنستاباي').reduce((acc, i) => acc + getInvoiceTotal(i), 0);
+  const grossCredit = invoices.reduce((acc, i) => {
     if (i.payment_method === 'آجل') return acc + getInvoiceTotal(i);
     if (i.payment_method === 'مختلط') return acc + (Number(i.paid_credit) || 0);
     return acc;
   }, 0);
+
+  const cashSales = Math.max(0, grossCash - cashRefunds);
+  const visaSales = Math.max(0, grossVisa - visaRefunds);
+  const instapaySales = Math.max(0, grossInstapay - instapayRefunds);
+  const creditSales = Math.max(0, grossCredit - creditRefunds);
 
   // Filtered invoices
   const filteredInvoices = invoices.filter((inv) => {
@@ -397,6 +449,7 @@ export function ReportsView({ currentUser }) {
                   <span className="text-slate-400">تفصيل المختلط:</span>
                   <span className="text-teal-300">
                     كاش: {Number(selectedInvoiceForModal.paid_cash || 0).toFixed(2)} | آجل: {Number(selectedInvoiceForModal.paid_credit || 0).toFixed(2)}
+                    {Number(selectedInvoiceForModal.paid_card || 0) > 0 ? ` | كارد: ${Number(selectedInvoiceForModal.paid_card).toFixed(2)}` : ''}
                   </span>
                 </div>
               )}
@@ -456,8 +509,12 @@ export function ReportsView({ currentUser }) {
                       });
                       showToast('تم استرجاع الفاتورة ورد الأصناف للمخزن وخصم القيمة بنجاح 🔄');
                       setSelectedInvoiceForModal(null);
-                      const freshInvoices = await sqliteService.getInvoices(100);
-                      setInvoices(freshInvoices);
+                      const [freshInvoices, freshRefunds] = await Promise.all([
+                        sqliteService.getInvoices(200),
+                        sqliteService.getAllRefunds(300)
+                      ]);
+                      setInvoices(freshInvoices || []);
+                      setRefunds(freshRefunds || []);
                     } catch (e) {
                       alert('خطأ في إتمام المرتجع: ' + (e.message || e));
                     }
