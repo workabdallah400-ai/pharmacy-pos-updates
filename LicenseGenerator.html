@@ -3,910 +3,829 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>بوابة المطور لإدارة وتوليد تراخيص صيدليتي | م/ عبد الله جميل</title>
+  <title>صيدليتي — أداة المطور الرسمية لتوليد وإدارة التراخيص | م/ عبد الله جميل</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&family=JetBrains+Mono:wght@700;800&display=swap" rel="stylesheet">
   <style>
-    :root {
-      --bg: #0B1220;
-      --card-bg: #111A2B;
-      --card-border: #23324D;
-      --primary: #14B8A6;
-      --primary-hover: #0D9488;
-      --accent: #10B981;
-      --danger: #EF4444;
-      --warning: #F59E0B;
-      --text: #F8FAFC;
-      --text-muted: #94A3B8;
-      --font-stack: 'Segoe UI', Tahoma, Arial, sans-serif;
-      --mono-stack: Consolas, 'Courier New', monospace;
-    }
-
     * {
       box-sizing: border-box;
       margin: 0;
       padding: 0;
     }
-
     body {
-      font-family: var(--font-stack);
-      background-color: var(--bg);
-      color: var(--text);
+      font-family: 'Cairo', sans-serif;
+      background: radial-gradient(circle at 50% 5%, #17233A 0%, #0B1220 100%);
+      color: #e2e8f0;
       min-height: 100vh;
       display: flex;
       flex-direction: column;
       align-items: center;
-      padding: 24px 16px;
+      justify-content: flex-start;
+      padding: 30px 20px;
       -webkit-font-smoothing: antialiased;
     }
-
     .container {
       width: 100%;
-      max-width: 980px;
+      max-width: 820px;
     }
-
-    /* Key Management Header Bar */
-    .key-bar {
-      background: var(--card-bg);
-      border: 1px solid var(--card-border);
-      border-radius: 16px;
-      padding: 16px 20px;
-      margin-bottom: 20px;
-      display: flex;
-      flex-wrap: wrap;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
+    .card {
+      background: #111A2B;
+      border: 1px solid #23324D;
+      border-radius: 28px;
+      padding: 36px;
+      box-shadow: 0 30px 70px -15px rgba(0, 0, 0, 0.8), 0 0 45px -10px rgba(20, 184, 166, 0.15);
+      position: relative;
+      overflow: hidden;
     }
-
-    .key-status {
+    .card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 4px;
+      background: linear-gradient(90deg, #14B8A6, #10B981, #06B6D4);
+    }
+    
+    /* Header */
+    .header {
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 18px;
+      border-bottom: 1px solid #23324D;
+      padding-bottom: 24px;
+      margin-bottom: 28px;
+    }
+    .header-icon {
+      width: 72px;
+      height: 72px;
+      border-radius: 22px;
+      background: linear-gradient(135deg, #14B8A6, #10B981);
+      color: #0b1220;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 38px;
+      box-shadow: 0 10px 25px -5px rgba(20, 184, 166, 0.4);
+      flex-shrink: 0;
+    }
+    .header-info h1 {
+      font-size: 24px;
+      font-weight: 900;
+      color: #ffffff;
+      line-height: 1.25;
+    }
+    .header-info p {
       font-size: 13px;
-      font-weight: 700;
+      color: #94a3b8;
+      margin-top: 4px;
+      font-weight: 600;
     }
-
-    .status-badge {
+    .dev-badge {
       display: inline-flex;
       align-items: center;
-      gap: 6px;
+      gap: 8px;
+      background: rgba(20, 184, 166, 0.12);
+      border: 1px solid rgba(20, 184, 166, 0.3);
+      color: #2dd4bf;
       padding: 4px 12px;
       border-radius: 20px;
       font-size: 12px;
       font-weight: 800;
+      margin-top: 8px;
     }
 
-    .badge-locked {
-      background: rgba(239, 68, 68, 0.15);
-      border: 1px solid rgba(239, 68, 68, 0.3);
-      color: #F87171;
+    /* Form Fields */
+    .form-group {
+      margin-bottom: 22px;
     }
-
-    .badge-unlocked {
-      background: rgba(16, 185, 129, 0.15);
-      border: 1px solid rgba(16, 185, 129, 0.3);
-      color: #34D399;
-    }
-
-    .key-actions {
+    label {
       display: flex;
+      justify-content: space-between;
       align-items: center;
-      gap: 10px;
-    }
-
-    /* Main Card */
-    .card {
-      background: var(--card-bg);
-      border: 1px solid var(--card-border);
-      border-radius: 24px;
-      padding: 32px;
-      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
-      position: relative;
-    }
-
-    .header {
-      display: flex;
-      align-items: center;
-      gap: 16px;
-      border-bottom: 1px solid var(--card-border);
-      padding-bottom: 20px;
-      margin-bottom: 24px;
-    }
-
-    .header-icon {
-      width: 56px;
-      height: 56px;
-      border-radius: 16px;
-      background: linear-gradient(135deg, var(--primary), var(--accent));
-      color: #0B1220;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 28px;
-      font-weight: 900;
-      shrink: 0;
-    }
-
-    .header-text h1 {
-      font-size: 20px;
-      font-weight: 900;
-      color: #FFFFFF;
-    }
-
-    .header-text p {
-      font-size: 12px;
-      color: var(--text-muted);
-      margin-top: 4px;
-    }
-
-    /* Navigation Tabs */
-    .tabs {
-      display: flex;
-      gap: 8px;
-      border-bottom: 1px solid var(--card-border);
-      margin-bottom: 24px;
-      padding-bottom: 12px;
-    }
-
-    .tab-btn {
-      background: transparent;
-      border: 1px solid transparent;
-      color: var(--text-muted);
-      padding: 10px 18px;
-      border-radius: 12px;
       font-size: 13px;
+      font-weight: 700;
+      color: #cbd5e1;
+      margin-bottom: 8px;
+    }
+    .paste-btn {
+      background: #17233A;
+      border: 1px solid #23324D;
+      color: #2dd4bf;
+      padding: 3px 10px;
+      border-radius: 8px;
+      font-size: 11px;
       font-weight: 700;
       cursor: pointer;
       font-family: inherit;
       transition: all 0.2s;
     }
-
-    .tab-btn:hover {
-      background: rgba(255, 255, 255, 0.05);
-      color: #FFFFFF;
+    .paste-btn:hover {
+      background: #23324D;
+      color: #fff;
     }
-
-    .tab-btn.active {
-      background: rgba(20, 184, 166, 0.15);
-      border-color: rgba(20, 184, 166, 0.4);
-      color: #2DD4BF;
-    }
-
-    .tab-content {
-      display: none;
-    }
-
-    .tab-content.active {
-      display: block;
-    }
-
-    /* Form Controls */
-    .form-group {
-      margin-bottom: 20px;
-    }
-
-    label {
-      display: block;
-      font-size: 13px;
-      font-weight: 700;
-      color: #CBD5E1;
-      margin-bottom: 8px;
-    }
-
-    input[type="text"], input[type="password"], input[type="number"], textarea, select {
+    input[type="text"], input[type="number"], input[type="date"] {
       width: 100%;
       background: #0B1220;
-      border: 1px solid var(--card-border);
-      border-radius: 12px;
-      padding: 12px 16px;
-      font-size: 13px;
-      font-weight: 600;
-      color: #FFFFFF;
+      border: 1px solid #23324D;
+      border-radius: 14px;
+      padding: 13px 16px;
+      font-size: 14px;
+      font-weight: 700;
+      color: #fff;
       font-family: inherit;
       outline: none;
-      transition: border-color 0.2s;
+      transition: border-color 0.2s, box-shadow 0.2s;
     }
-
-    input[type="text"]:focus, input[type="password"]:focus, textarea:focus, select:focus {
-      border-color: var(--primary);
+    input[type="text"]:focus, input[type="number"]:focus, input[type="date"]:focus {
+      border-color: #14B8A6;
+      box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.15);
     }
-
     .code-input {
-      font-family: var(--mono-stack) !important;
+      font-family: 'JetBrains Mono', monospace !important;
       font-weight: 800 !important;
-      letter-spacing: 1px;
+      font-size: 16px !important;
+      color: #2dd4bf !important;
+      letter-spacing: 1.5px;
+      text-align: center;
+      text-transform: uppercase;
     }
-
     .grid-2 {
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 16px;
     }
 
-    .btn {
-      display: inline-flex;
+    /* License Mode Selection Grid (9 Options) */
+    .modes-label {
+      font-size: 13px;
+      font-weight: 800;
+      color: #2dd4bf;
+      margin-bottom: 10px;
+      display: block;
+    }
+    .modes-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      margin-bottom: 18px;
+    }
+    .mode-btn {
+      background: #0B1220;
+      border: 1px solid #23324D;
+      border-radius: 12px;
+      padding: 12px 8px;
+      color: #94a3b8;
+      font-size: 12px;
+      font-weight: 700;
+      font-family: inherit;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
       align-items: center;
       justify-content: center;
-      gap: 8px;
-      padding: 12px 20px;
+      gap: 4px;
+      transition: all 0.2s;
+      text-align: center;
+      user-select: none;
+    }
+    .mode-btn:hover {
+      background: #17233A;
+      color: #fff;
+      border-color: rgba(20, 184, 166, 0.4);
+    }
+    .mode-btn.active {
+      background: linear-gradient(135deg, rgba(20, 184, 166, 0.2), rgba(16, 185, 129, 0.2));
+      border-color: #14B8A6;
+      color: #2dd4bf;
+      box-shadow: 0 0 16px rgba(20, 184, 166, 0.25);
+    }
+    .mode-btn.danger.active {
+      background: rgba(239, 68, 68, 0.2);
+      border-color: #ef4444;
+      color: #fca5a5;
+      box-shadow: 0 0 16px rgba(239, 68, 68, 0.25);
+    }
+    .mode-btn.warning.active {
+      background: rgba(245, 158, 11, 0.2);
+      border-color: #f59e0b;
+      color: #fcd34d;
+      box-shadow: 0 0 16px rgba(245, 158, 11, 0.25);
+    }
+
+    /* Dynamic inputs container */
+    .dynamic-input-row {
+      display: none;
+      background: #0B1220;
+      border: 1px solid #23324D;
+      border-radius: 14px;
+      padding: 14px;
+      margin-bottom: 20px;
+      animation: fadeIn 0.3s;
+    }
+
+    /* Main Action Button */
+    .btn-generate {
+      width: 100%;
+      background: linear-gradient(135deg, #14B8A6, #10B981);
+      border: none;
+      border-radius: 16px;
+      padding: 16px;
+      color: #0b1220;
+      font-size: 16px;
+      font-weight: 900;
+      font-family: inherit;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      box-shadow: 0 12px 30px -5px rgba(20, 184, 166, 0.4);
+      transition: all 0.2s;
+    }
+    .btn-generate:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 16px 36px -5px rgba(20, 184, 166, 0.5);
+    }
+    .btn-generate:active {
+      transform: scale(0.99);
+    }
+
+    /* Results Output Container */
+    .results-container {
+      display: none;
+      margin-top: 32px;
+      border-top: 1px solid #23324D;
+      padding-top: 28px;
+      animation: fadeIn 0.3s ease-out;
+    }
+    .result-card {
+      background: #0B1220;
+      border: 1px solid #23324D;
+      border-radius: 16px;
+      padding: 18px;
+      margin-bottom: 16px;
+    }
+    .result-card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+    .result-card-title {
+      font-size: 12px;
+      font-weight: 800;
+      color: #94a3b8;
+    }
+    .code-box {
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 800;
+      font-size: 18px;
+      padding: 12px 16px;
+      background: #111A2B;
+      border: 1px solid #23324D;
       border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      letter-spacing: 1px;
+    }
+    .code-box.primary {
+      color: #2dd4bf;
+      border-color: rgba(20, 184, 166, 0.4);
+    }
+    .code-box.warning {
+      color: #fcd34d;
+      border-color: rgba(245, 158, 11, 0.4);
+    }
+    .code-box.danger {
+      color: #fca5a5;
+      border-color: rgba(239, 68, 68, 0.4);
+    }
+    .copy-icon-btn {
+      background: #17233A;
+      border: 1px solid #23324D;
+      color: #cbd5e1;
+      padding: 6px 12px;
+      border-radius: 8px;
+      font-size: 11px;
+      font-weight: 700;
+      cursor: pointer;
+      font-family: inherit;
+      white-space: nowrap;
+      transition: all 0.2s;
+    }
+    .copy-icon-btn:hover {
+      background: #23324D;
+      color: #fff;
+    }
+    .copy-icon-btn.copied {
+      background: #10B981 !important;
+      color: #0b1220 !important;
+      border-color: #10B981 !important;
+    }
+
+    /* Dates Breakdown Stats */
+    .dates-breakdown {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+    .stat-box {
+      background: #0B1220;
+      border: 1px solid #23324D;
+      border-radius: 12px;
+      padding: 12px;
+      text-align: center;
+    }
+    .stat-box-label {
+      font-size: 11px;
+      color: #94a3b8;
+      display: block;
+      margin-bottom: 4px;
+    }
+    .stat-box-val {
       font-size: 13px;
+      font-weight: 800;
+      color: #2dd4bf;
+    }
+
+    /* WhatsApp Box */
+    .whatsapp-box {
+      background: linear-gradient(135deg, rgba(37, 211, 102, 0.08), rgba(16, 185, 129, 0.05));
+      border: 1px solid rgba(37, 211, 102, 0.3);
+      border-radius: 16px;
+      padding: 20px;
+      margin-top: 20px;
+    }
+    .whatsapp-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+    .whatsapp-title {
+      font-size: 13px;
+      font-weight: 800;
+      color: #25D366;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .whatsapp-text {
+      background: #0B1220;
+      border: 1px solid #23324D;
+      border-radius: 12px;
+      padding: 16px;
+      font-size: 12px;
+      line-height: 1.8;
+      color: #cbd5e1;
+      white-space: pre-line;
+      max-height: 220px;
+      overflow-y: auto;
+    }
+    .whatsapp-actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-top: 14px;
+    }
+    .btn-wa-copy, .btn-wa-send {
+      padding: 12px;
+      border-radius: 12px;
+      font-size: 12px;
       font-weight: 800;
       font-family: inherit;
       cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
       transition: all 0.2s;
-      border: none;
     }
-
-    .btn-primary {
-      background: var(--primary);
-      color: #0B1220;
-    }
-
-    .btn-primary:hover {
-      background: var(--primary-hover);
-    }
-
-    .btn-secondary {
+    .btn-wa-copy {
       background: #17233A;
-      border: 1px solid var(--card-border);
-      color: #FFFFFF;
+      border: 1px solid #23324D;
+      color: #fff;
     }
-
-    .btn-secondary:hover {
+    .btn-wa-copy:hover {
       background: #23324D;
     }
-
-    .btn-danger {
-      background: rgba(239, 68, 68, 0.15);
-      border: 1px solid rgba(239, 68, 68, 0.4);
-      color: #F87171;
+    .btn-wa-send {
+      background: #25D366;
+      border: none;
+      color: #0b1220;
+      font-weight: 900;
+    }
+    .btn-wa-send:hover {
+      background: #20bd5a;
     }
 
-    .btn-danger:hover {
-      background: rgba(239, 68, 68, 0.25);
-    }
-
-    /* Output Results Box */
-    .result-box {
+    /* Footer */
+    .footer {
+      text-align: center;
       margin-top: 24px;
-      background: #0B1220;
-      border: 1px solid var(--card-border);
-      border-radius: 16px;
-      padding: 20px;
-      display: none;
-    }
-
-    .token-display {
-      background: #080D17;
-      border: 1px solid #1C283F;
-      border-radius: 10px;
-      padding: 14px;
-      font-family: var(--mono-stack);
       font-size: 12px;
-      color: #2DD4BF;
-      word-break: break-all;
-      margin: 10px 0;
+      color: #64748b;
     }
-
-    /* Customers Table */
-    .table-container {
-      overflow-x: auto;
-      border: 1px solid var(--card-border);
-      border-radius: 12px;
-    }
-
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 12px;
-      text-align: right;
-    }
-
-    th {
-      background: #0B1220;
-      padding: 12px;
-      color: var(--text-muted);
-      border-bottom: 1px solid var(--card-border);
+    .footer a {
+      color: #2dd4bf;
+      text-decoration: none;
       font-weight: 700;
     }
 
-    td {
-      padding: 12px;
-      border-bottom: 1px solid #1C283F;
-      color: #CBD5E1;
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
     }
 
-    tr:hover td {
-      background: rgba(255, 255, 255, 0.02);
-    }
-
-    .notice {
-      padding: 12px 16px;
-      border-radius: 12px;
-      font-size: 12px;
-      line-height: 1.6;
-      margin-bottom: 20px;
-    }
-
-    .notice-info {
-      background: rgba(20, 184, 166, 0.1);
-      border: 1px solid rgba(20, 184, 166, 0.25);
-      color: #2DD4BF;
-    }
-
-    .notice-warning {
-      background: rgba(245, 158, 11, 0.1);
-      border: 1px solid rgba(245, 158, 11, 0.25);
-      color: #FBBF24;
-    }
-
-    /* Modal */
-    .modal-overlay {
-      position: fixed;
-      inset: 0;
-      background: rgba(0, 0, 0, 0.75);
-      display: none;
-      align-items: center;
-      justify-content: center;
-      padding: 20px;
-      z-index: 1000;
-    }
-
-    .modal {
-      background: var(--card-bg);
-      border: 1px solid var(--card-border);
-      border-radius: 20px;
-      max-width: 480px;
-      width: 100%;
-      padding: 24px;
+    @media (max-width: 680px) {
+      .modes-grid { grid-template-columns: repeat(2, 1fr); }
+      .grid-2 { grid-template-columns: 1fr; }
+      .dates-breakdown { grid-template-columns: 1fr; }
+      .whatsapp-actions { grid-template-columns: 1fr; }
     }
   </style>
 </head>
 <body>
-  <div class="container">
-    <!-- Key Management Bar -->
-    <div class="key-bar">
-      <div class="key-status">
-        <span>مفتاح التوقيع الرقمي (Ed25519):</span>
-        <span id="keyBadge" class="status-badge badge-locked">🔒 مغلق / غير محمل</span>
-        <span id="keyKid" style="color: var(--text-muted); font-family: var(--mono-stack); font-size: 11px;"></span>
-      </div>
-      <div class="key-actions">
-        <button id="btnLoadKey" class="btn btn-secondary" style="padding: 8px 14px; font-size: 12px;" onclick="openLoadKeyModal()">
-          🔑 تحميل المفتاح الخاص
-        </button>
-        <button id="btnLockKey" class="btn btn-danger" style="padding: 8px 14px; font-size: 12px; display: none;" onclick="lockPrivateKey()">
-          قفل وتفريغ الذاكرة ✕
-        </button>
-      </div>
-    </div>
 
-    <!-- Main Card -->
+  <div class="container">
     <div class="card">
+      
+      <!-- Header -->
       <div class="header">
         <div class="header-icon">💊</div>
-        <div class="header-text">
-          <h1>بوابة المطور — نظام تراخيص صيدليتي 2026</h1>
-          <p>توليد تراخيص مشفرة برمجياً بتقنية Ed25519 وإدارة العملاء وقوائم الإلغاء (Offline 100%)</p>
+        <div class="header-info">
+          <h1>صيدليتي — أداة المطور الرسمية لتوليد وإدارة التراخيص</h1>
+          <p>لوحة التحكم والتشفير المعتمدة لإصدار التراخيص، إيقاف الأجهزة، واستعادة الحسابات</p>
+          <div class="dev-badge">
+            <span>👨‍💻 المطور: م/ عبد الله جميل</span>
+            <span>•</span>
+            <span dir="ltr">01201395243</span>
+          </div>
         </div>
       </div>
 
-      <!-- Navigation Tabs -->
-      <div class="tabs">
-        <button class="tab-btn active" onclick="switchTab('issue')">➕ إصدار وتجديد ترخيص</button>
-        <button class="tab-btn" onclick="switchTab('customers')">👥 سجل العملاء والتراخيص</button>
-        <button class="tab-btn" onclick="switchTab('revocations')">🚫 إدارة وتصدير الإلغاءات</button>
+      <!-- Form Inputs -->
+      <div class="form-group">
+        <label>
+          <span>كود جهاز العميل (Hardware Machine ID):</span>
+          <button type="button" class="paste-btn" onclick="pasteMachineId()">📋 لصق من الحافظة</button>
+        </label>
+        <input type="text" id="machineId" class="code-input" placeholder="مثال: EGYP-B009-4237-53D2 أو PH-F496-344D-5FA3" value="EGYP-B009-4237-53D2">
       </div>
 
-      <!-- TAB 1: ISSUE LICENSE -->
-      <div id="tab-issue" class="tab-content active">
-        <div class="grid-2">
-          <div class="form-group">
-            <label>اسم الصيدلية / العميل:</label>
-            <input type="text" id="custName" placeholder="صيدلية الأمل - د. أحمد">
-          </div>
-          <div class="form-group">
-            <label>رقم هاتف الواتساب:</label>
-            <input type="text" id="custPhone" placeholder="01012345678">
-          </div>
+      <div class="grid-2">
+        <div class="form-group">
+          <label>اسم الصيدلية أو العميل:</label>
+          <input type="text" id="clientName" placeholder="مثال: صيدلية النخبة الحديثة" value="صيدلية النخبة الحديثة">
         </div>
 
         <div class="form-group">
-          <label>كود الجهاز (Hardware Machine ID):</label>
-          <input type="text" id="custMid" class="code-input" placeholder="EGYP-XXXX-YYYY-ZZZZ">
-        </div>
-
-        <div class="grid-2">
-          <div class="form-group">
-            <label>نوع الترخيص:</label>
-            <select id="licenseType" onchange="toggleDurationGroup()">
-              <option value="LIFETIME">دائم مدى الحياة (LIFETIME)</option>
-              <option value="TIMED">محدد المدة (TIMED)</option>
-            </select>
-          </div>
-          <div class="form-group" id="durationGroup" style="display: none;">
-            <label>مدة الترخيص (بالأيام):</label>
-            <input type="number" id="licenseDays" value="365">
-          </div>
-        </div>
-
-        <div style="margin-top: 10px;">
-          <button class="btn btn-primary" onclick="generateTokenForCustomer()">
-            توليد وتوقيع التوكن الرقمي 🚀
-          </button>
-        </div>
-
-        <!-- Result Box -->
-        <div id="resultBox" class="result-box">
-          <h4 style="font-size: 14px; font-weight: 800; color: #FFFFFF; margin-bottom: 6px;">كود الترخيص المعتمد (Ed25519 Token):</h4>
-          <div id="displayToken" class="token-display"></div>
-          <div style="display: flex; gap: 10px; margin-top: 12px;">
-            <button class="btn btn-secondary" style="font-size: 12px; padding: 8px 14px;" onclick="copyResultToken()">
-              📋 نسخ الكود
-            </button>
-            <button class="btn btn-secondary" style="font-size: 12px; padding: 8px 14px;" onclick="copyWhatsAppTemplate()">
-              💬 نسخ رسالة الواتساب
-            </button>
-            <button class="btn btn-primary" style="font-size: 12px; padding: 8px 14px; background: #25D366; color: #0B1220;" onclick="openWhatsAppChat()">
-              إرسال واتساب مباشر ↗
-            </button>
-          </div>
+          <label>رقم واتساب العميل (لإرسال الكود فوراً):</label>
+          <input type="text" id="clientPhone" placeholder="010XXXXXXXX" value="01201395243">
         </div>
       </div>
 
-      <!-- TAB 2: CUSTOMERS REGISTRY -->
-      <div id="tab-customers" class="tab-content">
-        <div class="notice notice-info">
-          يتم حفظ بيانات العملاء والتراخيص محلياً في المتصفح، مع إمكانية تجديد الترخيص أو إلغائه فوراً.
-        </div>
-        <div class="table-container">
-          <table>
-            <thead>
-              <tr>
-                <th>العميل</th>
-                <th>كود الجهاز</th>
-                <th>النوع</th>
-                <th>تاريخ الإصدار</th>
-                <th>الحالة</th>
-                <th>إجراءات</th>
-              </tr>
-            </thead>
-            <tbody id="customersTableBody">
-              <tr>
-                <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 24px;">لا يوجد عملاء مسجلين حتى الآن.</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+      <!-- License Mode Selector (9 Options) -->
+      <span class="modes-label">حدد نوع وخيار الترخيص المطلوب للجهاز:</span>
+      <div class="modes-grid">
+        <button type="button" class="mode-btn active" onclick="selectMode('LIFETIME', this)">
+          <span style="font-size: 16px;">🏆</span>
+          <span>ترخيص دائم مدى الحياة</span>
+        </button>
+        <button type="button" class="mode-btn" onclick="selectMode('DAYS_30', this)">
+          <span style="font-size: 16px;">📅</span>
+          <span>شهر تجاري (30 يوماً)</span>
+        </button>
+        <button type="button" class="mode-btn" onclick="selectMode('DAYS_90', this)">
+          <span style="font-size: 16px;">📅</span>
+          <span>3 أشهر (90 يوماً)</span>
+        </button>
+        <button type="button" class="mode-btn" onclick="selectMode('DAYS_180', this)">
+          <span style="font-size: 16px;">📅</span>
+          <span>6 أشهر (180 يوماً)</span>
+        </button>
+        <button type="button" class="mode-btn" onclick="selectMode('DAYS_365', this)">
+          <span style="font-size: 16px;">📅</span>
+          <span>سنة كاملة (365 يوماً)</span>
+        </button>
+        <button type="button" class="mode-btn" onclick="selectMode('CUSTOM_DAYS', this)">
+          <span style="font-size: 16px;">🔢</span>
+          <span>عدد أيام مخصص</span>
+        </button>
+        <button type="button" class="mode-btn" onclick="selectMode('CUSTOM_DATE', this)">
+          <span style="font-size: 16px;">📆</span>
+          <span>تاريخ انتهاء محدد</span>
+        </button>
+        <button type="button" class="mode-btn warning" onclick="selectMode('RESET_PIN', this)">
+          <span style="font-size: 16px;">🔑</span>
+          <span>كود استعادة رقم الأدمن (RST)</span>
+        </button>
+        <button type="button" class="mode-btn danger" onclick="selectMode('REVOKE', this)">
+          <span style="font-size: 16px;">🚫</span>
+          <span>كود إلغاء وسحب الترخيص (REV)</span>
+        </button>
       </div>
 
-      <!-- TAB 3: REVOCATION EXPORT -->
-      <div id="tab-revocations" class="tab-content">
-        <div class="notice notice-warning">
-          قائمة الإلغاءات الموقعة رقمياً (revocations.json) تتيح إلغاء تراخيص منتهية أو مسحوبة بدون اتصال بالإنترنت، بمجرد استيراد الملف في برنامج الصيدلية.
-        </div>
-        <div style="margin-bottom: 20px;">
-          <button class="btn btn-danger" onclick="exportSignedRevocations()">
-            📥 تصدير قائمة الإلغاءات الموقعة (revocations.json)
-          </button>
-        </div>
-        <div class="table-container">
-          <table>
-            <thead>
-              <tr>
-                <th>معرف الترخيص (LID)</th>
-                <th>كود الجهاز</th>
-                <th>سبب الإلغاء</th>
-                <th>تاريخ الإلغاء</th>
-              </tr>
-            </thead>
-            <tbody id="revocationsTableBody">
-              <tr>
-                <td colspan="4" style="text-align: center; color: var(--text-muted); padding: 24px;">لا توجد تراخيص ملغاة حالياً.</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+      <!-- Dynamic Custom Inputs Row -->
+      <div class="dynamic-input-row" id="customDaysRow">
+        <label>أدخل عدد الأيام المطلوب تشغيل البرنامج خلالها:</label>
+        <input type="number" id="customDaysInput" min="1" max="3650" placeholder="مثال: 45 يوماً" value="45">
       </div>
+
+      <div class="dynamic-input-row" id="customDateRow">
+        <label>اختر تاريخ انتهاء الصلاحية المحدد بدقة:</label>
+        <input type="date" id="customDateInput">
+      </div>
+
+      <!-- Submit Button -->
+      <button type="button" class="btn-generate" onclick="generateAllCodes()">
+        <span>⚡</span>
+        <span>توليد كود الترخيص والبيانات فوراً</span>
+      </button>
+
+      <!-- Results Container -->
+      <div class="results-container" id="resultsBox">
+        
+        <!-- Dates Breakdown -->
+        <div class="dates-breakdown" id="datesBreakdown">
+          <div class="stat-box">
+            <span class="stat-box-label">تاريخ الإصدار والتوليد</span>
+            <span class="stat-box-val" id="statIssueDate">2026-11-02</span>
+          </div>
+          <div class="stat-box">
+            <span class="stat-box-label">تاريخ انتهاء الصلاحية</span>
+            <span class="stat-box-val" id="statExpiryDate">مدى الحياة</span>
+          </div>
+          <div class="stat-box">
+            <span class="stat-box-label">الأيام المتبقية المحسوبة</span>
+            <span class="stat-box-val" id="statDaysRemaining">دائم (غير محدود)</span>
+          </div>
+        </div>
+
+        <!-- 1. Main License Key Card -->
+        <div class="result-card">
+          <div class="result-card-header">
+            <span class="result-card-title">🔑 كود التفعيل والتشغيل الرئيسي (License Key):</span>
+            <span style="color: #10B981; font-size: 11px; font-weight: 800;">✓ مشفر ومطابق 100%</span>
+          </div>
+          <div class="code-box primary">
+            <span id="displayLicenseKey">LIC-LIFE-XXXX-YYYY-ZZZZ</span>
+            <button type="button" class="copy-icon-btn" onclick="copyText('displayLicenseKey', this)">📋 نسخ المفتاح</button>
+          </div>
+        </div>
+
+        <!-- 2. Master Recovery PIN Card -->
+        <div class="result-card">
+          <div class="result-card-header">
+            <span class="result-card-title">🔑 كود استعادة رقم سري المدير (Master Reset Code - RST):</span>
+            <span style="color: #f59e0b; font-size: 11px; font-weight: 700;">يعيد رمز PIN تلقائياً إلى (1234)</span>
+          </div>
+          <div class="code-box warning">
+            <span id="displayResetKey">RST-ADMIN-XXXX-YYYY</span>
+            <button type="button" class="copy-icon-btn" onclick="copyText('displayResetKey', this)">📋 نسخ كود الاستعادة</button>
+          </div>
+        </div>
+
+        <!-- 3. Revocation Key Card -->
+        <div class="result-card">
+          <div class="result-card-header">
+            <span class="result-card-title">🚫 كود إلغاء وسحب الترخيص فوراً (Revocation / Kill Code - REV):</span>
+            <span style="color: #ef4444; font-size: 11px; font-weight: 700;">يلغي تفعيل الجهاز ويقفل البرنامج فوراً</span>
+          </div>
+          <div class="code-box danger">
+            <span id="displayRevokeKey">REV-KILL-XXXX-YYYY</span>
+            <button type="button" class="copy-icon-btn" onclick="copyText('displayRevokeKey', this)">📋 نسخ كود الإلغاء</button>
+          </div>
+        </div>
+
+        <!-- 4. WhatsApp Ready Message Box -->
+        <div class="whatsapp-box">
+          <div class="whatsapp-header">
+            <span class="whatsapp-title">💬 رسالة الواتساب الجاهزة للإرسال المباشر للعميل:</span>
+            <span style="font-size: 11px; color: #94a3b8;">منسقة وفق النموذج الرسمي</span>
+          </div>
+
+          <div class="whatsapp-text" id="whatsappMessageText"></div>
+
+          <div class="whatsapp-actions">
+            <button type="button" class="btn-wa-copy" onclick="copyWhatsAppMessage(this)">
+              <span>📱</span>
+              <span>نسخ رسالة الواتساب كاملة</span>
+            </button>
+            <button type="button" class="btn-wa-send" onclick="sendWhatsAppDirect()">
+              <span>💬</span>
+              <span>إرسال مباشر عبر واتساب</span>
+            </button>
+          </div>
+        </div>
+
+      </div>
+
     </div>
-  </div>
 
-  <!-- LOAD KEY MODAL -->
-  <div id="loadKeyModal" class="modal-overlay">
-    <div class="modal">
-      <h3 style="font-size: 16px; font-weight: 800; margin-bottom: 14px;">فك تشفير المفتاح الخاص في الذاكرة</h3>
-      <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 16px; line-height: 1.6;">
-        اختر ملف المفتاح المشفر (license-private-key.enc.json) ثم أدخل كلمة المرور. يتم فك التشفير محلياً 100% ولا يُخزن المفتاح بعد إغلاق المتصفح.
-      </p>
-
-      <div class="form-group">
-        <label>ملف المفتاح المشفر (.enc.json):</label>
-        <input type="file" id="encFileInput" accept=".json">
-      </div>
-
-      <div class="form-group">
-        <label>كلمة مرور فك التشفير:</label>
-        <input type="password" id="passphraseInput" placeholder="أدخل كلمة المرور">
-      </div>
-
-      <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px;">
-        <button class="btn btn-secondary" onclick="closeLoadKeyModal()">إلغاء</button>
-        <button class="btn btn-primary" onclick="unlockPrivateKey()">فك التشفير وتفعيل المفتاح</button>
-      </div>
+    <!-- Footer -->
+    <div class="footer">
+      نظام إدارة الصيدليات ونقاط البيع | تطوير وإدارة: <a href="https://wa.me/201201395243" target="_blank">م/ عبد الله جميل (01201395243)</a>
     </div>
   </div>
 
   <script>
-    // State in memory
-    let activePrivateKey = null;
-    let activeKid = '2026-01';
-    let loadedEncData = null;
+    const MASTER_SECRET = 'PHARMACY_POS_MASTER_SECRET_2026';
+    let currentMode = 'LIFETIME';
 
-    // Database of customers and revocations (localStorage backed)
-    function getStoredData() {
-      try {
-        return JSON.parse(localStorage.getItem('PHARMACY_LICENSE_DB') || '{"customers":[],"revocations":[]}');
-      } catch (e) {
-        return { customers: [], revocations: [] };
-      }
-    }
-
-    function saveStoredData(data) {
-      localStorage.setItem('PHARMACY_LICENSE_DB', JSON.stringify(data));
-      renderTables();
-    }
-
-    // Modal controls
-    function openLoadKeyModal() {
-      document.getElementById('loadKeyModal').style.display = 'flex';
-    }
-
-    function closeLoadKeyModal() {
-      document.getElementById('loadKeyModal').style.display = 'none';
-      document.getElementById('passphraseInput').value = '';
-    }
-
-    // Clear key on unload
-    window.addEventListener('beforeunload', () => {
-      activePrivateKey = null;
+    // Set default date in date picker to next month
+    window.addEventListener('DOMContentLoaded', () => {
+      const d = new Date();
+      d.setMonth(d.getMonth() + 1);
+      document.getElementById('customDateInput').value = d.toISOString().slice(0, 10);
     });
 
-    function lockPrivateKey() {
-      activePrivateKey = null;
-      document.getElementById('keyBadge').className = 'status-badge badge-locked';
-      document.getElementById('keyBadge').innerText = '🔒 مغلق / غير محمل';
-      document.getElementById('keyKid').innerText = '';
-      document.getElementById('btnLoadKey').style.display = 'inline-flex';
-      document.getElementById('btnLockKey').style.display = 'none';
-      alert('تم قفل المفتاح ومسح بياناته من الذاكرة.');
+    // Pure Web Crypto SHA-256 Engine
+    async function sha256Hex(str) {
+      if (window.crypto && window.crypto.subtle) {
+        const buf = await window.crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+        return Array.from(new Uint8Array(buf))
+          .map(b => b.toString(16).padStart(2, '0'))
+          .join('')
+          .toUpperCase();
+      }
+      // Fallback
+      let h1 = 0xdeadbeef, h2 = 0x41c64e6d;
+      for (let i = 0; i < str.length; i++) {
+        const ch = str.charCodeAt(i);
+        h1 = Math.imul(h1 ^ ch, 2654435761);
+        h2 = Math.imul(h2 ^ ch, 1597334677);
+      }
+      return ((4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(16) + 'A1B2C3D4E5F6A7B8').slice(0, 64).toUpperCase();
     }
 
-    // Base64Url helpers
-    function base64UrlEncode(bytes) {
-      let binary = '';
-      const len = bytes.byteLength;
-      for (let i = 0; i < len; i++) {
-        binary += String.fromCharCode(bytes[i]);
-      }
-      return btoa(binary)
-        .replace(/\+/g, '-')
-        .replace(/\//g, '_')
-        .replace(/=+$/, '');
+    // Mode Selector Handler
+    function selectMode(mode, element) {
+      currentMode = mode;
+      document.querySelectorAll('.mode-btn').forEach(btn => btn.classList.remove('active'));
+      element.classList.add('active');
+
+      document.getElementById('customDaysRow').style.display = mode === 'CUSTOM_DAYS' ? 'block' : 'none';
+      document.getElementById('customDateRow').style.display = mode === 'CUSTOM_DATE' ? 'block' : 'none';
     }
 
-    function base64DecodeToBytes(b64) {
-      const bin = atob(b64);
-      const bytes = new Uint8Array(bin.length);
-      for (let i = 0; i < bin.length; i++) {
-        bytes[i] = bin.charCodeAt(i);
-      }
-      return bytes;
-    }
-
-    // Handle Encrypted Key Load
-    document.getElementById('encFileInput').addEventListener('change', async (e) => {
-      const file = e.target.files && e.target.files[0];
-      if (!file) return;
-      try {
-        const text = await file.text();
-        loadedEncData = JSON.parse(text);
-      } catch (err) {
-        alert('ملف غير صالح.');
-        loadedEncData = null;
-      }
-    });
-
-    async function unlockPrivateKey() {
-      if (!loadedEncData) {
-        alert('يرجى اختيار ملف المفتاح المشفر (.enc.json)');
-        return;
-      }
-      const passphrase = document.getElementById('passphraseInput').value;
-      if (!passphrase) {
-        alert('يرجى إدخال كلمة المرور');
+    // Master Generator Function
+    async function generateAllCodes() {
+      const midInput = document.getElementById('machineId').value.trim().toUpperCase();
+      if (!midInput) {
+        alert('⚠️ يرجى إدخال أو لصق كود جهاز العميل (Machine Code) أولاً!');
         return;
       }
 
-      try {
-        const salt = base64DecodeToBytes(loadedEncData.salt);
-        const iv = base64DecodeToBytes(loadedEncData.iv);
-        const tag = base64DecodeToBytes(loadedEncData.tag);
-        const ciphertext = base64DecodeToBytes(loadedEncData.ciphertext);
-        const iterations = loadedEncData.iterations || 600000;
+      const cleanMid = midInput.replace(/[^A-Z0-9]/g, '');
+      const clientName = document.getElementById('clientName').value.trim() || 'الصيدلية';
 
-        // PBKDF2 derive key
-        const enc = new TextEncoder();
-        const baseKey = await crypto.subtle.importKey(
-          'raw',
-          enc.encode(passphrase),
-          { name: 'PBKDF2' },
-          false,
-          ['deriveKey']
-        );
+      // 1. Calculate Expiry Date & Remaining Days
+      let licenseKey = '';
+      let expiryDateText = 'مدى الحياة (غير محدد)';
+      let daysRemainingText = 'دائم (غير محدود)';
+      let modeTitle = 'ترخيص دائم مدى الحياة (LIFETIME)';
 
-        const aesKey = await crypto.subtle.deriveKey(
-          {
-            name: 'PBKDF2',
-            salt: salt,
-            iterations: iterations,
-            hash: 'SHA-256'
-          },
-          baseKey,
-          { name: 'AES-GCM', length: 256 },
-          false,
-          ['decrypt']
-        );
+      const today = new Date();
+      const issueDateText = today.toISOString().slice(0, 10);
 
-        // Concat ciphertext + tag for WebCrypto AES-GCM decrypt
-        const combined = new Uint8Array(ciphertext.length + tag.length);
-        combined.set(ciphertext);
-        combined.set(tag, ciphertext.length);
+      if (currentMode === 'LIFETIME') {
+        const lifeHash = await sha256Hex(cleanMid + '-LIFETIME-' + MASTER_SECRET);
+        licenseKey = 'LIC-LIFE-' + lifeHash.substring(0, 4) + '-' + lifeHash.substring(4, 8) + '-' + (cleanMid.slice(-4) || 'EGYP');
+      } else if (currentMode === 'RESET_PIN') {
+        const rstHash = await sha256Hex(cleanMid + '-RESET-' + MASTER_SECRET);
+        licenseKey = 'RST-ADMIN-' + rstHash.substring(0, 4) + '-' + rstHash.substring(4, 8);
+        modeTitle = 'كود استعادة رقم سري الأدمن (إعادة PIN إلى 1234)';
+      } else if (currentMode === 'REVOKE') {
+        const revHash = await sha256Hex(cleanMid + '-REVOKE-' + MASTER_SECRET);
+        licenseKey = 'REV-KILL-' + revHash.substring(0, 4) + '-' + revHash.substring(4, 8);
+        modeTitle = 'كود إلغاء وسحب الترخيص فوراً (إيقاف البرنامج)';
+      } else {
+        // DURATION MODES
+        let targetDate = new Date();
+        if (currentMode === 'DAYS_30') {
+          targetDate.setDate(targetDate.getDate() + 30);
+          modeTitle = 'شهر تجاري (30 يوماً)';
+        } else if (currentMode === 'DAYS_90') {
+          targetDate.setDate(targetDate.getDate() + 90);
+          modeTitle = '3 أشهر (90 يوماً)';
+        } else if (currentMode === 'DAYS_180') {
+          targetDate.setDate(targetDate.getDate() + 180);
+          modeTitle = '6 أشهر (180 يوماً)';
+        } else if (currentMode === 'DAYS_365') {
+          targetDate.setDate(targetDate.getDate() + 365);
+          modeTitle = 'سنة كاملة (365 يوماً)';
+        } else if (currentMode === 'CUSTOM_DAYS') {
+          const days = parseInt(document.getElementById('customDaysInput').value, 10) || 30;
+          targetDate.setDate(targetDate.getDate() + days);
+          modeTitle = `فترة مخصصة (${days} يوماً)`;
+        } else if (currentMode === 'CUSTOM_DATE') {
+          const picked = document.getElementById('customDateInput').value;
+          if (picked) targetDate = new Date(picked + 'T23:59:59');
+          modeTitle = `تاريخ محدد حتى (${picked})`;
+        }
 
-        const decryptedDer = await crypto.subtle.decrypt(
-          { name: 'AES-GCM', iv: iv, tagLength: 128 },
-          aesKey,
-          combined
-        );
+        const y = targetDate.getFullYear();
+        const m = String(targetDate.getMonth() + 1).padStart(2, '0');
+        const d = String(targetDate.getDate()).padStart(2, '0');
+        const ymd = '' + y + m + d;
+        expiryDateText = `${y}-${m}-${d}`;
 
-        // Import private key as Ed25519
-        activePrivateKey = await crypto.subtle.importKey(
-          'pkcs8',
-          decryptedDer,
-          { name: 'Ed25519' },
-          false,
-          ['sign']
-        );
+        const diffDays = Math.ceil((targetDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+        daysRemainingText = `${diffDays} يوماً`;
 
-        activeKid = loadedEncData.kid || '2026-01';
-
-        document.getElementById('keyBadge').className = 'status-badge badge-unlocked';
-        document.getElementById('keyBadge').innerText = '🔓 نشط وجاهز للتوقيع';
-        document.getElementById('keyKid').innerText = `(KID: ${activeKid})`;
-        document.getElementById('btnLoadKey').style.display = 'none';
-        document.getElementById('btnLockKey').style.display = 'inline-flex';
-
-        closeLoadKeyModal();
-        alert('✅ تم فك تشفير المفتاح الخاص بنجاح في الذاكرة.');
-      } catch (err) {
-        alert('❌ فشل فك التشفير. تأكد من صحة كلمة المرور والملف.');
-      }
-    }
-
-    // Tabs
-    function switchTab(tabId) {
-      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-      event.target.classList.add('active');
-      document.getElementById('tab-' + tabId).classList.add('active');
-    }
-
-    function toggleDurationGroup() {
-      const type = document.getElementById('licenseType').value;
-      document.getElementById('durationGroup').style.display = type === 'TIMED' ? 'block' : 'none';
-    }
-
-    // Token Generation
-    async function generateTokenForCustomer() {
-      if (!activePrivateKey) {
-        alert('⚠️ يجب تحميل وفك تشفير المفتاح الخاص أولاً لتوقيع الترخيص.');
-        openLoadKeyModal();
-        return;
+        const expHash = await sha256Hex(cleanMid + '-EXP-' + ymd + '-' + MASTER_SECRET);
+        licenseKey = 'LIC-EXP-' + ymd + '-' + expHash.substring(0, 4) + '-' + expHash.substring(4, 8);
       }
 
-      const name = document.getElementById('custName').value.trim();
-      const phone = document.getElementById('custPhone').value.trim();
-      const mid = document.getElementById('custMid').value.trim().toUpperCase();
-      const type = document.getElementById('licenseType').value;
-      const days = parseInt(document.getElementById('licenseDays').value, 10) || 365;
+      // 2. Generate Master Reset & Revoke Codes for this device
+      const rstHash = await sha256Hex(cleanMid + '-RESET-' + MASTER_SECRET);
+      const resetCode = 'RST-ADMIN-' + rstHash.substring(0, 4) + '-' + rstHash.substring(4, 8);
 
-      if (!mid || !mid.startsWith('EGYP-')) {
-        alert('يرجى إدخال Machine ID صحيح يبدأ بـ EGYP-');
-        return;
-      }
+      const revHash = await sha256Hex(cleanMid + '-REVOKE-' + MASTER_SECRET);
+      const revokeCode = 'REV-KILL-' + revHash.substring(0, 4) + '-' + revHash.substring(4, 8);
 
-      const iat = Math.floor(Date.now() / 1000);
-      const exp = type === 'TIMED' ? iat + (days * 86400) : null;
-      const lid = 'LID-' + Math.random().toString(36).substring(2, 10).toUpperCase();
+      // 3. Update DOM Displays
+      document.getElementById('displayLicenseKey').innerText = licenseKey;
+      document.getElementById('displayResetKey').innerText = resetCode;
+      document.getElementById('displayRevokeKey').innerText = revokeCode;
 
-      const payloadObj = {
-        v: 2,
-        kid: activeKid,
-        lid: lid,
-        mid: mid,
-        typ: type,
-        iat: iat,
-        exp: exp
-      };
+      document.getElementById('statIssueDate').innerText = issueDateText;
+      document.getElementById('statExpiryDate').innerText = expiryDateText;
+      document.getElementById('statDaysRemaining').innerText = daysRemainingText;
 
-      const canonicalStr = JSON.stringify(payloadObj, ['v', 'kid', 'lid', 'mid', 'typ', 'iat', 'exp']);
-      const payloadBase64Url = base64UrlEncode(new TextEncoder().encode(canonicalStr));
-      const msgBytes = new TextEncoder().encode(`LIC2.${payloadBase64Url}`);
-
-      const sigBuffer = await crypto.subtle.sign({ name: 'Ed25519' }, activePrivateKey, msgBytes);
-      const sigBase64Url = base64UrlEncode(new Uint8Array(sigBuffer));
-
-      const fullToken = `LIC2.${payloadBase64Url}.${sigBase64Url}`;
-
-      // Update UI
-      document.getElementById('displayToken').innerText = fullToken;
-      document.getElementById('resultBox').style.display = 'block';
-
-      // Save to customer registry
-      const db = getStoredData();
-      db.customers.unshift({
-        lid,
-        name: name || 'بدون اسم',
-        phone: phone || '',
-        mid,
-        typ: type,
-        exp,
-        iat,
-        token: fullToken
-      });
-      saveStoredData(db);
-    }
-
-    function copyResultToken() {
-      const token = document.getElementById('displayToken').innerText;
-      navigator.clipboard.writeText(token);
-      alert('تم نسخ التوكن بنجاح 📋');
-    }
-
-    function buildWhatsAppText() {
-      const name = document.getElementById('custName').value.trim() || 'العميل';
-      const mid = document.getElementById('custMid').value.trim().toUpperCase();
-      const token = document.getElementById('displayToken').innerText;
-      const type = document.getElementById('licenseType').value;
-      const days = document.getElementById('licenseDays').value;
-
-      return `أهلاً بك د. ${name}،
+      // 4. Construct Exact WhatsApp Template
+      const whatsappMsg = `أهلاً بك د. ${clientName}،
 تم بنجاح إصدار كود تفعيل وتشغيل نظام «صيدليتي» لإدارة الصيدليات ونقاط البيع:
 
-🔹 كود الجهاز: ${mid}
-🔹 نوع الترخيص: ${type === 'LIFETIME' ? 'دائم مدى الحياة' : days + ' يوم'}
-🔹 مفتاح التفعيل الرقمي (Ed25519):
-${token}
+🔹 كود الجهاز: ${midInput}
+🔹 نوع الترخيص: ${currentMode === 'LIFETIME' ? 'دائم مدى الحياة' : expiryDateText}
+🔹 مفتاح التفعيل: ${licenseKey}
 
-طريقة التفعيل: انسخ الكود كاملاً والصقه في شاشة التفعيل واضغط "تفعيل الترخيص".
+طريقة التفعيل: انسخ الكود وضعه في خانة مفتاح التفعيل واضغط "تفعيل البرنامج".
 لأي دعم فني واستفسار: م/ عبد الله جميل — 01201395243.
 نتمنى لكم تجارة مباركة ودوام التوفيق! 💊`;
+
+      document.getElementById('whatsappMessageText').innerText = whatsappMsg;
+      document.getElementById('resultsBox').style.display = 'block';
+
+      // Smooth scroll to results
+      document.getElementById('resultsBox').scrollIntoView({ behavior: 'smooth' });
     }
 
-    function copyWhatsAppTemplate() {
-      navigator.clipboard.writeText(buildWhatsAppText());
-      alert('تم نسخ رسالة الواتساب 📋');
+    // Copy Helper
+    function copyText(elementId, btn) {
+      const text = document.getElementById(elementId).innerText;
+      navigator.clipboard.writeText(text);
+      const originalText = btn.innerHTML;
+      btn.innerHTML = '✓ تم النسخ';
+      btn.classList.add('copied');
+      setTimeout(() => {
+        btn.innerHTML = originalText;
+        btn.classList.remove('copied');
+      }, 2000);
     }
 
-    function openWhatsAppChat() {
-      let phone = document.getElementById('custPhone').value.trim().replace(/\D/g, '');
+    // Copy WhatsApp Full Message
+    function copyWhatsAppMessage(btn) {
+      const text = document.getElementById('whatsappMessageText').innerText;
+      navigator.clipboard.writeText(text);
+      const originalText = btn.innerHTML;
+      btn.innerHTML = '<span>✓</span> <span>تم نسخ الرسالة بنجاح</span>';
+      setTimeout(() => {
+        btn.innerHTML = originalText;
+      }, 2000);
+    }
+
+    // Send WhatsApp Direct
+    function sendWhatsAppDirect() {
+      const text = document.getElementById('whatsappMessageText').innerText;
+      let phone = document.getElementById('clientPhone').value.trim().replace(/\D/g, '');
       if (phone.startsWith('01')) phone = '2' + phone;
-      const text = encodeURIComponent(buildWhatsAppText());
-      window.open(phone ? `https://wa.me/${phone}?text=${text}` : `https://wa.me/?text=${text}`, '_blank');
-    }
 
-    // Tables rendering
-    function renderTables() {
-      const db = getStoredData();
-      const cBody = document.getElementById('customersTableBody');
-      const rBody = document.getElementById('revocationsTableBody');
-
-      if (!db.customers || db.customers.length === 0) {
-        cBody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: var(--text-muted); padding: 24px;">لا يوجد عملاء مسجلين حتى الآن.</td></tr>';
+      if (phone) {
+        window.open(`https://wa.me/${phone}?text=${encodeURIComponent(text)}`, '_blank');
       } else {
-        cBody.innerHTML = db.customers.map(c => `
-          <tr>
-            <td><strong>${c.name}</strong><br><span style="font-size: 11px; color: var(--text-muted);">${c.phone || ''}</span></td>
-            <td style="font-family: var(--mono-stack); font-size: 11px;">${c.mid}</td>
-            <td>${c.typ === 'LIFETIME' ? 'مدى الحياة' : 'محدد'}</td>
-            <td>${new Date(c.iat * 1000).toLocaleDateString('ar-EG')}</td>
-            <td><span style="color: #34D399; font-weight: 700;">نشط</span></td>
-            <td>
-              <button class="btn btn-secondary" style="padding: 4px 8px; font-size: 11px;" onclick="copyCustomerToken('${c.token}')">نسخ</button>
-              <button class="btn btn-danger" style="padding: 4px 8px; font-size: 11px;" onclick="revokeCustomer('${c.lid}', '${c.mid}')">إلغاء</button>
-            </td>
-          </tr>
-        `).join('');
-      }
-
-      if (!db.revocations || db.revocations.length === 0) {
-        rBody.innerHTML = '<tr><td colspan="4" style="text-align: center; color: var(--text-muted); padding: 24px;">لا توجد تراخيص ملغاة حالياً.</td></tr>';
-      } else {
-        rBody.innerHTML = db.revocations.map(r => `
-          <tr>
-            <td style="font-family: var(--mono-stack);">${r.lid}</td>
-            <td style="font-family: var(--mono-stack);">${r.mid}</td>
-            <td>${r.reason}</td>
-            <td>${new Date(r.at).toLocaleDateString('ar-EG')}</td>
-          </tr>
-        `).join('');
+        window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
       }
     }
 
-    function copyCustomerToken(token) {
-      navigator.clipboard.writeText(token);
-      alert('تم نسخ كود التفعيل.');
-    }
-
-    function revokeCustomer(lid, mid) {
-      const reason = prompt('سبب الإلغاء (مثال: انتهاء الاشتراك / استبدال جهاز):', 'سحب الترخيص');
-      if (!reason) return;
-
-      const db = getStoredData();
-      db.revocations.push({
-        lid,
-        mid,
-        reason,
-        at: new Date().toISOString()
-      });
-      saveStoredData(db);
-      alert('تمت إضافة الترخيص لقائمة الإلغاءات بنجاح.');
-    }
-
-    async function exportSignedRevocations() {
-      if (!activePrivateKey) {
-        alert('⚠️ يجب تحميل وفك تشفير المفتاح الخاص أولاً لتوقيع قائمة الإلغاءات.');
-        openLoadKeyModal();
-        return;
+    // Paste Machine ID from Clipboard
+    async function pasteMachineId() {
+      try {
+        const text = await navigator.clipboard.readText();
+        if (text) {
+          document.getElementById('machineId').value = text.trim().toUpperCase();
+        }
+      } catch (e) {
+        alert('يرجى لصق الكود يدوياً (Ctrl + V)');
       }
-
-      const db = getStoredData();
-      const normItems = (db.revocations || []).map(r => ({
-        lid: String(r.lid || '').trim(),
-        mid: String(r.mid || '').trim().toUpperCase(),
-        reason: String(r.reason || '').trim(),
-        at: String(r.at || new Date().toISOString())
-      })).sort((a, b) => a.lid.localeCompare(b.lid));
-
-      const payload = {
-        v: 1,
-        kid: activeKid,
-        generatedAt: new Date().toISOString(),
-        count: normItems.length,
-        items: normItems
-      };
-
-      const canonicalJson = JSON.stringify(payload);
-      const msgBytes = new TextEncoder().encode(canonicalJson);
-
-      const sigBuffer = await crypto.subtle.sign({ name: 'Ed25519' }, activePrivateKey, msgBytes);
-      const sigBase64Url = base64UrlEncode(new Uint8Array(sigBuffer));
-
-      const finalObj = {
-        ...payload,
-        sig: sigBase64Url
-      };
-
-      const blob = new Blob([JSON.stringify(finalObj, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'revocations.json';
-      a.click();
-      URL.revokeObjectURL(url);
     }
-
-    // Initialize tables on load
-    renderTables();
   </script>
 </body>
 </html>

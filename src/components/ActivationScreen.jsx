@@ -284,77 +284,77 @@ export function ActivationScreen({
             </p>
           </div>
 
-            {/* Form: Activation Key Input & Submit */}
-            <form onSubmit={handleActivate} className="space-y-4 pt-1">
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <label className="block text-xs font-bold text-slate-300 text-right">
-                    رمز الترخيص الرسمي (License Token):
-                  </label>
-                  <button
-                    type="button"
-                    onClick={handlePasteKey}
-                    className="px-2.5 py-1 rounded-lg bg-[#17233A] hover:bg-[#23324D] text-slate-300 hover:text-teal-300 text-[11px] font-bold border border-[#23324D] flex items-center gap-1 transition-all"
-                    title="لصق من الحافظة"
-                  >
-                    <ClipboardPaste className="w-3.5 h-3.5" />
-                    <span>لصق الرمز 📋</span>
-                  </button>
+          {/* 4. Form: Activation Key Input & Submit */}
+          <form onSubmit={handleActivate} className="space-y-4 pt-1">
+            <div className="space-y-2">
+              <label className="block text-xs font-bold text-slate-300 text-right">
+                مفتاح التفعيل (Activation Key):
+              </label>
+
+              <div className="relative flex items-center">
+                {/* Key Icon */}
+                <div className="absolute right-3.5 text-slate-400 pointer-events-none">
+                  <Key className="w-4 h-4 text-teal-400" />
                 </div>
 
-                <div className="relative">
-                  <textarea
-                    rows={4}
-                    value={licenseKeyInput}
-                    onChange={(e) => {
-                      setLicenseKeyInput(e.target.value.trim());
-                      setErrorMsg('');
-                      setSuccessMsg('');
-                      setIsSuccess(false);
-                    }}
-                    placeholder="الصق رمز الترخيص الرقمي الكامل هنا (يبدأ بـ LIC2.)..."
-                    className="w-full bg-[#0B1220] border border-[#23324D] focus:border-teal-400 rounded-xl p-3 text-xs text-teal-300 font-mono font-medium leading-relaxed placeholder:text-slate-600 placeholder:font-sans focus:outline-none focus:ring-1 focus:ring-teal-400 transition-all resize-none"
-                    dir="ltr"
-                    autoFocus
-                  />
-                </div>
-                <div className="flex items-center justify-between text-[10px] text-slate-500">
-                  <span>يدعم رموز: ترخيص دائم / مدة محددة / استعادة PIN / إلغاء ترخيص</span>
-                  {licenseKeyInput.startsWith('LIC2.') && (
-                    <span className="text-teal-400 font-bold">✓ تنسيق LIC2 رقمي معتمد</span>
-                  )}
-                </div>
+                {/* Input Field with Auto-Uppercase */}
+                <input
+                  type="text"
+                  value={licenseKeyInput}
+                  onChange={(e) => {
+                    setLicenseKeyInput(e.target.value.toUpperCase());
+                    setErrorMsg('');
+                    setSuccessMsg('');
+                    setIsSuccess(false);
+                  }}
+                  placeholder="XXXX-XXXX-XXXX-XXXX أو LIC-LIFE-..."
+                  className="w-full bg-[#0B1220] border border-[#23324D] focus:border-teal-400 rounded-xl pr-10 pl-28 py-3 text-sm text-white font-mono font-bold tracking-wider placeholder:text-slate-600 placeholder:font-sans focus:outline-none focus:ring-1 focus:ring-teal-400 transition-all uppercase"
+                  dir="ltr"
+                  autoFocus
+                />
+
+                {/* Paste from Clipboard Button */}
+                <button
+                  type="button"
+                  onClick={handlePasteKey}
+                  className="absolute left-2 px-2.5 py-1.5 rounded-lg bg-[#17233A] hover:bg-[#23324D] text-slate-300 hover:text-teal-300 text-[11px] font-bold border border-[#23324D] flex items-center gap-1 transition-all"
+                  title="لصق من الحافظة"
+                >
+                  <ClipboardPaste className="w-3.5 h-3.5" />
+                  <span>لصق 📋</span>
+                </button>
               </div>
+            </div>
 
-              {/* Error Message */}
-              {errorMsg && (
-                <div className="p-3 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs font-bold text-center animate-shake">
-                  {errorMsg}
-                </div>
-              )}
+            {/* Error Message */}
+            {errorMsg && (
+              <div className="p-3 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs font-bold text-center animate-shake">
+                {errorMsg}
+              </div>
+            )}
 
-              {/* Success Message */}
-              {successMsg && (
-                <div className="p-3.5 rounded-xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-xs font-bold text-center flex items-center justify-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                  <span>{successMsg}</span>
-                </div>
-              )}
+            {/* Success Message */}
+            {successMsg && (
+              <div className="p-3.5 rounded-xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-xs font-bold text-center flex items-center justify-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                <span>{successMsg}</span>
+              </div>
+            )}
 
-              {/* Submit Activation Button */}
-              <button
-                type="submit"
-                disabled={isSubmitting || isSuccess}
-                className={`w-full py-3.5 rounded-2xl font-black text-sm flex items-center justify-center gap-2 shadow-xl transition-all ${
-                  isSuccess
-                    ? 'bg-emerald-500 text-slate-950 shadow-emerald-500/20'
-                    : 'bg-gradient-to-r from-teal-500 to-emerald-500 hover:from-teal-400 hover:to-emerald-400 active:scale-[0.99] text-slate-950 shadow-teal-500/20 cursor-pointer'
-                } disabled:opacity-50`}
-              >
-                <Sparkles className="w-4 h-4" />
-                <span>{isSubmitting ? 'جارٍ التحقق الرقمي...' : '🚀 تفعيل البرنامج الآن'}</span>
-              </button>
-            </form>
+            {/* Submit Activation Button */}
+            <button
+              type="submit"
+              disabled={isSubmitting || isSuccess}
+              className={`w-full py-3.5 rounded-2xl font-black text-sm flex items-center justify-center gap-2 shadow-xl transition-all ${
+                isSuccess
+                  ? 'bg-emerald-500 text-slate-950 shadow-emerald-500/20'
+                  : 'bg-gradient-to-r from-teal-500 to-emerald-500 hover:from-teal-400 hover:to-emerald-400 active:scale-[0.99] text-slate-950 shadow-teal-500/20 cursor-pointer'
+              } disabled:opacity-50`}
+            >
+              <Sparkles className="w-4 h-4" />
+              <span>{isSubmitting ? 'جارٍ التحقق...' : '🚀 تفعيل البرنامج الآن'}</span>
+            </button>
+          </form>
 
         </div>
 
