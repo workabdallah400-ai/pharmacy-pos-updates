@@ -1,3 +1,4 @@
+import { getUnitName } from '../utils/pharmacyUnits';
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Search,

@@ -1,3 +1,4 @@
+import { ErrorBoundary } from './components/ErrorBoundary';
 import React, { useState, useEffect } from 'react';
 import { LoginScreen } from './components/LoginScreen';
 import { TopHeader } from './components/TopHeader';
@@ -745,6 +746,7 @@ export default function App() {
 
         {/* Center Main Content Area */}
         <main className="flex-1 flex flex-col overflow-hidden bg-[#0B1220] relative">
+          <ErrorBoundary>
           {activeTab === 'pos' ? (
             <POSView
               currentUser={currentUser}
@@ -817,6 +819,7 @@ export default function App() {
           ) : (
             <PlaceholderView activeTabId={activeTab} />
           )}
+        </ErrorBoundary>
         </main>
       </div>
 
