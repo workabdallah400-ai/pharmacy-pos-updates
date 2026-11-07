@@ -240,47 +240,6 @@ export function TopHeader({
       {/* Left Section: Online/Offline Badge, License Badge & Controls */}
       <div className="flex items-center gap-2.5">
         
-        {/* Online / Offline Status Badge with Auto-Sync */}
-        <button
-          type="button"
-          onClick={handleManualSync}
-          title={isOnline ? `متصل بالإنترنت - آخر مزامنة: ${lastSyncText} (انقر للمزامنة الفورية)` : 'وضع أوفلاين محلي 100% (انقر للحفظ)'}
-          className={`flex items-center gap-2 px-3 py-1 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
-            isOnline
-              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20'
-              : 'bg-rose-500/10 border-rose-500/30 text-rose-400 hover:bg-rose-500/20'
-          }`}
-        >
-          {isOnline ? (
-            <Wifi className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
-          ) : (
-            <WifiOff className="w-3.5 h-3.5 text-rose-400" />
-          )}
-          <span>{isOnline ? 'أونلاين (متصل بالواي فاي)' : 'أوفلاين (محلي 100%)'}</span>
-          {pendingCount > 0 && (
-            <span
-              className={`px-1.5 py-0.5 rounded-md text-[10px] font-mono font-black ${
-                isOnline ? 'bg-amber-500/25 text-amber-300' : 'bg-rose-500/25 text-rose-200'
-              }`}
-              title="عمليات محفوظة محلياً في انتظار الرفع"
-            >
-              {pendingCount} معلّقة
-            </span>
-          )}
-          {cloudPendingCount > 0 && (
-            <span
-              className="px-1.5 py-0.5 rounded-md text-[10px] font-mono font-black bg-sky-500/25 text-sky-200"
-              title="عمليات بانتظار رفعها إلى الخادم الدائم (تُرفع تلقائياً عند عودة الإنترنت)"
-            >
-              {cloudPendingCount} للسحابة
-            </span>
-          )}
-          <div className="flex items-center gap-1 border-r border-slate-700 pr-2 mr-1">
-            <RefreshCw className={`w-3 h-3 text-teal-300 ${isSyncing ? 'animate-spin' : ''}`} />
-            <span className="text-[10px] text-slate-300 font-mono hidden sm:inline">{isSyncing ? 'مزامنة...' : 'مزامنة'}</span>
-          </div>
-        </button>
-
         {/* Official License Badge */}
         <button
           type="button"

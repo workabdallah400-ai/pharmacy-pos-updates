@@ -72,15 +72,10 @@ export function SettingsView({ onUpdatePharmacyName, onRevokeDevice, currentUser
     return DEFAULT_SETTINGS;
   });
 
-  const [activeTab, setActiveTab] = useState(initialTab); // 'receipt', 'hardware', 'backup', 'license', 'security', 'cloud'
+  const [activeTab, setActiveTab] = useState(initialTab === 'cloud' || initialTab === 'security' ? 'receipt' : initialTab); // 'receipt', 'hardware', 'backup', 'users', 'audit', 'updates'
   const [toastMessage, setToastMessage] = useState('');
   const [copiedKey, setCopiedKey] = useState(false);
-  const [showAdminPin, setShowAdminPin] = useState(false);
-  const [showCashierPin, setShowCashierPin] = useState(false);
   const [enteredLicenseKey, setEnteredLicenseKey] = useState(settings.licenseKey || '');
-  const [showRevokeModal, setShowRevokeModal] = useState(false);
-  const [revokePinInput, setRevokePinInput] = useState('');
-  const [revokeError, setRevokeError] = useState('');
   const [syncStatus, setSyncStatus] = useState(null);
   const [syncRunning, setSyncRunning] = useState(false);
   const [reportServerInfo, setReportServerInfo] = useState(null);
@@ -157,6 +152,18 @@ export function SettingsView({ onUpdatePharmacyName, onRevokeDevice, currentUser
     setTimeout(() => setToastMessage(''), 3000);
   };
 
+  // Load settings from SQLite on mount
+  useEffect(() => {
+    sqliteService.getSettings().then((s) => {
+      if (s) {
+        setSettings((prev) => ({ ...prev, ...s }));
+        if (s.pharmacyName && onUpdatePharmacyName) {
+          onUpdatePharmacyName(s.pharmacyName);
+        }
+      }
+    }).catch(() => {});
+  }, []);
+
   const handleFieldChange = (field, value) => {
     setSettings((prev) => {
       const next = { ...prev, [field]: value };
@@ -165,6 +172,20 @@ export function SettingsView({ onUpdatePharmacyName, onRevokeDevice, currentUser
       }
       return next;
     });
+  };
+
+  const handleSaveAll = async () => {
+    try {
+      localStorage.setItem('PHARMACY_SETTINGS', JSON.stringify(settings));
+      await sqliteService.saveSettings(settings);
+      if (onUpdatePharmacyName) {
+        onUpdatePharmacyName(settings.pharmacyName);
+      }
+      showToast('تم حفظ كافة الإعدادات والخيارات وهوية الصيدلية بنجاح ✓');
+      playBarcodeBeep();
+    } catch (e) {
+      showToast('تم الحفظ محلياً');
+    }
   };
 
   // --- Auto updater helpers ---
@@ -280,16 +301,7 @@ export function SettingsView({ onUpdatePharmacyName, onRevokeDevice, currentUser
     }
   };
 
-  const handleSaveAll = () => {
-    try {
-      localStorage.setItem('PHARMACY_SETTINGS', JSON.stringify(settings));
-      if (onUpdatePharmacyName) {
-        onUpdatePharmacyName(settings.pharmacyName);
-      }
-      showToast('تم حفظ كافة الإعدادات والخيارات بنجاح ✓');
-      playBarcodeBeep();
-    } catch (e) {}
-  };
+
 
   // 3. Backup Database to JSON file download
   const handleBackupNow = async () => {
@@ -384,8 +396,7 @@ export function SettingsView({ onUpdatePharmacyName, onRevokeDevice, currentUser
     { id: 'backup', label: 'النسخ الاحتياطي والأمان', icon: HardDrive },
     { id: 'users', label: 'إدارة المستخدمين والحسابات', icon: Shield, permission: 'canManageUsers' },
     { id: 'audit', label: 'سجل العمليات والتدقيق (Audit Log)', icon: Eye, permission: 'canViewAuditLog' },
-    { id: 'security', label: 'أكواد PIN (توافق قديم)', icon: Lock },
-    { id: 'cloud', label: 'المزامنة وبوابة الموبايل', icon: Cloud }
+    { id: 'updates', label: 'تحديثات البرنامج', icon: RefreshCw }
   ];
 
   const navTabs = allNavTabs.filter((tab) => {
@@ -941,73 +952,9 @@ export function SettingsView({ onUpdatePharmacyName, onRevokeDevice, currentUser
             </div>
           )}
 
-          {/* TAB 5: Users & PIN Security */}
-          {activeTab === 'security' && (
-            <div className="max-w-3xl space-y-8">
-
-              {/* Legacy PIN Info Banner */}
-              <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs font-medium flex items-center gap-2 mb-4">
-                <AlertTriangle className="w-4 h-4 shrink-0 text-amber-400" />
-                <span>نظام الحسابات (اسم المستخدم/كلمة المرور) هو النظام الأساسي. أكواد PIN متبقية للتوافق مع الإصدارات القديمة فقط.</span>
-              </div>
-
-              {/* PIN Settings */}
-              <div className="grid grid-cols-2 gap-4">
-                
-                {/* Admin PIN */}
-                <div className="bg-[#0B1220] p-4 rounded-2xl border border-[#23324D] space-y-2">
-                  <label className="block text-xs font-bold text-slate-200">
-                    رمز PIN لمدير الصيدلية (Admin PIN)
-                  </label>
-                  <div className="relative">
-                    <input
-                      type={showAdminPin ? 'text' : 'password'}
-                      maxLength="4"
-                      value={settings.adminPin}
-                      onChange={(e) => handleFieldChange('adminPin', e.target.value)}
-                      className="w-full bg-[#111A2B] border border-[#23324D] focus:border-teal-400 rounded-xl pl-10 pr-3.5 py-2.5 text-base font-mono font-bold text-emerald-400 text-center tracking-widest focus:outline-none"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowAdminPin(!showAdminPin)}
-                      className="absolute left-3 top-3 text-slate-400 hover:text-white"
-                    >
-                      {showAdminPin ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                  </div>
-                  <p className="text-[10px] text-slate-500">
-                    الرمز الافتراضي: 1234 (يملك كافة الصلاحيات والأرباح)
-                  </p>
-                </div>
-
-                {/* Cashier PIN */}
-                <div className="bg-[#0B1220] p-4 rounded-2xl border border-[#23324D] space-y-2">
-                  <label className="block text-xs font-bold text-slate-200">
-                    رمز PIN لكاشير الصيدلية (Cashier PIN)
-                  </label>
-                  <div className="relative">
-                    <input
-                      type={showCashierPin ? 'text' : 'password'}
-                      maxLength="4"
-                      value={settings.cashierPin}
-                      onChange={(e) => handleFieldChange('cashierPin', e.target.value)}
-                      className="w-full bg-[#111A2B] border border-[#23324D] focus:border-teal-400 rounded-xl pl-10 pr-3.5 py-2.5 text-base font-mono font-bold text-teal-400 text-center tracking-widest focus:outline-none"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowCashierPin(!showCashierPin)}
-                      className="absolute left-3 top-3 text-slate-400 hover:text-white"
-                    >
-                      {showCashierPin ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                  </div>
-                  <p className="text-[10px] text-slate-500">
-                    الرمز الافتراضي: 0000 (صلاحيات بيع كاشير فقط)
-                  </p>
-                </div>
-
-              </div>
-
+          {/* TAB 5: Hardware & Cashier Restrictions */}
+          {activeTab === 'hardware' && (
+            <div className="max-w-3xl space-y-6">
               {/* Cashier Restrictions Toggles */}
               <div className="space-y-3">
                 <div className="text-xs font-bold text-slate-300">صلاحيات وقيود الكاشير:</div>
@@ -1031,7 +978,7 @@ export function SettingsView({ onUpdatePharmacyName, onRevokeDevice, currentUser
                   <div>
                     <div className="text-xs font-bold text-white">منع حذف الفواتير الصادرة بدون إذن المدير</div>
                     <div className="text-[11px] text-slate-400 mt-0.5">
-                      يتطلب إدخال PIN المدير عند الرغبة في إلغاء أي فاتورة مسجلة
+                      يتطلب صلاحية المدير عند الرغبة في إلغاء أي فاتورة مسجلة
                     </div>
                   </div>
                   <input
@@ -1058,644 +1005,51 @@ export function SettingsView({ onUpdatePharmacyName, onRevokeDevice, currentUser
                 </div>
 
               </div>
-
             </div>
           )}
 
-          {/* TAB 6: Cloud Sync & Mobile Portal */}
-          {activeTab === 'cloud' && (
+          {/* TAB 6: App Updates */}
+          {activeTab === 'updates' && (
             <div className="max-w-2xl space-y-6">
-              <div className="text-xs font-bold text-teal-400 flex items-center gap-2 mb-2">
-                <Cloud className="w-4 h-4" />
-                المزامنة السحابية وبوابة متابعة الموبايل الذكية:
-              </div>
-
-              {/* Cloud Sync Toggle */}
-              <div className="bg-[#0B1220] p-4 rounded-xl border border-[#23324D] flex items-center justify-between">
-                <div>
-                  <div className="text-xs font-bold text-white">المزامنة التلقائية اللحظية في الخلفية</div>
-                  <div className="text-[11px] text-slate-400 mt-0.5">
-                    رفع الفواتير وإغلاق الورديات فورياً لسحابة الصيدلية المشفرة
-                  </div>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={settings.enableCloudSync}
-                  onChange={(e) => handleFieldChange('enableCloudSync', e.target.checked)}
-                  className="w-5 h-5 rounded text-teal-500 bg-[#111A2B] border-[#23324D] focus:ring-teal-400"
-                />
-              </div>
-
-              {/* Sync Endpoint */}
-              <div className="bg-[#0B1220] p-4 rounded-xl border border-[#23324D] space-y-2">
-                <label className="block text-xs font-bold text-slate-200">
-                  رابط سيرفر المزامنة (Sync Endpoint)
-                </label>
-                <input
-                  type="url"
-                  dir="ltr"
-                  value={settings.syncEndpoint || ''}
-                  onChange={(e) => handleFieldChange('syncEndpoint', e.target.value)}
-                  placeholder="https://your-server.com/api/pharmacy/sync"
-                  className="w-full bg-[#111A2B] border border-[#23324D] focus:border-teal-400 rounded-xl px-3 py-2.5 text-xs text-white font-mono focus:outline-none"
-                />
-                <p className="text-[11px] text-slate-400 leading-relaxed">
-                  كل عملية (بيع/آجل/توريد/مرتجع/مصروف/وردية) تُسجّل في طابور محلي وتُرفع تلقائياً هنا فور عودة الإنترنت.
-                  اترك الحقل فارغاً إذا كنت تعمل محلياً — سيحفظ النظام كل العمليات محلياً بدون فقدان أي بيانات.
-                </p>
-              </div>
-
-              {/* Report Server Base URL (QR → hosted report page) */}
-              <div className="bg-[#0B1220] p-4 rounded-xl border border-[#23324D] space-y-2">
-                <label className="block text-xs font-bold text-slate-200">
-                  رابط سيرفر التقارير (Report Server Base URL)
-                </label>
-                <input
-                  type="url"
-                  dir="ltr"
-                  value={settings.reportBaseUrl || ''}
-                  onChange={(e) => handleFieldChange('reportBaseUrl', e.target.value)}
-                  placeholder="https://pharmacy-reports.<name>.workers.dev"
-                  className="w-full bg-[#111A2B] border border-[#23324D] focus:border-teal-400 rounded-xl px-3 py-2.5 text-xs text-white font-mono focus:outline-none"
-                />
-                <p className="text-[11px] text-slate-400 leading-relaxed">
-                  عند مسح كود QR الخاص بالوردية سيُفتح تقرير عربي منسق على الموبايل بدلاً من نص طويل.
-                  ضع رابط الـ Worker هنا عشان الرابط يبقى دائم، أو اتركه فارغاً لاستخدام
-                  السيرفر المحلي المدمج في نسخة الكمبيوتر تلقائياً.
-                </p>
-
-                <div className="flex gap-2 pt-1">
-                  <button
-                    type="button"
-                    disabled={cloudTestBusy}
-                    onClick={async () => {
-                      const base = String(settings.reportBaseUrl || '').trim().replace(/\/+$/, '');
-                      if (!base) {
-                        showToast('اكتب رابط سيرفر التقارير أولاً');
-                        return;
-                      }
-                      setCloudTestBusy(true);
-                      try {
-                        const token = String(settings.reportToken || '').trim();
-                        const url = `${base}/health${token ? `?token=${encodeURIComponent(token)}` : ''}`;
-                        const controller = new AbortController();
-                        const timer = setTimeout(() => controller.abort(), 12000);
-                        const res = await fetch(url, { signal: controller.signal });
-                        clearTimeout(timer);
-                        if (!res.ok) {
-                          showToast(`السيرفر رد بخطأ HTTP ${res.status}`);
-                          return;
-                        }
-                        const info = await res.json().catch(() => ({}));
-                        showToast(`✅ السيرفر شغال — ${info.service || 'report server'}`);
-                      } catch (e) {
-                        showToast(e.name === 'AbortError'
-                          ? 'انتهت مهلة الاتصال بالسيرفر'
-                          : 'تعذر الاتصال — تأكد من الرابط والإنترنت');
-                      } finally {
-                        setCloudTestBusy(false);
-                      }
-                    }}
-                    className="px-3 py-2 rounded-lg bg-[#111A2B] hover:bg-[#17233A] border border-[#23324D] text-slate-200 text-[11px] font-bold disabled:opacity-50"
-                  >
-                    {cloudTestBusy ? 'جارِ الاختبار...' : 'اختبار الاتصال'}
-                  </button>
-                </div>
-
-                {/* The URL that actually ends up inside the shift QR code */}
-                <div className="bg-[#111A2B] border border-teal-500/25 rounded-xl p-3 space-y-1">
-                  <div className="text-[11px] font-bold text-slate-200">رابط الـ QR الحالي</div>
-                  <div dir="ltr" className="text-[10px] text-teal-300 font-mono break-all text-left">
-                    {getPermanentReportBaseUrl() || getReportBaseUrl() || 'غير محدد — استخدم السيرفر المحلي'}
-                  </div>
-                  <p className="text-[10px] text-slate-500 leading-relaxed">
-                    ده بالظبط الرابط اللي بيتقرا لما الكاميرا تمسح كود الوردية.
-                    لو كان رابط دائم (workers.dev أو دومينك) يفضل شغال للأبد.
-                  </p>
-                </div>
-
-                {/* Permanent cloud host (Cloudflare Worker) */}
-                <div className="bg-gradient-to-r from-violet-500/10 via-[#111A2B] to-sky-500/10 border border-violet-500/30 rounded-xl p-3 space-y-2">
-                  <div className="text-[11px] font-bold text-white">الرابط الدائم (Cloudflare Worker)</div>
-                  <div dir="ltr" className="text-[10px] text-violet-300 font-mono break-all text-left">
-                    {settings.permanentReportUrl || 'غير محدد'}
-                  </div>
-                  <p className="text-[10px] text-slate-400 leading-relaxed">
-                    استضافة مجانية دائمة على Cloudflare — الداتا محفوظة ومفيش نوم،
-                    وكود QR المطبوع يفضل شغال للأبد. بيتحدّث تلقائياً بعد كل وردية.
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const url = String(settings.permanentReportUrl || '').trim().replace(/\/+$/, '');
-                        if (!url) {
-                          showToast('لا يوجد رابط دائم محفوظ');
-                          return;
-                        }
-                        handleFieldChange('reportBaseUrl', url);
-                        try {
-                          localStorage.setItem(
-                            'PHARMACY_SETTINGS',
-                            JSON.stringify({ ...settings, reportBaseUrl: url })
-                          );
-                        } catch (err) {}
-                        showToast('✅ تم ضبط الرابط الدائم في كود QR');
-                      }}
-                      className="px-3 py-2 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-[11px] font-bold"
-                    >
-                      استخدم الرابط الدائم في QR
-                    </button>
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        const url = String(settings.permanentReportUrl || '').trim().replace(/\/+$/, '');
-                        if (!url) return;
-                        setCloudTestBusy(true);
-                        try {
-                          const token = String(settings.reportToken || '').trim();
-                          const res = await fetch(`${url}/health${token ? `?token=${encodeURIComponent(token)}` : ''}`);
-                          const info = await res.json().catch(() => ({}));
-                          showToast(res.ok
-                            ? `✅ الخادم الدائم شغال — ${info.service || 'ok'}`
-                            : `الخادم الدائم رد بخطأ HTTP ${res.status}`);
-                        } catch (e) {
-                          showToast('تعذر الاتصال بالخادم الدائم');
-                        } finally {
-                          setCloudTestBusy(false);
-                        }
-                      }}
-                      className="px-3 py-2 rounded-lg bg-[#0B1220] hover:bg-[#17233A] border border-[#23324D] text-slate-200 text-[11px] font-bold"
-                    >
-                      اختبار الخادم الدائم
-                    </button>
-                  </div>
-                </div>
-
-                {/* Permanent daily summary link — the link the owner keeps */}
-                <div className="bg-[#111A2B] border border-amber-500/25 rounded-xl p-3 space-y-2">
-                  <div className="text-[11px] font-bold text-white">📅 رابط ملخص اليوم الدائم (يحفظه المالك)</div>
-                  <div dir="ltr" className="text-[10px] text-amber-300 font-mono break-all text-left">
-                    {buildDailySummaryUrl(settings.cloudPharmacyId || 'PHARMACY-LOCAL') || 'غير محدد'}
-                  </div>
-                  <p className="text-[10px] text-slate-500 leading-relaxed">
-                    صفحة تفاصيل اليوم كاملة (مبيعات، آجل، توريد، مرتجعات، إتلاف، مصروفات، جرد الدرج).
-                    لو الصيدلية بدون إنترنت تعرض آخر بيانات مرفوعة مع وقت آخر مزامنة، وتُحدَّث تلقائياً فور عودة الاتصال.
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const url = buildDailySummaryUrl(settings.cloudPharmacyId || 'PHARMACY-LOCAL');
-                        if (url) window.open(url, '_blank');
-                        else showToast('لا يوجد رابط دائم محفوظ');
-                      }}
-                      className="px-3 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-[11px] font-bold"
-                    >
-                      فتح ملخص اليوم
-                    </button>
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        const url = buildDailySummaryUrl(settings.cloudPharmacyId || 'PHARMACY-LOCAL');
-                        if (!url) {
-                          showToast('لا يوجد رابط دائم محفوظ');
-                          return;
-                        }
-                        try {
-                          await navigator.clipboard.writeText(url);
-                          showToast('✅ تم نسخ رابط ملخص اليوم');
-                        } catch (e) {
-                          showToast('تعذر نسخ الرابط');
-                        }
-                      }}
-                      className="px-3 py-2 rounded-lg bg-[#0B1220] hover:bg-[#17233A] border border-[#23324D] text-slate-200 text-[11px] font-bold"
-                    >
-                      نسخ الرابط
-                    </button>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-300 mb-1">
-                    رمز حماية التقارير (اختياري — REPORT_TOKEN)
-                  </label>
-                  <input
-                    type="text"
-                    dir="ltr"
-                    value={settings.reportToken || ''}
-                    onChange={(e) => handleFieldChange('reportToken', e.target.value)}
-                    placeholder="اتركه فارغاً للاستخدام المحلي"
-                    className="w-full bg-[#111A2B] border border-[#23324D] focus:border-teal-400 rounded-xl px-3 py-2 text-xs text-white font-mono focus:outline-none"
-                  />
-                </div>
-
-                <div className="bg-[#111A2B] border border-teal-500/25 rounded-xl p-3 space-y-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-[11px] font-bold text-slate-200">السيرفر المحلي المدمج</span>
-                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${reportServerInfo?.running ? 'text-emerald-300 border-emerald-500/30 bg-emerald-500/10' : 'text-slate-400 border-[#23324D] bg-[#0B1220]'}`}>
-                      {reportServerInfo?.running ? `يعمل على المنفذ ${reportServerInfo.port}` : 'غير متاح في المتصفح'}
-                    </span>
-                  </div>
-                  {reportServerInfo?.lanUrl && (
-                    <div dir="ltr" className="text-[10px] text-teal-300 font-mono text-left break-all">
-                      {reportServerInfo.lanUrl}
+              <div className="bg-[#0B1220] p-6 rounded-2xl border border-[#23324D] space-y-5">
+                <div className="flex items-center justify-between pb-3 border-b border-[#23324D]">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-teal-500/15 text-teal-400 border border-teal-500/30 flex items-center justify-center">
+                      <RefreshCw className={`w-5 h-5 ${updateBusy ? 'animate-spin' : ''}`} />
                     </div>
-                  )}
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const base = (reportServerInfo?.lanUrl || getReportPreviewBaseUrl() || '').replace(/\/+$/, '');
-                        if (!base) {
-                          showToast('السيرفر المحلي غير متاح — شغّل التطبيق على الكمبيوتر أولاً');
-                          return;
-                        }
-                        handleFieldChange('reportBaseUrl', base);
-                        handleFieldChange('syncEndpoint', `${base}/api/pharmacy/sync`);
-                        showToast('تم ضبط سيرفر التقارير والمزامنة المحلي بنجاح');
-                      }}
-                      className="flex-1 py-2 rounded-lg bg-teal-500 hover:bg-teal-400 text-slate-950 text-[11px] font-bold"
-                    >
-                      استخدام السيرفر المحلي
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const liveUrl = buildLiveReportsUrl(settings.cloudPharmacyId || 'PHARMACY-LOCAL');
-                        if (liveUrl) window.open(liveUrl, '_blank');
-                        else showToast('لا يوجد سيرفر تقارير متاح حالياً');
-                      }}
-                      className="flex-1 py-2 rounded-lg bg-[#0B1220] hover:bg-[#17233A] border border-[#23324D] text-slate-200 text-[11px] font-bold"
-                    >
-                      فتح صفحة التقارير
-                    </button>
-                  </div>
-                  <p className="text-[10px] text-slate-500 leading-relaxed">
-                    السيرفر يعمل تلقائياً داخل نسخة الكمبيوتر ويستقبل كل عمليات الوردية محلياً.
-                    تأكد من السماح لـ Node.js في جدار الحماية أول مرة، وأن الموبايل على نفس شبكة الواي فاي.
-                  </p>
-                </div>
-
-                {/* --- FREE PUBLIC TUNNEL (Cloudflare, no account) --- */}
-                <div className="mt-4 bg-gradient-to-r from-violet-500/10 via-[#111A2B] to-sky-500/10 border border-violet-500/30 rounded-xl p-3 space-y-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-[11px] font-bold text-white flex items-center gap-2">
-                      <Globe className="w-4 h-4 text-violet-400" />
-                      رابط عام مجاني (نفق Cloudflare) — بدون حساب
-                    </span>
-                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${tunnelState?.running ? 'text-emerald-300 border-emerald-500/30 bg-emerald-500/10' : 'text-slate-400 border-[#23324D] bg-[#0B1220]'}`}>
-                      {tunnelState?.running ? 'مفتوح 🌍' : 'مغلق'}
-                    </span>
-                  </div>
-
-                  <p className="text-[10px] text-slate-400 leading-relaxed">
-                    افتح نفقاً عاماً مجانياً من Cloudflare (بدون تسجيل ولا بطاقة) فيصبح كود QR
-                    يفتح تقرير الوردية من <b className="text-white">أي مكان في العالم</b> — حتى لو
-                    الصيدلية ليست على نفس الواي فاي. الرابط مؤقت ويتغير عند إعادة التشغيل.
-                  </p>
-
-                  {tunnelState?.url && (
-                    <div className="bg-[#0B1220] border border-emerald-500/30 rounded-lg p-2.5 flex items-center justify-between gap-2">
-                      <span dir="ltr" className="text-[11px] text-emerald-300 font-mono truncate">
-                        {tunnelState.url}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={handleCopyTunnelUrl}
-                        className="shrink-0 p-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300"
-                        title="نسخ الرابط"
-                      >
-                        <Copy className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  )}
-
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={!!settings.useCloudflareTunnel}
-                      onChange={async (e) => {
-                        const enabled = e.target.checked;
-                        // Persist immediately — the QR builder reads the
-                        // setting straight from localStorage.
-                        const next = { ...settings, useCloudflareTunnel: enabled };
-                        handleFieldChange('useCloudflareTunnel', enabled);
-                        try {
-                          localStorage.setItem('PHARMACY_SETTINGS', JSON.stringify(next));
-                        } catch (err) {}
-                        showToast(enabled
-                          ? 'تم تفعيل الرابط العام في كود QR'
-                          : 'تم الرجوع إلى الرابط المحلي في كود QR');
-
-                        // Turning it on while no tunnel is running: open it
-                        // right away so the QR code is usable immediately.
-                        if (enabled && !tunnelState?.running && isTunnelSupported()) {
-                          await handleStartTunnel();
-                        }
-                      }}
-                      className="w-4 h-4 rounded text-violet-500 bg-[#0B1220] border-[#23324D] focus:ring-violet-400"
-                    />
-                    <span className="text-[11px] text-slate-300">
-                      استخدم هذا الرابط العام في كود QR للوردية
-                    </span>
-                  </label>
-
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={settings.autoStartTunnel !== false}
-                      onChange={(e) => {
-                        const enabled = e.target.checked;
-                        handleFieldChange('autoStartTunnel', enabled);
-                        try {
-                          localStorage.setItem(
-                            'PHARMACY_SETTINGS',
-                            JSON.stringify({ ...settings, autoStartTunnel: enabled })
-                          );
-                        } catch (err) {}
-                        showToast(enabled
-                          ? 'سيُفتح النفق تلقائياً مع تشغيل البرنامج'
-                          : 'لن يُفتح النفق تلقائياً — افتحه يدوياً من الإعدادات');
-                      }}
-                      className="w-4 h-4 rounded text-violet-500 bg-[#0B1220] border-[#23324D] focus:ring-violet-400"
-                    />
-                    <span className="text-[11px] text-slate-300">
-                      افتح النفق تلقائياً عند تشغيل البرنامج (مهم لكود QR المطبوع)
-                    </span>
-                  </label>
-
-                  {tunnelDownload.active && (
-                    <div className="w-full h-2 rounded-full bg-[#0B1220] overflow-hidden border border-[#23324D]">
-                      <div
-                        className="h-full bg-gradient-to-l from-violet-500 to-sky-500 transition-all"
-                        style={{ width: `${Math.max(4, tunnelDownload.percent || 0)}%` }}
-                      />
-                    </div>
-                  )}
-
-                  <div className="flex flex-wrap gap-2">
-                    {!tunnelState?.available && (
-                      <button
-                        type="button"
-                        disabled={tunnelBusy}
-                        onClick={handleDownloadCloudflared}
-                        className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-[#0B1220] hover:bg-[#17233A] border border-[#23324D] text-slate-200 text-[11px] font-bold disabled:opacity-50"
-                      >
-                        <Download className="w-3.5 h-3.5" />
-                        تنزيل برنامج النفق (مرة واحدة)
-                      </button>
-                    )}
-
-                    {tunnelState?.running ? (
-                      <button
-                        type="button"
-                        disabled={tunnelBusy}
-                        onClick={handleStopTunnel}
-                        className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-rose-600/20 hover:bg-rose-600/30 border border-rose-500/40 text-rose-200 text-[11px] font-bold disabled:opacity-50"
-                      >
-                        <Radio className="w-3.5 h-3.5" />
-                        إيقاف النفق
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        disabled={tunnelBusy || !isTunnelSupported()}
-                        onClick={handleStartTunnel}
-                        className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-[11px] font-bold disabled:opacity-50"
-                      >
-                        <Globe className="w-3.5 h-3.5" />
-                        {tunnelBusy ? 'جاري الفتح...' : 'افتح رابطاً عاماً مجانياً'}
-                      </button>
-                    )}
-
-                    {tunnelState?.url && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const url = `${tunnelState.url}/?pharmacyId=${encodeURIComponent(settings.cloudPharmacyId || 'PHARMACY-LOCAL')}`;
-                          window.open(url, '_blank');
-                        }}
-                        className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-[#0B1220] hover:bg-[#17233A] border border-[#23324D] text-slate-200 text-[11px] font-bold"
-                      >
-                        <Link2 className="w-3.5 h-3.5" />
-                        فتح البوابة العامة
-                      </button>
-                    )}
-                  </div>
-
-                  {!isTunnelSupported() && (
-                    <p className="text-[10px] text-amber-400/80">
-                      النفق العام متاح في نسخة سطح المكتب (الملف exe) فقط.
-                    </p>
-                  )}
-                </div>
-              </div>
-
-              {/* Live Sync Status */}
-              <div className="bg-[#111A2B] p-4 rounded-xl border border-teal-500/30 space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-white flex items-center gap-2">
-                    <RefreshCw className={`w-4 h-4 text-teal-400 ${syncRunning ? 'animate-spin' : ''}`} />
-                    حالة المزامنة الحالية
-                  </span>
-                  <button
-                    type="button"
-                    disabled={syncRunning}
-                    onClick={async () => {
-                      setSyncRunning(true);
-                      try {
-                        const res = await sqliteService.triggerAutoSync();
-                        await refreshSyncStatus();
-                        setToastMessage(res?.success
-                          ? (res.offline
-                            ? `تم الرفع محلياً — ${res.cloudPending || 0} عملية بانتظار عودة الإنترنت للرفع السحابي`
-                            : (res.mode === 'CLOUD' ? `تم رفع ${res.uploaded} عملية للسحابة` : 'تمت المزامنة المحلية بنجاح'))
-                          : 'تعذر الرفع للسحابة، سيعيد النظام المحاولة تلقائياً');
-                      } catch (e) {
-                        setToastMessage('فشلت المزامنة، البيانات محفوظة محلياً');
-                      } finally {
-                        setSyncRunning(false);
-                      }
-                    }}
-                    className="px-3 py-1.5 rounded-lg bg-teal-500 hover:bg-teal-400 text-slate-950 text-[11px] font-bold disabled:opacity-50"
-                  >
-                    مزامنة الآن
-                  </button>
-                </div>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-center">
-                  <div className="bg-[#0B1220] rounded-xl p-2.5 border border-[#23324D]">
-                    <div className="text-[10px] text-slate-400">الاتصال</div>
-                    <div className={`text-xs font-bold ${syncStatus?.online ? 'text-emerald-400' : 'text-rose-400'}`}>
-                      {syncStatus?.online ? 'متصل' : 'أوفلاين'}
+                    <div>
+                      <div className="text-sm font-bold text-white">تحديثات برنامج صيدليتي</div>
+                      <div className="text-xs text-slate-400">فحص وتنزيل أحدث التحديثات السحابية عبر GitHub بنقرة واحدة</div>
                     </div>
                   </div>
-                  <div className="bg-[#0B1220] rounded-xl p-2.5 border border-[#23324D]">
-                    <div className="text-[10px] text-slate-400">عمليات معلّقة</div>
-                    <div className="text-xs font-bold text-amber-300 font-mono">{syncStatus?.pending ?? 0}</div>
-                  </div>
-                  <div className="bg-[#0B1220] rounded-xl p-2.5 border border-[#23324D]">
-                    <div className="text-[10px] text-slate-400">فشل الرفع</div>
-                    <div className="text-xs font-bold text-rose-300 font-mono">{syncStatus?.failed ?? 0}</div>
-                  </div>
-                  <div className="bg-[#0B1220] rounded-xl p-2.5 border border-[#23324D]">
-                    <div className="text-[10px] text-slate-400">آخر مزامنة محلية</div>
-                    <div className="text-[11px] font-bold text-teal-300 font-mono">
-                      {syncStatus?.lastSyncedAt
-                        ? new Date(syncStatus.lastSyncedAt).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })
-                        : '—'}
-                    </div>
-                  </div>
-                  <div className="bg-[#0B1220] rounded-xl p-2.5 border border-[#23324D]">
-                    <div className="text-[10px] text-slate-400">بانتظار رفع السحابة</div>
-                    <div className={`text-xs font-bold font-mono ${(syncStatus?.cloudPending ?? 0) > 0 ? 'text-amber-300' : 'text-emerald-300'}`}>
-                      {syncStatus?.cloudPending ?? 0}
-                    </div>
-                  </div>
-                  <div className="bg-[#0B1220] rounded-xl p-2.5 border border-[#23324D]">
-                    <div className="text-[10px] text-slate-400">آخر رفع سحابي</div>
-                    <div className="text-[11px] font-bold text-emerald-300 font-mono">
-                      {syncStatus?.lastCloudSyncedAt
-                        ? new Date(syncStatus.lastCloudSyncedAt).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })
-                        : '—'}
-                    </div>
-                  </div>
-                </div>
-                <p className="text-[10px] text-slate-500 leading-relaxed">
-                  «بانتظار رفع السحابة» = عمليات محفوظة على جهازك ينتظرها الرفع إلى الخادم الدائم.
-                  لو الصيدلية بدون إنترنت ستزيد الرقم، وكل شيء مرفوع تلقائياً فور عودة الاتصال.
-                </p>
-              </div>
-
-              {/* Cloud Pharmacy ID */}
-              <div className="bg-[#0B1220] p-5 rounded-2xl border border-[#23324D] space-y-3">
-                <span className="text-xs font-bold text-slate-300 block">
-                  معرّف الصيدلية السحابي (Pharmacy Cloud ID):
-                </span>
-                <div className="p-3 bg-[#111A2B] rounded-xl border border-[#23324D] font-mono font-bold text-white text-center">
-                  {settings.cloudPharmacyId}
-                </div>
-              </div>
-
-              {/* Report portal + full backfill */}
-              <div className="bg-gradient-to-r from-teal-500/10 via-[#111A2B] to-emerald-500/10 border border-teal-500/30 rounded-2xl p-5 flex items-center justify-between gap-4">
-                <div>
-                  <div className="text-sm font-bold text-white mb-1">بوابة التقارير لمتابعة الورديات من الهاتف:</div>
-                  <div className="text-xs text-slate-400 mb-3">
-                    صفحة تفاعلية بها كل الورديات، تفتح من أي موبايل على نفس الواي فاي (أو من أي مكان مع سيرفر سحابي)
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const liveUrl = buildLiveReportsUrl(settings.cloudPharmacyId || 'PHARMACY-LOCAL');
-                        if (liveUrl) window.open(liveUrl, '_blank');
-                        else showToast('لا يوجد سيرفر تقارير متاح حالياً');
-                      }}
-                      className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-teal-500 text-slate-950 font-bold text-xs shadow-lg hover:bg-teal-400 transition-colors"
-                    >
-                      <span>فتح بوابة التقارير</span>
-                      <ExternalLink className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const url = buildDailySummaryUrl(settings.cloudPharmacyId || 'PHARMACY-LOCAL');
-                        if (url) window.open(url, '_blank');
-                        else showToast('لا يوجد سيرفر تقارير متاح حالياً');
-                      }}
-                      className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[#0B1220] hover:bg-[#17233A] border border-teal-500/40 text-teal-200 font-bold text-xs transition-colors"
-                    >
-                      <Calendar className="w-3.5 h-3.5" />
-                      <span>ملخص اليوم</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const url = buildMonthlySummaryUrl(settings.cloudPharmacyId || 'PHARMACY-LOCAL');
-                        if (url) window.open(url, '_blank');
-                        else showToast('لا يوجد سيرفر تقارير متاح حالياً');
-                      }}
-                      className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[#0B1220] hover:bg-[#17233A] border border-teal-500/40 text-teal-200 font-bold text-xs transition-colors"
-                    >
-                      <BarChart3 className="w-3.5 h-3.5" />
-                      <span>ملخص الشهر</span>
-                    </button>
-                    <button
-                      type="button"
-                      disabled={syncRunning}
-                      onClick={async () => {
-                        setSyncRunning(true);
-                        try {
-                          const res = await sqliteService.backfillReportSnapshot();
-                          if (res?.success) {
-                            showToast(`تم رفع ${res.shifts || 0} وردية و${res.invoices || 0} فاتورة للتقارير`);
-                          } else {
-                            showToast(res?.error || 'تعذر رفع التقارير — تأكد من إعداد السيرفر');
-                          }
-                        } catch (e) {
-                          showToast('فشل رفع التقارير، البيانات محفوظة محلياً');
-                        } finally {
-                          setSyncRunning(false);
-                        }
-                      }}
-                      className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[#0B1220] hover:bg-[#17233A] border border-teal-500/40 text-teal-200 font-bold text-xs transition-colors disabled:opacity-50"
-                    >
-                      <Upload className="w-3.5 h-3.5" />
-                      <span>رفع كامل للتقارير (كل الورديات)</span>
-                    </button>
-                  </div>
-                </div>
-
-                <div className="w-24 h-24 bg-white p-2 rounded-xl shadow-lg border border-teal-500/30 flex items-center justify-center shrink-0">
-                  <QrCode className="w-20 h-20 text-slate-900" />
-                </div>
-              </div>
-
-              {/* Program auto-updater */}
-              <div className="bg-[#0B1220] p-4 rounded-xl border border-[#23324D] space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-white flex items-center gap-2">
-                    <RefreshCw className={`w-4 h-4 text-teal-400 ${updateBusy ? 'animate-spin' : ''}`} />
-                    تحديثات البرنامج تلقائياً
-                  </span>
-                  <span className="text-[10px] font-mono text-teal-300 px-2 py-0.5 rounded-full border border-teal-500/30 bg-teal-500/10">
-                    v{appInfo?.version || '1.0.0'}
+                  <span className="text-xs font-mono font-bold text-teal-300 px-3 py-1 rounded-full border border-teal-500/30 bg-teal-500/10">
+                    الإصدار الحالي: v{appInfo?.version || '1.0.0'}
                   </span>
                 </div>
 
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-300 mb-1">
-                    رابط حزمة التحديثات (Update Feed URL)
-                  </label>
-                  <input
-                    type="url"
-                    dir="ltr"
-                    value={settings.updateFeedUrl || ''}
-                    onChange={(e) => handleFieldChange('updateFeedUrl', e.target.value)}
-                    placeholder="http://192.168.1.20:4100/updates/"
-                    className="w-full bg-[#111A2B] border border-[#23324D] focus:border-teal-400 rounded-xl px-3 py-2.5 text-xs text-white font-mono focus:outline-none"
-                  />
-                  <p className="text-[10px] text-slate-500 mt-1 leading-relaxed">
-                    اتركه فارغاً ليستخدم سيرفر التقارير المحلي (تحديث داخل شبكة الصيدلية بدون إنترنت).
-                    للنشر السحابي ارفع محتويات مجلد <span className="font-mono">server/updates</span> إلى السيرفر السحابي واكتب رابطه هنا.
+                <div className="bg-[#111A2B] p-4 rounded-xl border border-[#23324D] space-y-2">
+                  <div className="text-xs font-bold text-slate-300">مستودع التحديثات المعتمد (GitHub Releases):</div>
+                  <div className="font-mono text-xs text-teal-400" dir="ltr">workabdallah400-ai/pharmacy-pos-updates</div>
+                  <p className="text-[11px] text-slate-400 leading-relaxed pt-1">
+                    عند توفر إصدار جديد يمكنك فحصه وتحميله وتثبيته مباشرة، وسيقوم البرنامج بالإغلاق وتثبيت التحديث وإعادة التشغيل تلقائياً.
                   </p>
                 </div>
 
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap gap-3">
                   <button
                     type="button"
                     disabled={updateBusy}
                     onClick={handleCheckUpdates}
-                    className="px-4 py-2 rounded-xl bg-teal-500 hover:bg-teal-400 text-slate-950 text-[11px] font-bold disabled:opacity-50"
+                    className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-teal-500 to-emerald-500 hover:from-teal-400 hover:to-emerald-400 text-slate-950 text-xs font-bold flex items-center gap-2 shadow-lg shadow-teal-500/20 disabled:opacity-50 transition-all"
                   >
-                    {updateBusy ? 'جاري الفحص...' : 'تحقق من التحديثات'}
+                    <RefreshCw className={`w-4 h-4 ${updateBusy ? 'animate-spin' : ''}`} />
+                    <span>{updateBusy ? 'جاري الفحص الآن...' : 'فحص آخر تحديث (Check for Updates)'}</span>
                   </button>
                   <button
                     type="button"
                     disabled={updateBusy || updateState.status !== 'available'}
                     onClick={handleDownloadUpdate}
-                    className="px-4 py-2 rounded-xl bg-[#17233A] hover:bg-[#202E4C] border border-[#23324D] text-slate-200 text-[11px] font-bold disabled:opacity-40"
+                    className="px-5 py-2.5 rounded-xl bg-[#17233A] hover:bg-[#202E4C] border border-[#23324D] text-slate-200 text-xs font-bold disabled:opacity-40 transition-all"
                   >
                     تحميل التحديث
                   </button>
@@ -1703,14 +1057,14 @@ export function SettingsView({ onUpdatePharmacyName, onRevokeDevice, currentUser
                     type="button"
                     disabled={updateState.status !== 'downloaded'}
                     onClick={handleInstallUpdate}
-                    className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold disabled:opacity-40"
+                    className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold disabled:opacity-40 transition-all"
                   >
-                    تثبيت الآن
+                    تثبيت التحديث وإعادة التشغيل الآن
                   </button>
                 </div>
 
                 {updateState.status === 'downloading' && (
-                  <div className="w-full h-2 rounded-full bg-[#111A2B] overflow-hidden border border-[#23324D]">
+                  <div className="w-full h-2.5 rounded-full bg-[#111A2B] overflow-hidden border border-[#23324D]">
                     <div
                       className="h-full bg-gradient-to-l from-teal-500 to-emerald-500 transition-all"
                       style={{ width: `${Math.max(4, updateState.progress || 0)}%` }}
@@ -1718,90 +1072,21 @@ export function SettingsView({ onUpdatePharmacyName, onRevokeDevice, currentUser
                   </div>
                 )}
 
-                <div className="text-[11px] text-slate-400 leading-relaxed">
-                  {updateState.status === 'downloaded'
-                    ? '✅ التحديث جاهز — اضغط «تثبيت الآن» أو سيُثبَّت تلقائياً عند إغلاق البرنامج.'
-                    : updateState.message || 'لم يتم التحقق من التحديثات بعد.'}
+                <div className="p-3.5 rounded-xl bg-[#111A2B] border border-[#23324D] text-xs text-slate-300 flex items-center gap-2">
+                  <span className="text-teal-400 font-bold">الحالة:</span>
+                  <span>
+                    {updateState.status === 'downloaded'
+                      ? '✅ التحديث جاهز ومُحمَّل بنجاح — انقر فوق «تثبيت التحديث وإعادة التشغيل الآن».'
+                      : updateState.message || 'أنت على أحدث إصدار معتمد ✓'}
+                  </span>
                 </div>
               </div>
-
             </div>
           )}
 
         </div>
 
       </div>
-
-      {/* ======================================================== */}
-      {/* REVOKE & DEACTIVATE CONFIRMATION MODAL                   */}
-      {/* ======================================================== */}
-      {showRevokeModal && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#111A2B] border border-rose-500/40 rounded-2xl w-full max-w-md p-6 shadow-2xl space-y-5 animate-in fade-in zoom-in-95">
-            
-            <div className="flex items-center gap-3 text-rose-400">
-              <div className="w-12 h-12 rounded-xl bg-rose-500/20 border border-rose-500/30 flex items-center justify-center shrink-0">
-                <AlertOctagon className="w-6 h-6 text-rose-400" />
-              </div>
-              <div>
-                <h4 className="text-base font-black text-white">تأكيد إلغاء وتجريد ترخيص هذا الجهاز</h4>
-                <p className="text-xs text-rose-400 font-semibold">إجراء رقابي حاسم وخاص بالإدارة والمطور</p>
-              </div>
-            </div>
-
-            <div className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-xs text-rose-200 leading-relaxed">
-              ⚠️ تحذير: سيتم فوراً مسح مفتاح الترخيص من قاعدة البيانات وتسجيل الجهاز كجهاز ملغي (Revoked)، وسيتم قفل النظام فوراً وإعادته لشاشة التفعيل الإجبارية لمنع العميل من الدخول نهائياً.
-            </div>
-
-            <div className="space-y-2">
-              <label className="block text-xs font-bold text-slate-200">
-                أدخل رمز PIN للمدير أو المطور لتأكيد الإلغاء:
-              </label>
-              <input
-                type="password"
-                maxLength="6"
-                value={revokePinInput}
-                onChange={(e) => {
-                  setRevokePinInput(e.target.value);
-                  setRevokeError('');
-                }}
-                placeholder="****"
-                className="w-full bg-[#0B1220] border border-[#23324D] focus:border-rose-400 rounded-xl px-4 py-3 text-center text-lg text-white font-mono tracking-widest focus:outline-none"
-                autoFocus
-              />
-              {revokeError && (
-                <div className="text-xs font-bold text-rose-400 text-center">
-                  {revokeError}
-                </div>
-              )}
-            </div>
-
-            <div className="flex items-center gap-3 pt-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setShowRevokeModal(false);
-                  setRevokePinInput('');
-                  setRevokeError('');
-                }}
-                className="flex-1 py-2.5 rounded-xl bg-[#17233A] hover:bg-[#23324D] text-slate-300 text-xs font-bold transition-all"
-              >
-                إلغاء التراجع
-              </button>
-
-              <button
-                type="button"
-                onClick={handleConfirmRevoke}
-                className="flex-1 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-black shadow-lg shadow-rose-900/40 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
-              >
-                <Ban className="w-4 h-4" />
-                <span>تأكيد الإلغاء والقفل 🚫</span>
-              </button>
-            </div>
-
-          </div>
-        </div>
-      )}
 
     </div>
   );

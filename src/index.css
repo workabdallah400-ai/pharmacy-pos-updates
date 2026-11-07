@@ -56,8 +56,10 @@ html.theme-light img,
 html.theme-light video,
 html.theme-light canvas,
 html.theme-light svg.keep-color,
-html.theme-light .no-invert {
-  filter: invert(1) hue-rotate(180deg);
+html.theme-light .no-invert,
+html.theme-light [data-receipt-paper],
+html.theme-light .receipt-paper {
+  filter: invert(1) hue-rotate(180deg) !important;
 }
 
 /* Custom Scrollbars */

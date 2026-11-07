@@ -282,26 +282,6 @@ export async function activateLicenseKey(rawKey) {
   const cleanMid = machineId.replace(/[^A-Z0-9]/g, '');
 
   // 1. Support Master Admin PIN Reset Code (RST)
-  const expectedResetCode = await generateResetCode(machineId);
-
-  if (cleanKey.startsWith('RST')) {
-    if (cleanKey === expectedResetCode || cleanKey === 'RST-0120-1395-2430' || cleanKey === 'RST-ADMIN-0120') {
-      try {
-        const curSettings = JSON.parse(localStorage.getItem('PHARMACY_SETTINGS') || '{}');
-        localStorage.setItem(
-          'PHARMACY_SETTINGS',
-          JSON.stringify({ ...curSettings, adminPin: '1234' })
-        );
-      } catch (e) {}
-
-      return {
-        success: false,
-        isResetPin: true,
-        message: 'تم بنجاح استعادة وإعادة تعيين رمز مدير الصيدلية (Admin PIN) إلى: 1234 🔑'
-      };
-    }
-  }
-
   // 2. Support Revoke / Kill Code (REV / REVOKE)
   const expectedRevokeCode = await generateRevokeCode(machineId);
   if (cleanKey.startsWith('REV')) {

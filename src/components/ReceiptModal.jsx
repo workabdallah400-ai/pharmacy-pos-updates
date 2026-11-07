@@ -33,7 +33,7 @@ export function ReceiptModal({ isOpen, onClose, invoice, pharmacyName = 'صيد�
 
         {/* Paper Thermal Receipt Container */}
         <div className="flex-1 overflow-y-auto p-4 bg-slate-900/60 flex justify-center">
-          <div className="w-full max-w-xs bg-white text-slate-950 p-4 rounded-xl shadow-lg font-mono text-xs leading-relaxed text-right border border-slate-200">
+          <div data-receipt-paper="true" className="receipt-paper no-invert w-full max-w-xs bg-white text-slate-950 p-4 rounded-xl shadow-lg font-mono text-xs leading-relaxed text-right border border-slate-200">
             
             {/* Pharmacy Branding Header */}
             <div className="text-center pb-3 border-b border-dashed border-slate-300">

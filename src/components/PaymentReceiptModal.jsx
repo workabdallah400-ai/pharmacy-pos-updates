@@ -288,7 +288,8 @@ export function PaymentReceiptModal({
             {/* 80mm Thermal Receipt Preview Card */}
             <div
               id="printable-payment-receipt"
-              className="w-72 bg-white text-slate-900 rounded-lg p-4 font-mono text-[11px] shadow-2xl border border-slate-300 text-center space-y-2 select-text"
+              data-receipt-paper="true"
+              className="receipt-paper no-invert w-72 bg-white text-slate-900 rounded-lg p-4 font-mono text-[11px] shadow-2xl border border-slate-300 text-center space-y-2 select-text"
             >
               <div className="border-b border-dashed border-slate-400 pb-2">
                 <div className="font-black text-sm">{pharmacyName}</div>

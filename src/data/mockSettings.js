@@ -30,9 +30,7 @@ export const DEFAULT_SETTINGS = {
   licenseKey: '',
   trialDaysRemaining: 0,
 
-  // 5. PINs & Permissions
-  adminPin: '1234',
-  cashierPin: '0000',
+  // 5. Cashier Restrictions
   hideProfitFromCashier: true,
   preventInvoiceDeleteByCashier: true,
   preventPriceChangeByCashier: true,

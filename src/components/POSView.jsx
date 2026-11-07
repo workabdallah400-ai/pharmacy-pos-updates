@@ -28,7 +28,6 @@ import { AlternativesModal } from './AlternativesModal';
 import { ReceiptModal } from './ReceiptModal';
 import { ParkedBillsModal } from './ParkedBillsModal';
 import { QuickExpenseModal } from './QuickExpenseModal';
-import { MobileQRModal } from './MobileQRModal';
 import { ReturnInvoiceModal } from './ReturnInvoiceModal';
 import { sqliteService } from '../db/sqliteService';
 import { hasPermission } from '../utils/permissions';
@@ -41,7 +40,8 @@ export function POSView({
   currentShift,
   isShiftOpen = false,
   onOpenShiftModal,
-  onSaleCompleted
+  onSaleCompleted,
+  pharmacyName
 }) {
   // Real SQLite Medicines Catalog State (Clean 0 items)
   const [sqliteMedicines, setSqliteMedicines] = useState([]);
@@ -201,9 +201,6 @@ export function POSView({
       } else if (e.key === 'F8') {
         e.preventDefault();
         if (requireShift()) setShowExpenseModal(true);
-      } else if (e.key === 'F12') {
-        e.preventDefault();
-        setShowQRModal(true);
       }
     };
 
@@ -1486,14 +1483,6 @@ export function POSView({
             <span className="font-bold text-rose-400">F8</span>
             <span>مصروف نثريات</span>
           </button>
-
-          <button
-            onClick={() => setShowQRModal(true)}
-            className="flex items-center gap-1 bg-[#17233A] hover:bg-teal-500/20 hover:text-teal-300 border border-[#23324D] px-2 py-0.5 rounded-lg text-[11px] font-medium transition-colors"
-          >
-            <span className="font-bold text-teal-400">F12</span>
-            <span>QR الموبايل</span>
-          </button>
         </div>
 
         {/* Live Shift Counter */}
@@ -1530,6 +1519,7 @@ export function POSView({
           searchInputRef.current?.focus();
         }}
         invoice={lastCompletedInvoice}
+        pharmacyName={pharmacyName}
         cashierName={currentUser?.full_name || currentUser?.name || 'الكاشير'}
       />
 
@@ -1563,16 +1553,6 @@ export function POSView({
             throw e;
           }
         }}
-      />
-
-      <MobileQRModal
-        isOpen={showQRModal}
-        onClose={() => {
-          setShowQRModal(false);
-          searchInputRef.current?.focus();
-        }}
-        shiftTotal={shiftSalesTotal}
-        itemsCount={shiftInvoicesCount}
       />
 
       {/* Advanced Return / Refund Modal by Date & Time */}

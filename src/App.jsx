@@ -359,6 +359,15 @@ export default function App() {
     return 'صيدلية النخبة الحديثة';
   });
 
+  // Sync pharmacy name & settings from SQLite DB on boot
+  useEffect(() => {
+    sqliteService.getSettings().then((s) => {
+      if (s && s.pharmacyName) {
+        setPharmacyName(s.pharmacyName);
+      }
+    }).catch(() => {});
+  }, []);
+
   // 1. Shared Master Medicines State (Clean 0 items)
   const [medicines, setMedicines] = useState([]);
   const [hasUnreadShortages, setHasUnreadShortages] = useState(false);
@@ -842,6 +851,7 @@ export default function App() {
               onUpdateMedicines={setMedicines}
               currentShift={currentShift}
               isShiftOpen={!!currentShift}
+              pharmacyName={pharmacyName}
               onOpenShiftModal={() => setShowOpenShiftModal(true)}
               onSaleCompleted={async () => {
                 await reloadMedicinesFromDb();

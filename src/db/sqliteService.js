@@ -578,6 +578,62 @@ class SQLiteService {
     // Migration safe check for setup_completed and legacy admin
     this._runUserMigration();
     this._runMedicineDosageUnitMigration();
+    this._initSettingsTable();
+  }
+
+  _initSettingsTable() {
+    try {
+      this.db.run(`
+        CREATE TABLE IF NOT EXISTS app_settings (
+          key TEXT PRIMARY KEY,
+          value TEXT
+        );
+      `);
+    } catch (e) {}
+  }
+
+  async getSettings() {
+    await this.init();
+    try {
+      this._initSettingsTable();
+      const res = this.db.exec("SELECT value FROM app_settings WHERE key = 'general_settings' LIMIT 1");
+      if (res && res.length && res[0].values && res[0].values.length) {
+        const val = JSON.parse(res[0].values[0][0]);
+        return { ...DEFAULT_SETTINGS, ...val };
+      }
+    } catch (e) {
+      console.warn('Could not read settings from DB:', e);
+    }
+    // Fallback to localStorage
+    if (typeof localStorage !== 'undefined') {
+      try {
+        const saved = JSON.parse(localStorage.getItem('PHARMACY_SETTINGS') || '{}');
+        if (saved && Object.keys(saved).length > 0) return { ...DEFAULT_SETTINGS, ...saved };
+      } catch (e) {}
+    }
+    return { ...DEFAULT_SETTINGS };
+  }
+
+  async saveSettings(settings) {
+    await this.init();
+    try {
+      this._initSettingsTable();
+      const json = JSON.stringify(settings);
+      const stmt = this.db.prepare("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('general_settings', ?)");
+      stmt.run([json]);
+      stmt.free();
+      this.saveToDisk();
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem('PHARMACY_SETTINGS', json);
+      }
+      return { success: true };
+    } catch (e) {
+      console.error('Error saving settings to SQLite:', e);
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem('PHARMACY_SETTINGS', JSON.stringify(settings));
+      }
+      return { success: false, error: e.message };
+    }
   }
 
   _runMedicineDosageUnitMigration() {

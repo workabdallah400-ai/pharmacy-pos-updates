@@ -114,15 +114,6 @@ export function ActivationScreen({
     try {
       const res = await activateLicenseKey(key);
 
-      // Check if this was an Admin PIN Reset Code
-      if (res.isResetPin) {
-        setIsSuccess(false);
-        setSuccessMsg(res.message || 'تمت إعادة تعيين رمز المدير.');
-        playCashDrawerSound();
-        setLicenseKeyInput('');
-        return;
-      }
-
       // Check if this was a Revoke Code entered by developer
       if (res.isRevoked) {
         setCurrentStatus('REVOKED');
