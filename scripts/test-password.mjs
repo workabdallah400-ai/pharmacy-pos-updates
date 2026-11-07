@@ -50,13 +50,13 @@ assert.strictEqual(legacyCheck.valid, true, 'Legacy hash must be recognized');
 assert.strictEqual(legacyCheck.needsRehash, true, 'Legacy hash must flag needsRehash = true');
 console.log('✅ Legacy hash accepted and triggers needsRehash');
 
-// 5. validatePasswordPolicy checks
-assert.strictEqual(validatePasswordPolicy('admin123', 'admin').valid, false);
-assert.strictEqual(validatePasswordPolicy('password', 'user').valid, false);
-assert.strictEqual(validatePasswordPolicy('short1!', 'user').valid, false); // < 10 chars
-assert.strictEqual(validatePasswordPolicy('username12345', 'username12345').valid, false); // password === username
-assert.strictEqual(validatePasswordPolicy('alllowercaseandnumbers12345', 'user').valid, false); // lacks uppercase or symbol
-assert.strictEqual(validatePasswordPolicy('StrongPass123!', 'admin').valid, true);
+// 5. validatePasswordPolicy checks (minimum 4 characters, letters/numbers only, no symbols)
+assert.strictEqual(validatePasswordPolicy('123', 'admin').valid, false); // < 4 chars
+assert.strictEqual(validatePasswordPolicy('1234', 'admin').valid, true); // 4 digits
+assert.strictEqual(validatePasswordPolicy('abcd', 'user').valid, true); // 4 letters
+assert.strictEqual(validatePasswordPolicy('Pass1234', 'user').valid, true); // letters & numbers
+assert.strictEqual(validatePasswordPolicy('pass@123', 'user').valid, false); // has symbol @
+assert.strictEqual(validatePasswordPolicy('كلمة123', 'user').valid, true); // arabic letters & numbers
 console.log('✅ validatePasswordPolicy enforcement tested');
 
 // 6. Golden Vector test with fixed salt (10,000 iterations for fast test vector)

@@ -570,10 +570,120 @@ class SQLiteService {
     try { this.db.run("ALTER TABLE medicines ADD COLUMN units_per_strip INTEGER DEFAULT 10;"); } catch (e) {}
     try { this.db.run("ALTER TABLE medicines ADD COLUMN price_unit REAL DEFAULT 0;"); } catch (e) {}
     try { this.db.run("ALTER TABLE medicines ADD COLUMN stock_units INTEGER DEFAULT 0;"); } catch (e) {}
+    try { this.db.run("ALTER TABLE medicines ADD COLUMN expiry TEXT;"); } catch (e) {}
     try { this.db.run("ALTER TABLE invoice_items ADD COLUMN unit_type TEXT DEFAULT 'box';"); } catch (e) {}
+    try { this.db.run("ALTER TABLE invoice_items ADD COLUMN batch_no TEXT;"); } catch (e) {}
+    try { this.db.run("ALTER TABLE invoice_items ADD COLUMN expiry TEXT;"); } catch (e) {}
 
     // Migration safe check for setup_completed and legacy admin
     this._runUserMigration();
+    this._runMedicineDosageUnitMigration();
+  }
+
+  _runMedicineDosageUnitMigration() {
+    try {
+      const metaRes = this.db.exec("SELECT value FROM app_meta WHERE key = 'dosage_units_classified_v1' LIMIT 1");
+      if (metaRes.length > 0 && metaRes[0].values.length > 0 && metaRes[0].values[0][0] === '1') {
+        return; // Already migrated
+      }
+
+      const rows = this.db.exec('SELECT id, trade_name, trade_name_ar, price_box FROM medicines');
+      if (!rows || !rows.length || !rows[0].values.length) return;
+
+      const classify = (tn, tnar) => {
+        const text = ((tn || '') + ' ' + (tnar || '')).toLowerCase();
+        if (text.includes('eye drop') || text.includes('ear drop') || text.includes('nasal drop') || text.includes('oral drop') || text.includes('قطرة') || text.includes('قطارة') || text.includes('نقط ') || text.includes('drops')) {
+          return 'droppers';
+        }
+        if (text.includes('spray') || text.includes('بخاخ') || text.includes('inhaler') || text.includes('استنشاق') || text.includes('aerosol') || text.includes('بخاخة')) {
+          return 'sprays';
+        }
+        if (text.includes('sachet') || text.includes('كيس') || text.includes('أكياس') || text.includes('فوار') || text.includes('efferv') || text.includes('granule') || text.includes('ساشيت') || text.includes('حبيبات فوارة')) {
+          return 'sachets';
+        }
+        if (text.includes('supp') || text.includes('لبوس') || text.includes('قمع') || text.includes('أقماع') || text.includes('ovule') || text.includes('بويضة مهبلية')) {
+          return 'suppositories';
+        }
+        if (text.includes('amp') || text.includes('أمبول') || text.includes('امبول') || text.includes('vial') || text.includes('فيال') || text.includes('حقن') || text.includes('سيرينج') || text.includes('syringe') || text.includes('cartridge') || text.includes('خرطوشة') || text.includes('inj') || text.includes('infusion') || text.includes('حقنة')) {
+          if (text.includes('vial') || text.includes('فيال')) return 'vials';
+          return 'ampoules';
+        }
+        if ((text.includes('cap') && !text.includes('caplet')) || text.includes('كبسول') || text.includes('softgel') || text.includes('soft gel')) {
+          return 'capsules';
+        }
+        if (text.includes('cream') || text.includes('كريم') || text.includes('ointment') || text.includes('مرهم') || text.includes(' gel') || text.includes('جل ') || text.includes('tube') || text.includes('أنبوبة') || text.includes('انبوبة') || text.includes('دهان') || text.includes('paste') || text.includes('معجون')) {
+          return 'tubes';
+        }
+        if (text.includes('syrup') || text.includes('شراب') || text.includes('susp') || text.includes('معلق') || text.includes('bottle') || text.includes('زجاجة') || text.includes('liquid') || text.includes('سائل') || text.includes('solution') || text.includes('محلول') || text.includes('mouthwash') || text.includes('غسول') || text.includes('lotion') || text.includes('لوشن') || text.includes('elixir') || text.includes('شامبو') || text.includes('shampoo')) {
+          return 'bottles';
+        }
+        return 'tablets';
+      };
+
+      const extractCounts = (tn, tnar, unitType) => {
+        const str = ((tn || '') + ' ' + (tnar || '')).toLowerCase();
+        if (unitType === 'bottles' || unitType === 'tubes' || unitType === 'droppers' || unitType === 'sprays') {
+          return { strips_per_box: 1, units_per_strip: 1 };
+        }
+        const countMatch = str.match(/(\d+)\s*(sachet|كيس|أكياس|amp|أمبول|امبول|supp|لبوس|vial|فيال|tab|قرص|cap|كبسول)/i);
+        const totalItems = countMatch ? parseInt(countMatch[1], 10) : null;
+        if (unitType === 'ampoules' || unitType === 'vials') {
+          return { strips_per_box: 1, units_per_strip: totalItems || 3 };
+        }
+        if (unitType === 'sachets') {
+          return { strips_per_box: 1, units_per_strip: totalItems || 10 };
+        }
+        if (unitType === 'tablets' || unitType === 'capsules') {
+          let strips = 2;
+          let units = 10;
+          if (totalItems) {
+            if (totalItems >= 30) {
+              strips = 3;
+              units = Math.round(totalItems / 3);
+            } else if (totalItems >= 20) {
+              strips = 2;
+              units = Math.round(totalItems / 2);
+            } else if (totalItems >= 10) {
+              strips = totalItems <= 10 ? 1 : 2;
+              units = totalItems <= 10 ? totalItems : Math.round(totalItems / 2);
+            } else {
+              strips = 1;
+              units = totalItems;
+            }
+          }
+          return { strips_per_box: strips, units_per_strip: units };
+        }
+        return { strips_per_box: 1, units_per_strip: totalItems || 1 };
+      };
+
+      this.db.run('BEGIN TRANSACTION;');
+      const stmt = this.db.prepare('UPDATE medicines SET unit_type = ?, strips_per_box = ?, units_per_strip = ?, price_strip = ?, price_unit = ? WHERE id = ?');
+      for (const [id, tn, tnar, priceBox] of rows[0].values) {
+        const unitType = classify(tn, tnar);
+        const counts = extractCounts(tn, tnar, unitType);
+        const pBox = Number(priceBox) || 0;
+        const strips = counts.strips_per_box;
+        const units = counts.units_per_strip;
+
+        let pStrip = pBox;
+        let pUnit = pBox;
+        if (unitType === 'tablets' || unitType === 'capsules' || unitType === 'suppositories') {
+          pStrip = strips > 0 ? parseFloat((pBox / strips).toFixed(2)) : pBox;
+          pUnit = (strips * units) > 0 ? parseFloat((pBox / (strips * units)).toFixed(2)) : pStrip;
+        } else if (unitType === 'ampoules' || unitType === 'vials' || unitType === 'sachets') {
+          pStrip = pBox;
+          pUnit = units > 0 ? parseFloat((pBox / units).toFixed(2)) : pBox;
+        }
+        stmt.run([unitType, strips, units, pStrip, pUnit, id]);
+      }
+      stmt.free();
+      this.db.run("INSERT OR REPLACE INTO app_meta (key, value) VALUES ('dosage_units_classified_v1', '1');");
+      this.db.run('COMMIT;');
+      this.saveToDisk();
+      console.log('✅ Medicine dosage unit classification migration completed successfully.');
+    } catch (e) {
+      console.warn('Medicine dosage unit migration warning:', e);
+    }
   }
 
   _runUserMigration() {
@@ -1092,6 +1202,7 @@ class SQLiteService {
     const stockBoxes = parseInt(med.stock_boxes, 10) || 0;
     const stockStrips = parseInt(med.stock_strips, 10) || 0;
     const stockUnits = parseInt(med.stock_units, 10) || 0;
+    const expiry = (med.expiry || '').trim();
 
     if (isUpdate) {
       // Update
@@ -1100,14 +1211,14 @@ class SQLiteService {
           trade_name = ?, trade_name_ar = ?, generic_name = ?, barcode = ?,
           price_box = ?, price_strip = ?, strips_per_box = ?, stock_boxes = ?,
           stock_strips = ?, shelf = ?, category = ?, reorder_level = ?, preferred_supplier = ?,
-          unit_type = ?, units_per_strip = ?, price_unit = ?, stock_units = ?
+          unit_type = ?, units_per_strip = ?, price_unit = ?, stock_units = ?, expiry = ?
         WHERE id = ?
       `);
       stmt.run([
         med.trade_name, med.trade_name_ar, med.generic_name, med.barcode,
         priceBox, priceStrip, stripsPerBox, stockBoxes,
         stockStrips, med.shelf, med.category, med.reorder_level || 5,
-        med.preferred_supplier, unitType, unitsPerStrip, priceUnit, stockUnits, id
+        med.preferred_supplier, unitType, unitsPerStrip, priceUnit, stockUnits, expiry, id
       ]);
       stmt.free();
 
@@ -1128,14 +1239,14 @@ class SQLiteService {
           id, trade_name, trade_name_ar, generic_name, barcode,
           price_box, price_strip, strips_per_box, stock_boxes, stock_strips,
           shelf, category, reorder_level, preferred_supplier,
-          unit_type, units_per_strip, price_unit, stock_units
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          unit_type, units_per_strip, price_unit, stock_units, expiry
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       stmt.run([
         id, med.trade_name, med.trade_name_ar, med.generic_name, med.barcode,
         priceBox, priceStrip, stripsPerBox, stockBoxes,
         stockStrips, med.shelf, med.category, med.reorder_level || 5,
-        med.preferred_supplier, unitType, unitsPerStrip, priceUnit, stockUnits
+        med.preferred_supplier, unitType, unitsPerStrip, priceUnit, stockUnits, expiry
       ]);
       stmt.free();
     }
@@ -1329,23 +1440,37 @@ class SQLiteService {
       ]);
       invStmt.free();
 
-      // 2. Insert Invoice Items
+      // 2. Insert Invoice Items (with FEFO batch allocation)
       const itemStmt = this.db.prepare(`
         INSERT INTO invoice_items (
           invoice_id, medicine_id, trade_name, trade_name_ar, is_strip, unit_type,
-          quantity, unit_price, total_price, unit_cost, profit
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          quantity, unit_price, total_price, unit_cost, profit, batch_no, expiry
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       for (const item of items) {
         const qty = Number(item.quantity) || 0;
         const unitPrice = Number(item.unit_price) || 0;
         const unitType = item.unitType || (item.is_strip ? 'strip' : 'box');
+        
+        // Find earliest expiring batch for this medicine
+        let itemBatchNo = item.batch_no || null;
+        let itemExpiry = item.expiry || null;
+        if (item.medicine_id && (!itemBatchNo || !itemExpiry)) {
+          const earliest = this._getEarliestBatchForMedicine(item.medicine_id);
+          if (earliest) {
+            itemBatchNo = earliest.batch_no;
+            itemExpiry = earliest.expiry;
+          }
+        }
+
         itemStmt.run([
           invoiceId, item.medicine_id || null, item.trade_name || '', item.trade_name_ar || '',
           unitType === 'box' ? 0 : 1, unitType, qty, unitPrice,
           Number(item.total_price) || (unitPrice * qty),
           Number(item.unit_cost) || (unitPrice * 0.75),
-          Number(item.profit) || ((Number(item.total_price) || (unitPrice * qty)) * 0.25)
+          Number(item.profit) || ((Number(item.total_price) || (unitPrice * qty)) * 0.25),
+          itemBatchNo,
+          itemExpiry
         ]);
       }
       itemStmt.free();
@@ -1411,6 +1536,9 @@ class SQLiteService {
         const newUnits = remainderAfterBoxes % ups;
 
         stockStmt.run([newBoxes, newStrips, newUnits, medicineId]);
+
+        // FEFO (First-Expiry-First-Out) deduction on batches in purchase_items
+        this._deductBatchesFEFO(medicineId, neededUnits, spb * ups);
       }
       stockStmt.free();
 
@@ -1524,6 +1652,178 @@ class SQLiteService {
     }
   }
 
+  // Helper to normalize any expiry string (MM/YYYY, DD/MM/YYYY, YYYY-MM-DD) into sortable YYYY-MM-DD
+  _normalizeExpiry(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '9999-12-31';
+    if (/^\d{4}-\d{1,2}(-\d{1,2})?$/.test(raw)) {
+      const parts = raw.split('-');
+      const month = String(parts[1]).padStart(2, '0');
+      const day = String(parts[2] || '01').padStart(2, '0');
+      return `${parts[0]}-${month}-${day}`;
+    }
+    const parts = raw.split(/[\/.-]/);
+    if (parts.length === 2) {
+      const p0 = parts[0].length === 4 ? parts[0] : parts[1];
+      const p1 = parts[0].length === 4 ? parts[1] : parts[0];
+      return `${p0}-${String(p1).padStart(2, '0')}-01`;
+    }
+    if (parts.length === 3) {
+      if (parts[0].length === 4) {
+        return `${parts[0]}-${String(parts[1]).padStart(2, '0')}-${String(parts[2]).padStart(2, '0')}`;
+      }
+      return `${parts[2]}-${String(parts[1]).padStart(2, '0')}-${String(parts[0]).padStart(2, '0')}`;
+    }
+    return raw;
+  }
+
+  // Find batch by exact barcode (e.g. if purchase invoice item has custom batch barcode)
+  async getBatchByBarcode(barcode) {
+    await this.init();
+    try {
+      const safeCode = String(barcode).trim().replace(/'/g, "''");
+      if (!safeCode) return null;
+      const res = this.db.exec(`
+        SELECT pi.*, m.trade_name_ar, m.trade_name, m.price_box, m.price_strip, m.strips_per_box, m.units_per_strip, m.unit_type
+        FROM purchase_items pi
+        JOIN medicines m ON m.id = pi.medicine_id
+        WHERE (pi.batch_no = '${safeCode}') AND (pi.quantity > 0 OR pi.bonus > 0)
+        ORDER BY pi.id DESC LIMIT 1
+      `);
+      const rows = this._formatRows(res);
+      return rows[0] || null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // Check if there is an older active batch in stock than the requested batch/expiry
+  async checkOlderExpiryBatch(medicineId, scannedExpiry, scannedBatchNo = null) {
+    await this.init();
+    try {
+      const safeId = Number(medicineId);
+      if (!safeId) return null;
+
+      const rows = this._formatRows(
+        this.db.exec(`SELECT id, batch_no, expiry, quantity, bonus FROM purchase_items WHERE medicine_id = ${safeId} AND (quantity > 0 OR bonus > 0) AND expiry IS NOT NULL AND expiry != ''`)
+      );
+      if (!rows || rows.length <= 1) return null;
+
+      // Sort ascending by normalized expiry (earliest first)
+      rows.sort((a, b) => this._normalizeExpiry(a.expiry).localeCompare(this._normalizeExpiry(b.expiry)));
+
+      const earliest = rows[0];
+      const earliestNorm = this._normalizeExpiry(earliest.expiry);
+
+      const targetExpiry = scannedExpiry || (rows.find(r => scannedBatchNo && r.batch_no === scannedBatchNo)?.expiry);
+      if (!targetExpiry) return null;
+
+      const targetNorm = this._normalizeExpiry(targetExpiry);
+
+      // If the target is newer than the earliest active batch (and not the same batch)
+      if (targetNorm > earliestNorm) {
+        if (!scannedBatchNo || earliest.batch_no !== scannedBatchNo) {
+          return {
+            hasOlder: true,
+            earliestBatch: earliest.batch_no,
+            earliestExpiry: earliest.expiry,
+            scannedExpiry: targetExpiry,
+            boxesAvailable: (earliest.quantity || 0) + (earliest.bonus || 0)
+          };
+        }
+      }
+
+      return null;
+    } catch (e) {
+      console.warn('Check older expiry error:', e);
+      return null;
+    }
+  }
+
+  // Get earliest active batch for a medicine
+  _getEarliestBatchForMedicine(medicineId) {
+    try {
+      const safeId = Number(medicineId);
+      if (!safeId) return null;
+      const rows = this._formatRows(
+        this.db.exec(`SELECT id, batch_no, expiry, quantity, bonus FROM purchase_items WHERE medicine_id = ${safeId} AND (quantity > 0 OR bonus > 0)`)
+      );
+      if (!rows || rows.length === 0) return null;
+      rows.sort((a, b) => this._normalizeExpiry(a.expiry).localeCompare(this._normalizeExpiry(b.expiry)));
+      return rows[0];
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // FEFO: Deduct sold discrete units from the earliest expiring purchase batches first
+  _deductBatchesFEFO(medicineId, soldUnits, unitsPerBox) {
+    try {
+      const safeId = Number(medicineId);
+      if (!safeId || soldUnits <= 0) return;
+
+      const rows = this._formatRows(
+        this.db.exec(`SELECT id, quantity, bonus, expiry, batch_no FROM purchase_items WHERE medicine_id = ${safeId} AND (quantity > 0 OR bonus > 0)`)
+      );
+      if (!rows || rows.length === 0) return;
+
+      // Sort by normalized expiry date ASC (Earliest expiring first)
+      rows.sort((a, b) => {
+        const ea = this._normalizeExpiry(a.expiry);
+        const eb = this._normalizeExpiry(b.expiry);
+        return ea.localeCompare(eb);
+      });
+
+      let remainingUnitsToDeduct = soldUnits;
+      const upPerBox = Math.max(1, unitsPerBox || 1);
+
+      for (const b of rows) {
+        if (remainingUnitsToDeduct <= 0) break;
+        const totalBatchBoxes = Math.max(0, (Number(b.quantity) || 0) + (Number(b.bonus) || 0));
+        const batchUnitsAvailable = totalBatchBoxes * upPerBox;
+        if (batchUnitsAvailable <= 0) continue;
+
+        if (batchUnitsAvailable <= remainingUnitsToDeduct) {
+          // Deplete this entire batch
+          this.db.run(`UPDATE purchase_items SET quantity = 0, bonus = 0 WHERE id = ${b.id}`);
+          remainingUnitsToDeduct -= batchUnitsAvailable;
+        } else {
+          // Partially deduct from this batch
+          const remUnits = batchUnitsAvailable - remainingUnitsToDeduct;
+          const newBoxes = Math.floor(remUnits / upPerBox);
+          const bonusFrac = (remUnits % upPerBox) > 0 ? 1 : 0; // retain remainder as box
+          this.db.run(`UPDATE purchase_items SET quantity = ?, bonus = ? WHERE id = ?`, [newBoxes, bonusFrac, b.id]);
+          remainingUnitsToDeduct = 0;
+        }
+      }
+
+      // Sync medicine's active nearest expiry
+      this._syncMedicineNearestExpiry(safeId);
+    } catch (e) {
+      console.warn('FEFO batch deduction error:', e);
+    }
+  }
+
+  // Sync nearest active expiry date from remaining batches into medicines.expiry
+  _syncMedicineNearestExpiry(medicineId) {
+    try {
+      const safeId = Number(medicineId);
+      if (!safeId) return;
+
+      const rows = this._formatRows(
+        this.db.exec(`SELECT expiry FROM purchase_items WHERE medicine_id = ${safeId} AND (quantity > 0 OR bonus > 0) AND expiry IS NOT NULL AND expiry != ''`)
+      );
+
+      if (rows && rows.length > 0) {
+        rows.sort((a, b) => this._normalizeExpiry(a.expiry).localeCompare(this._normalizeExpiry(b.expiry)));
+        const nearest = rows[0].expiry;
+        this.db.run(`UPDATE medicines SET expiry = ? WHERE id = ?`, [nearest, safeId]);
+      }
+    } catch (e) {
+      console.warn('Sync nearest expiry error:', e);
+    }
+  }
+
   async getInvoices(limit = 100) {
     await this.init();
     // Aliases keep the UI (ReportsView/Receipts) working with the SQL column names.
@@ -1538,6 +1838,46 @@ class SQLiteService {
       ORDER BY i.date_time DESC
       LIMIT ${Number(limit) || 100}
     `);
+    return this._formatRows(res);
+  }
+
+  async searchInvoicesByDateRange({ fromDateTime, toDateTime, searchQuery = '', limit = 200 } = {}) {
+    await this.init();
+    let whereClauses = [];
+    if (fromDateTime) {
+      const safeFrom = String(fromDateTime).replace(/'/g, "''");
+      whereClauses.push(`i.date_time >= '${safeFrom}'`);
+    }
+    if (toDateTime) {
+      const safeTo = String(toDateTime).replace(/'/g, "''");
+      whereClauses.push(`i.date_time <= '${safeTo}'`);
+    }
+    if (searchQuery && searchQuery.trim()) {
+      const safeQ = String(searchQuery).trim().replace(/'/g, "''");
+      whereClauses.push(`(
+        i.id LIKE '%${safeQ}%' OR 
+        i.customer_name LIKE '%${safeQ}%' OR 
+        i.cashier_name LIKE '%${safeQ}%' OR
+        EXISTS (
+          SELECT 1 FROM invoice_items ii 
+          WHERE ii.invoice_id = i.id AND (ii.trade_name LIKE '%${safeQ}%' OR ii.trade_name_ar LIKE '%${safeQ}%')
+        )
+      )`);
+    }
+    const whereStr = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+    const query = `
+      SELECT
+        i.*,
+        i.id              AS invoice_number,
+        i.total_retail    AS total,
+        i.total_retail    AS net_total,
+        i.date_time       AS created_at
+      FROM invoices i
+      ${whereStr}
+      ORDER BY i.date_time DESC
+      LIMIT ${Number(limit) || 200}
+    `;
+    const res = this.db.exec(query);
     return this._formatRows(res);
   }
 
@@ -3148,20 +3488,26 @@ class SQLiteService {
 
         // Augment stock in medicines
         const addedBoxes = (item.quantity || 0) + (item.bonus || 0);
+        const itemExp = (item.expiry || '').trim();
         if (item.medicine_id && addedBoxes > 0) {
           this.db.run(`
             UPDATE medicines 
             SET stock_boxes = stock_boxes + ${addedBoxes},
-                price_box = CASE WHEN ${item.price_box} > 0 THEN ${item.price_box} ELSE price_box END
+                price_box = CASE WHEN ${item.price_box} > 0 THEN ${item.price_box} ELSE price_box END,
+                expiry = CASE 
+                  WHEN expiry IS NULL OR expiry = '' THEN ? 
+                  ELSE expiry 
+                END
             WHERE id = ${item.medicine_id}
-          `);
+          `, [itemExp]);
+          this._syncMedicineNearestExpiry(item.medicine_id);
         } else if (!item.medicine_id && item.trade_name_ar) {
           const newMedId = Date.now() + Math.floor(Math.random() * 1000);
           const barcode = item.barcode || `622${Math.floor(1000000000 + Math.random() * 9000000000)}`;
           this.db.run(`
-            INSERT INTO medicines (id, trade_name, trade_name_ar, barcode, price_box, price_strip, strips_per_box, stock_boxes, stock_strips, shelf, category, reorder_level)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          `, [newMedId, item.trade_name || item.trade_name_ar, item.trade_name_ar, barcode, item.price_box, parseFloat((item.price_box / 2).toFixed(2)), 2, addedBoxes, 0, 'A-01', 'أدوية عامة', 3]);
+            INSERT INTO medicines (id, trade_name, trade_name_ar, barcode, price_box, price_strip, strips_per_box, stock_boxes, stock_strips, shelf, category, reorder_level, expiry)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `, [newMedId, item.trade_name || item.trade_name_ar, item.trade_name_ar, barcode, item.price_box, parseFloat((item.price_box / 2).toFixed(2)), 2, addedBoxes, 0, 'A-01', 'أدوية عامة', 3, itemExp]);
         }
       }
       itemStmt.free();

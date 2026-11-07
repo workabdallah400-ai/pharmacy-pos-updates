@@ -688,6 +688,7 @@ export function ProductsView({ currentUser, medicines = [], onSaveMedicine, onDe
                   <th className="p-3.5">سعر العلبة</th>
                   <th className="p-3.5">سعر الشريط</th>
                   <th className="p-3.5">الرصيد الحالي</th>
+                  <th className="p-3.5">تاريخ الصلاحية</th>
                   <th className="p-3.5">مكان الرف</th>
                   <th className="p-3.5 text-center">الإجراءات</th>
                 </tr>
@@ -695,7 +696,7 @@ export function ProductsView({ currentUser, medicines = [], onSaveMedicine, onDe
               <tbody className="divide-y divide-[#23324D]/60 font-medium">
                 {displayMedicines.length === 0 ? (
                   <tr>
-                    <td colSpan="7" className="text-center py-12 text-slate-400">
+                    <td colSpan="8" className="text-center py-12 text-slate-400">
                       {isLoading ? (
                         <div className="flex items-center justify-center gap-2 text-teal-400">
                           <RefreshCw className="w-4 h-4 animate-spin" />
@@ -820,14 +821,25 @@ export function ProductsView({ currentUser, medicines = [], onSaveMedicine, onDe
                           )}
                         </td>
 
-                        {/* 6. Shelf Location */}
+                        {/* 6. Expiry Date */}
+                        <td className="p-3.5 font-mono text-xs">
+                          {med.expiry ? (
+                            <span className="px-2 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/30 font-bold">
+                              {med.expiry}
+                            </span>
+                          ) : (
+                            <span className="text-slate-500 text-[11px]">-</span>
+                          )}
+                        </td>
+
+                        {/* 7. Shelf Location */}
                         <td className="p-3.5 font-mono text-slate-300">
                           <span className="px-2 py-0.5 rounded bg-[#17233A] border border-[#23324D] text-[11px]">
                             {med.shelf || 'A-01'}
                           </span>
                         </td>
 
-                        {/* 7. Action Buttons */}
+                        {/* 8. Action Buttons */}
                         <td className="p-3.5 text-center">
                           {isQuickEditing ? (
                             <div className="flex items-center justify-center gap-1.5">

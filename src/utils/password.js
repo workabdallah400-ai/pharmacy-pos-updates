@@ -17,45 +17,28 @@ export const FORBIDDEN_PASSWORDS = [
 ];
 
 /**
- * Validates password strength policy.
- * Requirements:
- *  - 10 to 128 characters
- *  - At least 3 of 4 character classes: uppercase, lowercase, numbers, special characters
- *  - Not in forbidden passwords list
- *  - Not equal to username (case-insensitive)
+ * Validates password strength policy according to user requirements:
+ *  - At least 4 characters long (letters only, numbers only, or letters and numbers).
+ *  - No symbols or special characters allowed.
+ *  - Supports English and Arabic letters and digits.
+ *  - Maximum length: 64 characters.
  */
 export function validatePasswordPolicy(password, username = '') {
   const pwd = String(password || '');
-  const user = String(username || '').trim().toLowerCase();
 
-  if (pwd.length < 10) {
-    return { valid: false, error: 'كلمة المرور يجب ألا تقل عن 10 أحرف.' };
+  if (pwd.length < 4) {
+    return { valid: false, error: 'كلمة المرور يجب ألا تقل عن 4 خانات (أرقام أو حروف).' };
   }
-  if (pwd.length > 128) {
-    return { valid: false, error: 'كلمة المرور طويلة جداً (الحد الأقصى 128 حرفاً).' };
-  }
-
-  if (user && pwd.toLowerCase() === user) {
-    return { valid: false, error: 'لا يمكن أن تكون كلمة المرور مطابقة لاسم المستخدم.' };
+  if (pwd.length > 64) {
+    return { valid: false, error: 'كلمة المرور طويلة جداً (الحد الأقصى 64 خانة).' };
   }
 
-  const lowerPwd = pwd.toLowerCase();
-  for (const forbidden of FORBIDDEN_PASSWORDS) {
-    if (lowerPwd === forbidden.toLowerCase()) {
-      return { valid: false, error: 'كلمة المرور سهلة وشائعة جداً، يرجى اختيار كلمة مرور أقوى.' };
-    }
-  }
-
-  let classesCount = 0;
-  if (/[a-z]/.test(pwd)) classesCount++;
-  if (/[A-Z]/.test(pwd)) classesCount++;
-  if (/[0-9]/.test(pwd)) classesCount++;
-  if (/[^a-zA-Z0-9]/.test(pwd)) classesCount++;
-
-  if (classesCount < 3) {
+  // Only letters and numbers allowed (English, Arabic letters, standard and Arabic digits) - no symbols
+  const alphanumericNoSymbolsRegex = /^[\p{L}\p{N}]+$/u;
+  if (!alphanumericNoSymbolsRegex.test(pwd)) {
     return {
       valid: false,
-      error: 'كلمة المرور يجب أن تحتوي على 3 عناصر على الأقل من: حروف كبيرة، حروف صغيرة، أرقام، رموز خاصة.'
+      error: 'كلمة المرور يجب أن تتكون من أرقام أو حروف فقط بدون رموز خاصة.'
     };
   }
 

@@ -1,7 +1,7 @@
 {
   "name": "pharmacy-pos-ui",
   "private": true,
-  "version": "1.0.5",
+  "version": "1.0.7",
   "type": "module",
   "description": "PharmacyPOS — نظام إدارة صيدليات ونقاط بيع بواجهة عربية مع تقارير ورديات ذكية",
   "author": "PharmacyPOS",
@@ -82,8 +82,9 @@
     },
     "publish": [
       {
-        "provider": "generic",
-        "url": "https://updates.pharmacy-pos.local/updates/"
+        "provider": "github",
+        "owner": "workabdallah400-ai",
+        "repo": "pharmacy-pos-updates"
       }
     ]
   }

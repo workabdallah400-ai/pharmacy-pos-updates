@@ -36,6 +36,7 @@ export function ProductModal({ isOpen = true, onClose, medicine, medicineToEdit,
     stock_strips: 0,
     stock_units: 0,
     reorder_level: 3,
+    expiry: '',
     manufacturer: 'إيبيكو (EIPICO)'
   });
 
@@ -67,6 +68,7 @@ export function ProductModal({ isOpen = true, onClose, medicine, medicineToEdit,
         stock_strips: targetMedicine.stock_strips != null ? targetMedicine.stock_strips : 0,
         stock_units: targetMedicine.stock_units != null ? targetMedicine.stock_units : 0,
         reorder_level: targetMedicine.reorder_level != null ? targetMedicine.reorder_level : 3,
+        expiry: targetMedicine.expiry || '',
         manufacturer: targetMedicine.manufacturer || 'إيبيكو (EIPICO)'
       });
     } else {
@@ -87,6 +89,7 @@ export function ProductModal({ isOpen = true, onClose, medicine, medicineToEdit,
         stock_strips: 0,
         stock_units: 0,
         reorder_level: 3,
+        expiry: '',
         manufacturer: 'إيبيكو (EIPICO)'
       });
     }
@@ -538,6 +541,35 @@ export function ProductModal({ isOpen = true, onClose, medicine, medicineToEdit,
               </>
             );
           })()}
+
+          {/* Expiry Date & Reorder Level */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">
+                تاريخ الصلاحية (شهر / سنة أو يوم-شهر-سنة)
+              </label>
+              <input
+                type="text"
+                placeholder="مثال: 12/2026 أو 2026-12-01"
+                value={formData.expiry || ''}
+                onChange={(e) => setFormData({ ...formData, expiry: e.target.value })}
+                className="w-full h-10 bg-[#17233A] border border-[#23324D] focus:border-teal-400 rounded-xl px-3 text-amber-300 font-mono text-xs outline-none"
+                dir="ltr"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">
+                مكان الرف / الدرج
+              </label>
+              <input
+                type="text"
+                placeholder="مثال: A-01"
+                value={formData.shelf || ''}
+                onChange={(e) => setFormData({ ...formData, shelf: e.target.value })}
+                className="w-full h-10 bg-[#17233A] border border-[#23324D] focus:border-teal-400 rounded-xl px-3 text-white text-xs outline-none"
+              />
+            </div>
+          </div>
 
           {/* Category & Manufacturer Row */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

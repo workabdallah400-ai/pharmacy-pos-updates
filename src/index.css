@@ -14,19 +14,34 @@
 }
 
 /* ======================================================== */
-/* FONT SIZES (تكبير وتصغير حجم الخط)                      */
+/* FONT SIZES & PROPORTIONAL ZOOM (تكبير وتصغير الزووم)      */
 /* ======================================================== */
 html[data-font-size="sm"] {
-  font-size: 14px;
+  font-size: 15px;
+  zoom: 0.92;
 }
 html[data-font-size="md"] {
   font-size: 16px;
+  zoom: 1;
 }
 html[data-font-size="lg"] {
-  font-size: 18px;
+  font-size: 16px;
+  zoom: 1.08;
 }
 html[data-font-size="xl"] {
-  font-size: 20px;
+  font-size: 16px;
+  zoom: 1.16;
+}
+
+/* Ensure no text distortion, word collisions or container overflow */
+* {
+  box-sizing: border-box;
+}
+
+body, html {
+  overflow-x: hidden;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
 }
 
 /* ======================================================== */

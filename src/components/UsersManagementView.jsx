@@ -285,13 +285,16 @@ function UserForm({ existingUser = null, currentUser, onSave, onCancel }) {
                   dir="ltr"
                   value={formData.password}
                   onChange={(e) => setFormData(p => ({ ...p, password: e.target.value }))}
-                  placeholder={isEdit ? 'اتركها فارغة للإبقاء' : '••••••••••••'}
+                  placeholder={isEdit ? 'اتركها فارغة للإبقاء' : '4 خانات على الأقل (أرقام/حروف)'}
                   className="w-full bg-[#0B1220] border border-[#23324D] focus:border-teal-400 rounded-xl pr-9 pl-9 py-2.5 text-sm text-white font-mono focus:outline-none"
                 />
                 <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-teal-400" tabIndex={-1}>
                   {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
               </div>
+              <p className="text-[10px] text-slate-500">
+                4 خانات على الأقل (أرقام فقط أو حروف فقط أو كلاهما، بدون رموز).
+              </p>
             </div>
 
             <div className="space-y-1.5">

@@ -1,5 +1,6 @@
 import { ErrorBoundary } from './components/ErrorBoundary';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { AlertCircle, Bell, X } from 'lucide-react';
 import { LoginScreen } from './components/LoginScreen';
 import { TopHeader } from './components/TopHeader';
 import { Sidebar } from './components/Sidebar';
@@ -360,19 +361,72 @@ export default function App() {
 
   // 1. Shared Master Medicines State (Clean 0 items)
   const [medicines, setMedicines] = useState([]);
+  const [hasUnreadShortages, setHasUnreadShortages] = useState(false);
+  const [shortageToast, setShortageToast] = useState(null); // { id, message }
+  const prevMedicineStockMap = useRef(new Map());
+  const isInitialMedsLoad = useRef(true);
 
   // Load the full medicine catalog from SQLite so shared views
   // (shortages, purchases, reports) always see the real quantities.
   const reloadMedicinesFromDb = async () => {
     try {
       const rows = await sqliteService.getAllMedicines(100000);
-      if (Array.isArray(rows) && rows.length > 0) {
+      if (Array.isArray(rows)) {
+        // Detect items that just crossed/reached the reorder_level
+        if (!isInitialMedsLoad.current && prevMedicineStockMap.current.size > 0) {
+          const newlyShort = [];
+          for (const med of rows) {
+            const reorder = Number(med.reorder_level != null ? med.reorder_level : 3);
+            const currentBoxes = Number(med.stock_boxes) || 0;
+            const prevBoxes = prevMedicineStockMap.current.get(med.id);
+            if (prevBoxes !== undefined && prevBoxes > reorder && currentBoxes <= reorder) {
+              newlyShort.push(med);
+            }
+          }
+          if (newlyShort.length > 0) {
+            const first = newlyShort[0];
+            const name = first.trade_name_ar || first.trade_name;
+            const msg = newlyShort.length === 1
+              ? `المنتج [${name}] وصل إلى حد الطلب وتم إضافته إلى كشكول النواقص`
+              : `المنتج [${name}] و (${newlyShort.length - 1}) أصناف أخرى وصلت إلى حد الطلب وتم إضافتها إلى كشكول النواقص`;
+            
+            setShortageToast({ id: Date.now(), message: msg });
+            setHasUnreadShortages(true);
+          }
+        }
+
+        // Update tracking map
+        const newMap = new Map();
+        for (const m of rows) {
+          newMap.set(m.id, Number(m.stock_boxes) || 0);
+        }
+        prevMedicineStockMap.current = newMap;
+        isInitialMedsLoad.current = false;
+
         setMedicines(rows);
       }
     } catch (e) {
       console.warn('Failed to load medicines from SQLite:', e);
     }
   };
+
+  // Clear red shortage badge when navigating to shortages tab
+  const handleSelectTab = (tabId) => {
+    if (tabId === 'shortages') {
+      setHasUnreadShortages(false);
+    }
+    setActiveTab(tabId);
+  };
+
+  // Auto-dismiss shortage toast after 7 seconds
+  useEffect(() => {
+    if (shortageToast) {
+      const timer = setTimeout(() => {
+        setShortageToast(null);
+      }, 7000);
+      return () => clearTimeout(timer);
+    }
+  }, [shortageToast]);
 
   useEffect(() => {
     reloadMedicinesFromDb();
@@ -735,13 +789,47 @@ export default function App() {
       />
 
       {/* Main Workspace with Sidebar on Right (RTL) */}
-      <div className="flex-1 flex flex-row overflow-hidden">
+      <div className="flex-1 flex flex-row overflow-hidden relative">
+        {/* Shortage Reorder Alert Toast Notification */}
+        {shortageToast && (
+          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 bg-gradient-to-r from-rose-950 via-slate-900 to-rose-950 border-2 border-rose-500/70 text-white px-5 py-3 rounded-2xl shadow-2xl shadow-rose-950/80 animate-in fade-in slide-in-from-top-4 duration-300">
+            <div className="w-10 h-10 rounded-xl bg-rose-500/20 border border-rose-500/40 flex items-center justify-center text-rose-400 shrink-0 shadow-inner animate-bounce">
+              <Bell className="w-5 h-5 text-rose-400" />
+            </div>
+            <div className="flex flex-col">
+              <span className="text-xs font-bold text-rose-300">تنبيه حد الطلب والنواقص</span>
+              <span className="text-sm font-extrabold text-white">{shortageToast.message}</span>
+            </div>
+            <div className="flex items-center gap-2 mr-2">
+              <button
+                type="button"
+                onClick={() => {
+                  handleSelectTab('shortages');
+                  setShortageToast(null);
+                }}
+                className="text-xs font-bold bg-rose-600 hover:bg-rose-500 text-white px-3 py-1.5 rounded-lg transition-colors shadow-sm"
+              >
+                عرض كشكول النواقص
+              </button>
+              <button
+                type="button"
+                onClick={() => setShortageToast(null)}
+                className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
+                title="إغلاق"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Right Sidebar */}
         <Sidebar
           activeTab={activeTab}
-          onSelectTab={setActiveTab}
+          onSelectTab={handleSelectTab}
           currentUser={currentUser}
           onLogout={handleLogout}
+          hasUnreadShortages={hasUnreadShortages}
         />
 
         {/* Center Main Content Area */}
@@ -776,6 +864,7 @@ export default function App() {
               suppliers={suppliers}
               medicines={medicines}
               onSavePurchase={handleSavePurchase}
+              onSaveMedicine={handleSaveMedicine}
               onPaySupplier={handlePaySupplier}
               initialPurchaseData={pendingPurchaseData}
               onClearInitialPurchaseData={() => setPendingPurchaseData(null)}

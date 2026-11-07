@@ -93,8 +93,8 @@ export function ForcePasswordChangeScreen({ currentUser, onPasswordChanged }) {
                 {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
               </button>
             </div>
-            <p className="text-[10px] text-slate-500">
-              يجب ألا تقل عن 10 أحرف وتتضمن حروفاً كبيرة وصغيرة وأرقاماً أو رموزاً.
+            <p className="text-[10px] text-slate-400">
+              يجب ألا تقل عن 4 خانات (أرقام فقط، حروف فقط، أو حروف وأرقام بدون رموز خاصة).
             </p>
           </div>
 

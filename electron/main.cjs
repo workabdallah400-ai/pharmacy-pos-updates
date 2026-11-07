@@ -317,7 +317,21 @@ ipcMain.handle('app:update-check', async (event, options = {}) => {
     return { available: false, reason: 'unavailable', version: app.getVersion() };
   }
   try {
-    updater.setFeedURL({ provider: 'generic', url: feedUrl });
+    if (feedUrl && feedUrl.includes('github.com')) {
+      updater.setFeedURL({
+        provider: 'github',
+        owner: 'workabdallah400-ai',
+        repo: 'pharmacy-pos-updates'
+      });
+    } else if (feedUrl) {
+      updater.setFeedURL({ provider: 'generic', url: feedUrl });
+    } else {
+      updater.setFeedURL({
+        provider: 'github',
+        owner: 'workabdallah400-ai',
+        repo: 'pharmacy-pos-updates'
+      });
+    }
     const result = await updater.checkForUpdates();
     const info = result && result.updateInfo ? result.updateInfo : null;
     const available = !!(result && result.updateInfo && result.updateInfo.version !== app.getVersion());
@@ -514,6 +528,16 @@ ipcMain.on('window:maximize', () => {
 
 ipcMain.on('window:close', () => {
   if (mainWindow) mainWindow.close();
+});
+
+ipcMain.on('window:set-zoom-factor', (event, factor) => {
+  if (mainWindow && mainWindow.webContents) {
+    try {
+      mainWindow.webContents.setZoomFactor(Number(factor) || 1.0);
+    } catch (e) {
+      console.warn('Failed to set zoom factor:', e);
+    }
+  }
 });
 
 // 3. Database Binary IPC Handlers (Reliable Cross-Process Persistence)

@@ -33,12 +33,34 @@ export function useThemeAndFontSize() {
     } catch (e) {}
   }, [theme]);
 
-  // Apply font size to <html>
+  // Apply font size / zoom factor cleanly without breaking layouts
   useEffect(() => {
     try {
       const root = document.documentElement;
       root.setAttribute('data-font-size', fontSize);
       localStorage.setItem(FONT_SIZE_KEY, fontSize);
+
+      const zoomFactorMap = {
+        sm: 0.9,
+        md: 1.0,
+        lg: 1.1,
+        xl: 1.2
+      };
+      const factor = zoomFactorMap[fontSize] || 1.0;
+
+      // In Electron desktop environment, use native webContents zoomFactor
+      if (typeof window !== 'undefined' && window.require) {
+        try {
+          const { ipcRenderer, webFrame } = window.require('electron');
+          if (webFrame && typeof webFrame.setZoomFactor === 'function') {
+            webFrame.setZoomFactor(factor);
+          } else if (ipcRenderer) {
+            ipcRenderer.send('window:set-zoom-factor', factor);
+          }
+        } catch (e) {
+          console.warn('Native zoom apply error:', e);
+        }
+      }
     } catch (e) {}
   }, [fontSize]);
 

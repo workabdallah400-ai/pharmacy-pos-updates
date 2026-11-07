@@ -15,10 +15,12 @@ import {
   CheckCircle2,
   Smartphone,
   Wallet,
-  Coins
+  Coins,
+  RotateCcw
 } from 'lucide-react';
 import { hasPermission } from '../utils/permissions';
 import { sqliteService } from '../db/sqliteService';
+import { ReturnInvoiceModal } from './ReturnInvoiceModal';
 
 export function ReportsView({ currentUser }) {
   const [invoices, setInvoices] = useState([]);
@@ -26,8 +28,16 @@ export function ReportsView({ currentUser }) {
   const [topSellers, setTopSellers] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [paymentFilter, setPaymentFilter] = useState('ALL');
+
+  // Date range filters for invoices log
+  const [fromDate, setFromDate] = useState('');
+  const [toDate, setToDate] = useState('');
+
   const [selectedInvoiceForModal, setSelectedInvoiceForModal] = useState(null);
+  const [modalInvoiceItems, setModalInvoiceItems] = useState([]);
   const [modalInvoiceRefunds, setModalInvoiceRefunds] = useState([]);
+  const [isLoadingModalItems, setIsLoadingModalItems] = useState(false);
+  const [showReturnModal, setShowReturnModal] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
 
   const canRefund = hasPermission(currentUser, 'canRefund');
@@ -39,11 +49,20 @@ export function ReportsView({ currentUser }) {
 
   const openInvoicePreview = async (inv) => {
     setSelectedInvoiceForModal(inv);
+    setIsLoadingModalItems(true);
+    setModalInvoiceItems([]);
     try {
-      const refs = await sqliteService.getInvoiceRefunds(inv.id);
+      const [refs, items] = await Promise.all([
+        sqliteService.getInvoiceRefunds(inv.id),
+        sqliteService.getInvoiceItems(inv.id)
+      ]);
       setModalInvoiceRefunds(refs || []);
+      setModalInvoiceItems(items || []);
     } catch (e) {
       setModalInvoiceRefunds([]);
+      setModalInvoiceItems([]);
+    } finally {
+      setIsLoadingModalItems(false);
     }
   };
 
@@ -148,6 +167,18 @@ export function ReportsView({ currentUser }) {
   // Filtered invoices
   const filteredInvoices = invoices.filter((inv) => {
     if (paymentFilter !== 'ALL' && inv.payment_method !== paymentFilter) return false;
+
+    // Filter by Date Range (e.g. from 2026-10-01 to 2026-10-02)
+    const invDateStr = inv.created_at || inv.date_time || '';
+    if (fromDate) {
+      const invDay = invDateStr.slice(0, 10);
+      if (invDay < fromDate) return false;
+    }
+    if (toDate) {
+      const invDay = invDateStr.slice(0, 10);
+      if (invDay > toDate) return false;
+    }
+
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       const numMatch = String(inv.invoice_number || inv.id || '').includes(q);
@@ -295,35 +326,84 @@ export function ReportsView({ currentUser }) {
           </div>
         </div>
 
-        {/* 2. Search & Payment Filter Bar */}
-        <div className="bg-[#111A2B] border border-[#23324D] rounded-2xl p-3.5 flex items-center justify-between gap-3 shadow-sm">
-          <div className="relative flex-1">
-            <Search className="w-4 h-4 absolute right-3.5 top-1/2 -translate-y-1/2 text-teal-400" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="ابحث برقم الفاتورة، اسم العميل، أو الكاشير..."
-              className="w-full h-10 bg-[#0B1220] border border-[#23324D] focus:border-teal-400 rounded-xl pr-10 pl-4 text-xs text-white outline-none"
-            />
+        {/* 2. Search & Payment & Date Filter Bar */}
+        <div className="bg-[#111A2B] border border-[#23324D] rounded-2xl p-3.5 space-y-3 shadow-sm">
+          <div className="flex flex-col md:flex-row items-center justify-between gap-3">
+            <div className="relative flex-1 w-full">
+              <Search className="w-4 h-4 absolute right-3.5 top-1/2 -translate-y-1/2 text-teal-400" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="ابحث برقم الفاتورة، اسم العميل، أو الكاشير..."
+                className="w-full h-10 bg-[#0B1220] border border-[#23324D] focus:border-teal-400 rounded-xl pr-10 pl-4 text-xs text-white outline-none"
+              />
+            </div>
+
+            <div className="flex items-center gap-1.5 text-xs flex-wrap w-full md:w-auto justify-end">
+              <span className="text-slate-400 text-[11px] ml-1">تصفية:</span>
+              {['ALL', 'كاش', 'فيزا', 'إنستاباي', 'آجل', 'مختلط'].map((method) => (
+                <button
+                  key={method}
+                  type="button"
+                  onClick={() => setPaymentFilter(method)}
+                  className={`px-3 py-1.5 rounded-xl font-bold transition-all cursor-pointer ${
+                    paymentFilter === method
+                      ? 'bg-teal-500 text-slate-950 shadow-glow-teal'
+                      : 'bg-[#0B1220] text-slate-400 hover:text-white border border-[#23324D]'
+                  }`}
+                >
+                  {method === 'ALL' ? 'كافة الفواتير' : method}
+                </button>
+              ))}
+            </div>
           </div>
 
-          <div className="flex items-center gap-1.5 text-xs">
-            <span className="text-slate-400 text-[11px] ml-1">تصفية:</span>
-            {['ALL', 'كاش', 'فيزا', 'إنستاباي', 'آجل', 'مختلط'].map((method) => (
-              <button
-                key={method}
-                type="button"
-                onClick={() => setPaymentFilter(method)}
-                className={`px-3 py-1.5 rounded-xl font-bold transition-all ${
-                  paymentFilter === method
-                    ? 'bg-teal-500 text-slate-950 shadow-glow-teal'
-                    : 'bg-[#0B1220] text-slate-400 hover:text-white border border-[#23324D]'
-                }`}
-              >
-                {method === 'ALL' ? 'كافة الفواتير' : method}
-              </button>
-            ))}
+          {/* Date Range Search Controls */}
+          <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-[#23324D]/60 text-xs">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-teal-300 font-bold flex items-center gap-1 text-[11px]">
+                <Calendar className="w-3.5 h-3.5 text-teal-400" />
+                <span>بحث الفواتير بالتاريخ:</span>
+              </span>
+
+              <div className="flex items-center gap-1 bg-[#0B1220] px-2.5 py-1 rounded-xl border border-[#23324D]">
+                <span className="text-slate-400 text-[11px]">من:</span>
+                <input
+                  type="date"
+                  value={fromDate}
+                  onChange={(e) => setFromDate(e.target.value)}
+                  className="bg-transparent text-white font-mono text-xs outline-none cursor-pointer"
+                />
+              </div>
+
+              <div className="flex items-center gap-1 bg-[#0B1220] px-2.5 py-1 rounded-xl border border-[#23324D]">
+                <span className="text-slate-400 text-[11px]">إلى:</span>
+                <input
+                  type="date"
+                  value={toDate}
+                  onChange={(e) => setToDate(e.target.value)}
+                  className="bg-transparent text-white font-mono text-xs outline-none cursor-pointer"
+                />
+              </div>
+
+              {(fromDate || toDate) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFromDate('');
+                    setToDate('');
+                  }}
+                  className="text-[11px] text-rose-400 hover:text-rose-300 font-bold underline px-1 cursor-pointer"
+                >
+                  إلغاء تصفية التاريخ
+                </button>
+              )}
+            </div>
+
+            <div className="text-[11px] text-slate-400 font-mono">
+              عثر على: <strong className="text-teal-300">{filteredInvoices.length}</strong> فاتورة
+            </div>
           </div>
         </div>
 
@@ -337,6 +417,16 @@ export function ReportsView({ currentUser }) {
             <span className="text-xs text-slate-400 font-mono">
               المعروض: <strong className="text-teal-300">{filteredInvoices.length}</strong> فاتورة
             </span>
+            {canRefund && (
+              <button
+                type="button"
+                onClick={() => setShowReturnModal(true)}
+                className="px-3 py-1.5 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>شاشة المرتجع بالتاريخ والوقت</span>
+              </button>
+            )}
           </div>
 
           <div className="flex-1 overflow-x-auto">
@@ -431,66 +521,180 @@ export function ReportsView({ currentUser }) {
 
       {/* Invoice Details Modal */}
       {selectedInvoiceForModal && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#111A2B] border border-[#23324D] rounded-3xl w-full max-w-md p-6 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between border-b border-[#23324D] pb-3">
-              <div className="flex items-center gap-2 text-teal-400 font-bold text-sm">
-                <FileText className="w-5 h-5" />
-                <span>تفاصيل الفاتورة #{selectedInvoiceForModal.invoice_number || selectedInvoiceForModal.id}</span>
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 select-none animate-in fade-in duration-200">
+          <div className="bg-[#111A2B] border border-[#23324D] rounded-3xl w-full max-w-2xl max-h-[90vh] shadow-2xl flex flex-col overflow-hidden">
+            
+            {/* Header */}
+            <div className="p-4 sm:p-5 border-b border-[#23324D] flex items-center justify-between bg-[#17233A]/80">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-teal-500/20 border border-teal-500/40 flex items-center justify-center text-teal-400">
+                  <FileText className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-white text-base">معاينة تفاصيل الفاتورة #{selectedInvoiceForModal.invoice_number || selectedInvoiceForModal.id}</h3>
+                  <p className="text-xs text-slate-400">
+                    تاريخ ووقت الفاتورة: {selectedInvoiceForModal.created_at ? new Date(selectedInvoiceForModal.created_at).toLocaleString('ar-EG') : '-'}
+                  </p>
+                </div>
               </div>
               <button
                 type="button"
                 onClick={() => setSelectedInvoiceForModal(null)}
-                className="text-slate-400 hover:text-white"
+                className="w-8 h-8 rounded-xl bg-[#17233A] hover:bg-rose-500/20 text-slate-400 hover:text-rose-300 border border-[#23324D] flex items-center justify-center transition-colors cursor-pointer"
               >
                 ✕
               </button>
             </div>
 
-            <div className="p-4 bg-[#0B1220] rounded-2xl border border-[#23324D] text-xs space-y-2 font-mono">
-              <div className="flex justify-between">
-                <span className="text-slate-400">العميل:</span>
-                <span className="text-white font-bold">{selectedInvoiceForModal.customer_name || 'عميل نقدي'}</span>
+            {/* Scrollable Body */}
+            <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4">
+              
+              {/* Meta Card: Who sold it, Customer, Payment */}
+              <div className="p-3.5 bg-[#0B1220] rounded-2xl border border-[#23324D] text-xs grid grid-cols-2 sm:grid-cols-4 gap-3 font-mono">
+                <div className="bg-[#111A2B] p-2.5 rounded-xl border border-[#23324D]">
+                  <span className="text-slate-400 block text-[11px] mb-1">المسؤول عن البيع (الكاشير):</span>
+                  <span className="text-teal-300 font-bold text-sm block truncate">
+                    👤 {selectedInvoiceForModal.cashier_name || 'الكاشير'}
+                  </span>
+                </div>
+
+                <div className="bg-[#111A2B] p-2.5 rounded-xl border border-[#23324D]">
+                  <span className="text-slate-400 block text-[11px] mb-1">العميل:</span>
+                  <span className="text-white font-bold text-sm block truncate">
+                    {selectedInvoiceForModal.customer_name || 'عميل نقدي'}
+                  </span>
+                </div>
+
+                <div className="bg-[#111A2B] p-2.5 rounded-xl border border-[#23324D]">
+                  <span className="text-slate-400 block text-[11px] mb-1">طريقة الدفع:</span>
+                  <span className="text-emerald-400 font-bold text-sm block">
+                    {selectedInvoiceForModal.payment_method || 'كاش'}
+                  </span>
+                </div>
+
+                <div className="bg-[#111A2B] p-2.5 rounded-xl border border-[#23324D]">
+                  <span className="text-slate-400 block text-[11px] mb-1">حالة الفاتورة:</span>
+                  <span className={`font-bold text-sm block ${selectedInvoiceForModal.status === 'REFUNDED' ? 'text-rose-400' : 'text-emerald-400'}`}>
+                    {selectedInvoiceForModal.status === 'REFUNDED' ? 'تم استرجاعها' : 'مكتملة ومسددة'}
+                  </span>
+                </div>
               </div>
-              <div className="flex justify-between">
-                <span className="text-slate-400">الكاشير:</span>
-                <span className="text-white font-bold">{selectedInvoiceForModal.cashier_name || 'الكاشير'}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-400">طريقة الدفع:</span>
-                <span className="text-teal-300 font-bold">{selectedInvoiceForModal.payment_method || 'كاش'}</span>
-              </div>
+
               {selectedInvoiceForModal.payment_method === 'مختلط' && (
-                <div className="flex justify-between text-[11px] bg-[#111A2B] px-2 py-1 rounded border border-teal-500/20">
-                  <span className="text-slate-400">تفصيل المختلط:</span>
-                  <span className="text-teal-300">
+                <div className="text-xs bg-[#111A2B] p-2.5 rounded-xl border border-teal-500/30 flex justify-between font-mono">
+                  <span className="text-slate-400">تفصيل السداد المختلط:</span>
+                  <span className="text-teal-300 font-bold">
                     كاش: {Number(selectedInvoiceForModal.paid_cash || 0).toFixed(2)} | آجل: {Number(selectedInvoiceForModal.paid_credit || 0).toFixed(2)}
-                    {Number(selectedInvoiceForModal.paid_card || 0) > 0 ? ` | كارد: ${Number(selectedInvoiceForModal.paid_card).toFixed(2)}` : ''}
+                    {Number(selectedInvoiceForModal.paid_card || 0) > 0 ? ` | كارد: ${Number(selectedInvoiceForModal.paid_card).toFixed(2)}` : ''} ج.م
                   </span>
                 </div>
               )}
+
+              {/* Items List Table */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-bold text-white flex items-center gap-1.5">
+                    <ShoppingBag className="w-4 h-4 text-teal-400" />
+                    <span>الأصناف المباعة في الفاتورة ({modalInvoiceItems.length} صنف):</span>
+                  </span>
+                  {selectedInvoiceForModal.discount > 0 && (
+                    <span className="text-rose-400 font-mono text-[11px] font-bold">
+                      خصم مطبق على الفاتورة: -{Number(selectedInvoiceForModal.discount).toFixed(2)} ج.م
+                    </span>
+                  )}
+                </div>
+
+                <div className="border border-[#23324D] rounded-2xl overflow-hidden bg-[#0B1220]">
+                  <table className="w-full text-right text-xs">
+                    <thead className="bg-[#141E30] text-slate-300 border-b border-[#23324D] font-bold">
+                      <tr>
+                        <th className="p-2.5">اسم الصنف</th>
+                        <th className="p-2.5 text-center">الوحدة</th>
+                        <th className="p-2.5 text-center">الكمية</th>
+                        <th className="p-2.5 text-center">سعر الوحدة</th>
+                        <th className="p-2.5 text-left">الإجمالي</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[#23324D]/60 font-medium">
+                      {isLoadingModalItems ? (
+                        <tr>
+                          <td colSpan="5" className="p-6 text-center text-slate-400 font-mono">
+                            جاري تحميل بنود الفاتورة...
+                          </td>
+                        </tr>
+                      ) : modalInvoiceItems.length === 0 ? (
+                        <tr>
+                          <td colSpan="5" className="p-6 text-center text-slate-500">
+                            لا توجد أصناف مسجلة لهذه الفاتورة
+                          </td>
+                        </tr>
+                      ) : (
+                        modalInvoiceItems.map((it, idx) => {
+                          const uType = it.unit_type || (it.is_strip ? 'strip' : 'box');
+                          const unitLabel = uType === 'box' ? 'علبة' : uType === 'strip' ? 'شريط' : 'وحدة/قرص';
+                          return (
+                            <tr key={it.id || idx} className="hover:bg-[#17233A]/50">
+                              <td className="p-2.5">
+                                <div className="font-bold text-white text-xs">{it.trade_name_ar || it.trade_name}</div>
+                                {it.trade_name && it.trade_name !== it.trade_name_ar && (
+                                  <div className="text-[10px] text-slate-400 font-mono" dir="ltr">{it.trade_name}</div>
+                                )}
+                              </td>
+                              <td className="p-2.5 text-center">
+                                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-[#17233A] text-teal-300 border border-[#23324D]">
+                                  {unitLabel}
+                                </span>
+                              </td>
+                              <td className="p-2.5 text-center font-mono font-bold text-white">
+                                {it.quantity}
+                              </td>
+                              <td className="p-2.5 text-center font-mono text-slate-300" dir="ltr">
+                                {Number(it.unit_price || 0).toFixed(2)}
+                              </td>
+                              <td className="p-2.5 text-left font-mono font-bold text-emerald-400" dir="ltr">
+                                {Number(it.total_price || (it.unit_price * it.quantity) || 0).toFixed(2)} ج.م
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Refunds if any */}
               {modalInvoiceRefunds.length > 0 && (
-                <div className="p-2 bg-rose-500/10 border border-rose-500/30 rounded-xl space-y-1 text-[11px]">
-                  <div className="text-rose-400 font-bold">مرتجعات مسجلة لهذه الفاتورة:</div>
+                <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-2xl space-y-1.5 text-xs">
+                  <div className="text-rose-400 font-bold flex items-center gap-1.5">
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>مرتجعات مسجلة لهذه الفاتورة:</span>
+                  </div>
                   {modalInvoiceRefunds.map((ref, idx) => (
-                    <div key={ref.id || idx} className="flex justify-between text-slate-300">
+                    <div key={ref.id || idx} className="flex justify-between text-slate-300 font-mono text-[11px] bg-[#111A2B]/60 p-1.5 rounded-lg border border-rose-500/20">
                       <span>{new Date(ref.date_time).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })} ({ref.reason})</span>
                       <span className="font-bold text-rose-300">-{Number(ref.refund_amount).toFixed(2)} ج.م</span>
                     </div>
                   ))}
-                  <div className="border-t border-rose-500/20 pt-1 flex justify-between font-bold text-rose-400">
+                  <div className="border-t border-rose-500/20 pt-1 flex justify-between font-bold text-rose-400 text-xs">
                     <span>إجمالي المرتجع:</span>
                     <span>-{modalInvoiceRefunds.reduce((s, r) => s + (Number(r.refund_amount) || 0), 0).toFixed(2)} ج.م</span>
                   </div>
                 </div>
               )}
-              <div className="flex justify-between border-t border-[#23324D] pt-2">
-                <span className="text-emerald-400 font-bold text-sm">صافي القيمة:</span>
-                <span className="text-emerald-400 font-bold text-sm">{getInvoiceTotal(selectedInvoiceForModal).toFixed(2)} ج.م</span>
+
+              {/* Total Summary */}
+              <div className="p-3 bg-[#0B1220] rounded-2xl border border-[#23324D] flex justify-between items-center font-mono">
+                <span className="text-slate-400 font-bold text-xs">صافي قيمة الفاتورة:</span>
+                <span className="text-emerald-400 font-black text-base" dir="ltr">
+                  {getInvoiceTotal(selectedInvoiceForModal).toFixed(2)} ج.م
+                </span>
               </div>
+
             </div>
 
-            <div className="flex gap-2">
+            {/* Actions Footer */}
+            <div className="p-4 bg-[#141E30] border-t border-[#23324D] flex gap-2">
               <button
                 type="button"
                 onClick={() => {
@@ -545,14 +749,30 @@ export function ReportsView({ currentUser }) {
               <button
                 type="button"
                 onClick={() => setSelectedInvoiceForModal(null)}
-                className="px-4 py-2.5 rounded-xl bg-[#17233A] text-slate-300 text-xs font-bold hover:bg-[#23324D]"
+                className="px-5 py-2.5 rounded-xl bg-[#17233A] text-slate-300 text-xs font-bold hover:bg-[#23324D] cursor-pointer"
               >
                 إغلاق
               </button>
             </div>
+
           </div>
         </div>
       )}
+
+      {/* Advanced Return / Refund Modal by Date & Time */}
+      <ReturnInvoiceModal
+        isOpen={showReturnModal}
+        onClose={() => setShowReturnModal(false)}
+        currentUser={currentUser}
+        onRefundCompleted={async () => {
+          const [freshInvoices, freshRefunds] = await Promise.all([
+            sqliteService.getInvoices(200),
+            sqliteService.getAllRefunds(300)
+          ]);
+          setInvoices(freshInvoices || []);
+          setRefunds(freshRefunds || []);
+        }}
+      />
 
     </div>
   );

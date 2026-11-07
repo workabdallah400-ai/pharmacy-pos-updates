@@ -23,20 +23,6 @@ export function FirstRunSetupScreen({ onSetupSuccess }) {
   const [errorMessage, setErrorMessage] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Password strength score (0 to 4)
-  const calculateStrength = (pwd) => {
-    let score = 0;
-    if (pwd.length >= 10) score++;
-    if (/[A-Z]/.test(pwd)) score++;
-    if (/[0-9]/.test(pwd)) score++;
-    if (/[^a-zA-Z0-9]/.test(pwd)) score++;
-    return score;
-  };
-
-  const strength = calculateStrength(password);
-  const strengthLabels = ['ضعيفة جداً', 'ضعيفة', 'متوسطة', 'قوية', 'ممتازة 🛡️'];
-  const strengthColors = ['bg-rose-500', 'bg-rose-400', 'bg-amber-400', 'bg-teal-400', 'bg-emerald-400'];
-
   const handleSetup = async (e) => {
     e.preventDefault();
     setErrorMessage('');
@@ -116,7 +102,7 @@ export function FirstRunSetupScreen({ onSetupSuccess }) {
           {/* Username */}
           <div className="space-y-1.5">
             <label className="block text-xs font-bold text-slate-300">
-              اسم المستخدم لتسجيل الدخول:
+              اسم المستخدم لتسجيل الدخول (Username):
             </label>
             <div className="relative">
               <UserCheck className="absolute right-3.5 top-3 w-4 h-4 text-slate-400" />
@@ -125,19 +111,19 @@ export function FirstRunSetupScreen({ onSetupSuccess }) {
                 dir="ltr"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
-                placeholder="owner_pharmacy"
+                placeholder="أدخل اسم المستخدم (مثال: admin أو doctor1)"
                 className="w-full bg-[#0B1220] border border-[#23324D] focus:border-teal-400 rounded-xl pr-10 pl-3 py-2.5 text-sm text-white font-mono focus:outline-none text-left"
               />
             </div>
             <p className="text-[10px] text-slate-500">
-              حروف إنجليزية أو أرقام فقط (3 إلى 32 حرفاً).
+              يمكنك كتابة أي اسم مستخدم تختاره (حروف أو أرقام).
             </p>
           </div>
 
           {/* Password */}
           <div className="space-y-1.5">
             <label className="block text-xs font-bold text-slate-300">
-              كلمة المرور القوية:
+              كلمة المرور (Password):
             </label>
             <div className="relative">
               <Lock className="absolute right-3.5 top-3 w-4 h-4 text-slate-400" />
@@ -146,7 +132,7 @@ export function FirstRunSetupScreen({ onSetupSuccess }) {
                 dir="ltr"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••••••"
+                placeholder="أدخل كلمة المرور (4 خانات على الأقل)..."
                 className="w-full bg-[#0B1220] border border-[#23324D] focus:border-teal-400 rounded-xl pr-10 pl-10 py-2.5 text-sm text-white font-mono focus:outline-none"
               />
               <button
@@ -157,26 +143,9 @@ export function FirstRunSetupScreen({ onSetupSuccess }) {
                 {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
               </button>
             </div>
-
-            {/* Strength Meter */}
-            {password && (
-              <div className="space-y-1 pt-1">
-                <div className="flex items-center justify-between text-[10px]">
-                  <span className="text-slate-400">مستوى قوة كلمة المرور:</span>
-                  <span className="font-bold text-teal-300">{strengthLabels[strength]}</span>
-                </div>
-                <div className="h-1.5 w-full bg-[#17233A] rounded-full overflow-hidden flex gap-1">
-                  {[0, 1, 2, 3].map((idx) => (
-                    <div
-                      key={idx}
-                      className={`h-full flex-1 transition-all ${
-                        idx < strength ? strengthColors[strength] : 'bg-transparent'
-                      }`}
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
+            <p className="text-[10px] text-slate-400">
+              تتكون من 4 خانات على الأقل (أرقام فقط، حروف فقط، أو حروف وأرقام بدون رموز خاصة).
+            </p>
           </div>
 
           {/* Confirm Password */}

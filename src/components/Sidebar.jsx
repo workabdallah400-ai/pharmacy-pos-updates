@@ -28,7 +28,7 @@ export const NAV_ITEMS = [
   { id: 'settings', label: 'الإعدادات العامة', icon: Settings, permission: 'canManageSettings' },
 ];
 
-export function Sidebar({ activeTab, onSelectTab, currentUser, onLogout }) {
+export function Sidebar({ activeTab, onSelectTab, currentUser, onLogout, hasUnreadShortages }) {
   const visibleItems = NAV_ITEMS.filter((item) => {
     if (!item.permission) return true;
     return hasPermission(currentUser, item.permission);
@@ -46,6 +46,8 @@ export function Sidebar({ activeTab, onSelectTab, currentUser, onLogout }) {
         {visibleItems.map((item) => {
           const Icon = item.icon;
           const isActive = activeTab === item.id;
+          const isShortageItem = item.id === 'shortages';
+          const showRedAlertBadge = isShortageItem && hasUnreadShortages && !isActive;
 
           return (
             <button
@@ -65,28 +67,42 @@ export function Sidebar({ activeTab, onSelectTab, currentUser, onLogout }) {
 
               <div className="flex items-center gap-3">
                 <div
-                  className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
+                  className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors relative ${
                     isActive
                       ? 'bg-teal-500/20 text-teal-300'
                       : 'bg-[#17233A] text-slate-400 group-hover:text-teal-400 group-hover:bg-[#1D2B47]'
                   }`}
                 >
                   <Icon className="w-4 h-4" />
+                  {showRedAlertBadge && (
+                    <span className="absolute -top-1 -right-1 flex h-2.5 w-2.5">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-rose-500"></span>
+                    </span>
+                  )}
                 </div>
                 <span className="text-xs sm:text-sm">{item.label}</span>
               </div>
 
               {/* Tag or Badge */}
-              {item.tag && (
-                <span className="text-[10px] font-mono bg-black/30 text-slate-400 px-1.5 py-0.5 rounded border border-[#23324D]/60">
-                  {item.tag}
-                </span>
-              )}
-              {item.badge && (
-                <span className="text-[10px] font-bold bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded border border-amber-500/30">
-                  {item.badge}
-                </span>
-              )}
+              <div className="flex items-center gap-1.5">
+                {showRedAlertBadge ? (
+                  <span className="inline-flex items-center gap-1 text-[10px] font-bold bg-rose-500/20 text-rose-300 px-2 py-0.5 rounded-full border border-rose-500/40 animate-pulse shadow-sm shadow-rose-900/50">
+                    <span className="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
+                    نواقص جديدة
+                  </span>
+                ) : item.badge && !isShortageItem ? (
+                  <span className="text-[10px] font-bold bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded border border-amber-500/30">
+                    {item.badge}
+                  </span>
+                ) : null}
+
+                {item.tag && (
+                  <span className="text-[10px] font-mono bg-black/30 text-slate-400 px-1.5 py-0.5 rounded border border-[#23324D]/60">
+                    {item.tag}
+                  </span>
+                )}
+              </div>
             </button>
           );
         })}

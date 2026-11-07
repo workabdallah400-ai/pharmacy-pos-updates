@@ -24,6 +24,7 @@ export function PurchasesView({
   suppliers,
   medicines,
   onSavePurchase,
+  onSaveMedicine,
   onPaySupplier,
   initialPurchaseData = null,
   onClearInitialPurchaseData
@@ -385,6 +386,7 @@ export function PurchasesView({
           await handleCreatePurchase(invoice);
           if (onClearInitialPurchaseData) onClearInitialPurchaseData();
         }}
+        onSaveMedicine={onSaveMedicine}
         initialItems={initialPurchaseData?.items || []}
         initialSupplierId={initialPurchaseData?.supplierId || null}
       />

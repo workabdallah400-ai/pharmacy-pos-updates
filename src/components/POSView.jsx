@@ -29,6 +29,7 @@ import { ReceiptModal } from './ReceiptModal';
 import { ParkedBillsModal } from './ParkedBillsModal';
 import { QuickExpenseModal } from './QuickExpenseModal';
 import { MobileQRModal } from './MobileQRModal';
+import { ReturnInvoiceModal } from './ReturnInvoiceModal';
 import { sqliteService } from '../db/sqliteService';
 import { hasPermission } from '../utils/permissions';
 import { calculateCartTotal } from '../utils/pricing';
@@ -78,6 +79,8 @@ export function POSView({
   const [showParkedModal, setShowParkedModal] = useState(false);
   const [showExpenseModal, setShowExpenseModal] = useState(false);
   const [showQRModal, setShowQRModal] = useState(false);
+  const [showReturnModal, setShowReturnModal] = useState(false);
+  const [fefoAlertModal, setFefoAlertModal] = useState(null); // { medicineName, scannedExpiry, oldestExpiry, oldestBatch, boxesAvailable }
 
   // Search input ref for persistent auto-focus
   const searchInputRef = useRef(null);
@@ -250,10 +253,65 @@ export function POSView({
       // Strict shift gate: scanning is blocked if no shift is open
       if (!requireShift()) return;
 
+      // Check if scanned code is a specific batch barcode
+      try {
+        const batchMatch = await sqliteService.getBatchByBarcode(q);
+        if (batchMatch && batchMatch.medicine_id) {
+          const medObj = {
+            id: batchMatch.medicine_id,
+            trade_name: batchMatch.trade_name,
+            trade_name_ar: batchMatch.trade_name_ar,
+            price_box: batchMatch.price_box,
+            price_strip: batchMatch.price_strip,
+            strips_per_box: batchMatch.strips_per_box,
+            units_per_strip: batchMatch.units_per_strip,
+            unit_type: batchMatch.unit_type,
+            stock_boxes: batchMatch.quantity || 0,
+            stock_strips: 0,
+            stock_units: 0,
+            expiry: batchMatch.expiry
+          };
+
+          // Strict FEFO check: is there an older active batch?
+          const olderBatch = await sqliteService.checkOlderExpiryBatch(batchMatch.medicine_id, batchMatch.expiry, batchMatch.batch_no);
+          if (olderBatch) {
+            setFefoAlertModal({
+              medicineName: medObj.trade_name_ar || medObj.trade_name,
+              scannedExpiry: batchMatch.expiry,
+              oldestExpiry: olderBatch.earliestExpiry,
+              oldestBatch: olderBatch.earliestBatch,
+              boxesAvailable: olderBatch.boxesAvailable
+            });
+            showToast(`⚠️ عفواً! هناك صلاحية أقدم (${olderBatch.earliestExpiry}) لنفس الدواء بالمخزن!`, 'error');
+            setSearchQuery('');
+            return;
+          }
+
+          addToCart(medObj, 'box');
+          setSearchQuery('');
+          return;
+        }
+      } catch (err) {}
+
       // Exact barcode match via SQLite index
       try {
         const exactBarcode = await sqliteService.getMedicineByBarcode(q);
         if (exactBarcode) {
+          // If the scanned medicine has an active older batch in purchase_items, enforce FEFO
+          const olderBatch = await sqliteService.checkOlderExpiryBatch(exactBarcode.id, exactBarcode.expiry);
+          if (olderBatch) {
+            setFefoAlertModal({
+              medicineName: exactBarcode.trade_name_ar || exactBarcode.trade_name,
+              scannedExpiry: exactBarcode.expiry,
+              oldestExpiry: olderBatch.earliestExpiry,
+              oldestBatch: olderBatch.earliestBatch,
+              boxesAvailable: olderBatch.boxesAvailable
+            });
+            showToast(`⚠️ عفواً! هناك صلاحية أقدم (${olderBatch.earliestExpiry}) لنفس الدواء بالمخزن!`, 'error');
+            setSearchQuery('');
+            return;
+          }
+
           addToCart(exactBarcode, 'box');
           setSearchQuery('');
           return;
@@ -657,7 +715,8 @@ export function POSView({
         unitPrice: item.unitPrice,
         total_price: item.unitPrice * item.quantity,
         unit_cost: item.unitPrice * 0.75,
-        profit: (item.unitPrice * item.quantity) * 0.25
+        profit: (item.unitPrice * item.quantity) * 0.25,
+        expiry: item.expiry || item.expiry_date || null
       })),
       total_retail: currentTotal,
       total_cost: currentTotal * 0.75,
@@ -843,9 +902,19 @@ export function POSView({
                             {med.trade_name}
                           </span>
                         </div>
-                        <span className="text-[10px] font-bold font-mono bg-[#17233A] text-teal-300 border border-[#23324D] px-2 py-0.5 rounded-lg shrink-0">
-                          رف: {med.shelf}
-                        </span>
+                        <div className="flex items-center gap-1 shrink-0">
+                          {med.expiry && (
+                            <span
+                              className="text-[10px] font-bold font-mono bg-amber-500/15 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded-lg shrink-0"
+                              title="أقرب تاريخ صلاحية متاح للبيع (يتم بيع الأقدم أولاً تلقائياً)"
+                            >
+                              صلاحية: {med.expiry}
+                            </span>
+                          )}
+                          <span className="text-[10px] font-bold font-mono bg-[#17233A] text-teal-300 border border-[#23324D] px-2 py-0.5 rounded-lg shrink-0">
+                            رف: {med.shelf}
+                          </span>
+                        </div>
                       </div>
 
                       {/* Active Ingredient */}
@@ -1023,6 +1092,17 @@ export function POSView({
                 ))}
               </select>
 
+              {/* Quick Return Invoices Button */}
+              <button
+                type="button"
+                onClick={() => setShowReturnModal(true)}
+                className="h-8 px-2.5 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 text-xs font-bold flex items-center gap-1 transition-all cursor-pointer"
+                title="استرجاع مبيعات ومرتجع بالفترة والساعة (مرتجع)"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>مرتجع فواتير</span>
+              </button>
+
               {/* Quick Park Bill Touch Button */}
               <button
                 type="button"
@@ -1094,28 +1174,16 @@ export function POSView({
                         {item.trade_name}
                       </div>
 
-                      {/* Expiry Warning: if expiry is within 6 months or expired */}
-                      {item.expiry_date && (() => {
-                        try {
-                          const expDate = new Date(item.expiry_date);
-                          const now = new Date();
-                          const diffMonths = (expDate.getFullYear() - now.getFullYear()) * 12 + (expDate.getMonth() - now.getMonth());
-                          if (diffMonths <= 0) {
-                            return (
-                              <span className="inline-block mt-0.5 text-[9px] font-bold px-1.5 py-0.2 rounded bg-rose-500/20 text-rose-300 border border-rose-500/40">
-                                ⚠️ منتهي الصلاحية ({item.expiry_date})
-                              </span>
-                            );
-                          }
-                          if (diffMonths <= 6) {
-                            return (
-                              <span className="inline-block mt-0.5 text-[9px] font-bold px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40">
-                                ⏳ ينتهي خلال {diffMonths} شهر ({item.expiry_date})
-                              </span>
-                            );
-                          }
-                        } catch (e) {}
-                        return null;
+                      {/* Expiry Badge / Warning */}
+                      {(item.expiry || item.expiry_date) && (() => {
+                        const rawExp = item.expiry || item.expiry_date;
+                        return (
+                          <div className="flex items-center gap-1 mt-0.5">
+                            <span className="text-[9px] font-bold font-mono px-1.5 py-0.2 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                              صلاحية: {rawExp} (أقدم دفعة FEFO)
+                            </span>
+                          </div>
+                        );
                       })()}
                       
                       {/* Unit Price indicator */}
@@ -1507,6 +1575,26 @@ export function POSView({
         itemsCount={shiftInvoicesCount}
       />
 
+      {/* Advanced Return / Refund Modal by Date & Time */}
+      <ReturnInvoiceModal
+        isOpen={showReturnModal}
+        onClose={() => {
+          setShowReturnModal(false);
+          searchInputRef.current?.focus();
+        }}
+        currentUser={currentUser}
+        currentShift={currentShift}
+        onRefundCompleted={async () => {
+          try {
+            const refreshed = await sqliteService.searchMedicines(searchQuery, 50);
+            if (Array.isArray(refreshed)) setSqliteMedicines(refreshed);
+          } catch (e) {}
+          if (typeof onSaleCompleted === 'function') {
+            await onSaleCompleted();
+          }
+        }}
+      />
+
       {/* Blocking banner when no shift is open */}
       {!isShiftOpen && (
         <div className="px-3.5 pt-3 bg-[#111A2B] border-b border-rose-500/40">
@@ -1526,6 +1614,66 @@ export function POSView({
                 🔓 فتح وردية الآن
               </button>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* FEFO Strict Expiry Alert Modal */}
+      {fefoAlertModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in">
+          <div className="w-full max-w-md bg-[#111A2B] border-2 border-rose-500/70 rounded-2xl shadow-2xl p-5 text-right font-cairo">
+            <div className="w-14 h-14 rounded-2xl bg-rose-500/20 border border-rose-500/40 flex items-center justify-center mx-auto mb-3 text-rose-400 animate-pulse">
+              <AlertTriangle className="w-8 h-8" />
+            </div>
+
+            <h3 className="text-base font-black text-rose-300 text-center mb-1">
+              عفواً! هناك صلاحية أقدم من هذا المنتج
+            </h3>
+            <p className="text-xs text-slate-300 text-center mb-4 leading-relaxed">
+              تم رفض إتمام البيع التزاماً بقواعد الصرف الصيدلي الذكي (FEFO). يجب بيع الدفعة الأقدم أولاً لتفادي ركود أو انتهاء الصلاحيات.
+            </p>
+
+            <div className="bg-[#17233A] border border-[#23324D] rounded-xl p-3.5 space-y-2 text-xs mb-4">
+              <div className="flex justify-between items-center text-slate-300">
+                <span>اسم الدواء:</span>
+                <span className="font-bold text-white text-sm">{fefoAlertModal.medicineName}</span>
+              </div>
+              <div className="flex justify-between items-center text-slate-400">
+                <span>صلاحية العلبة الممسوحة (جديدة):</span>
+                <span className="font-mono font-bold text-slate-300 bg-slate-800 px-2 py-0.5 rounded">{fefoAlertModal.scannedExpiry || 'أحدث'}</span>
+              </div>
+              <div className="flex justify-between items-center text-rose-300 pt-1 border-t border-[#23324D]">
+                <span className="font-bold">الصلاحية الأقدم الواجب بيعها أولاً:</span>
+                <span className="font-mono font-black text-rose-400 bg-rose-500/20 border border-rose-500/40 px-2.5 py-1 rounded-lg text-sm">
+                  {fefoAlertModal.oldestExpiry}
+                </span>
+              </div>
+              {fefoAlertModal.oldestBatch && (
+                <div className="flex justify-between items-center text-slate-400 text-[11px]">
+                  <span>رقم تشغيلة الدفعة القديمة:</span>
+                  <span className="font-mono text-amber-300">{fefoAlertModal.oldestBatch}</span>
+                </div>
+              )}
+              {fefoAlertModal.boxesAvailable > 0 && (
+                <div className="flex justify-between items-center text-amber-300 text-[11px]">
+                  <span>الكمية المتبقية من الدفعة القديمة:</span>
+                  <span className="font-bold font-mono">{fefoAlertModal.boxesAvailable} علبة</span>
+                </div>
+              )}
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setFefoAlertModal(null);
+                  searchInputRef.current?.focus();
+                }}
+                className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-rose-500 to-amber-500 hover:from-rose-400 hover:to-amber-400 text-slate-950 font-black text-xs transition-all shadow-md active:scale-95 cursor-pointer"
+              >
+                فهمت، سأقوم ببيع الصلاحية الأقدم أولاً
+              </button>
+            </div>
           </div>
         </div>
       )}
