@@ -1,13 +1,14 @@
 import React, { useState } from 'react';
 import { X, DollarSign, Printer, CheckCircle2, AlertCircle, CreditCard, Wallet, Smartphone, Sparkles } from 'lucide-react';
 import { playCashDrawerSound } from '../utils/sound';
+import { getPharmacyName } from '../utils/pharmacyIdentity';
 
 export function PaymentReceiptModal({
   isOpen,
   onClose,
   customer,
   onCollectPayment,
-  pharmacyName = 'صيدلية النخبة الحديثة'
+  pharmacyName = getPharmacyName()
 }) {
   const [amount, setAmount] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('كاش');

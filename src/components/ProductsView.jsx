@@ -28,6 +28,7 @@ import {
 import { ProductModal } from './ProductModal';
 import { BarcodeStickerModal } from './BarcodeStickerModal';
 import { StockTakeModal } from './StockTakeModal';
+import { confirmDialog } from './ConfirmDialog';
 import { sqliteService } from '../db/sqliteService';
 import { hasPermission } from '../utils/permissions';
 
@@ -900,7 +901,12 @@ export function ProductsView({ currentUser, medicines = [], onSaveMedicine, onDe
                                 <button
                                   type="button"
                                   onClick={async () => {
-                                    if (window.confirm(`هل أنت متأكد من حذف الصنف [${med.trade_name_ar || med.trade_name}] نهائياً؟`)) {
+                                    if (await confirmDialog({
+                                      title: 'حذف صنف نهائياً',
+                                      message: `هل أنت متأكد من حذف الصنف [${med.trade_name_ar || med.trade_name}] نهائياً؟`,
+                                      confirmLabel: 'حذف الصنف',
+                                      danger: true
+                                    })) {
                                       try {
                                         await sqliteService.deleteMedicine(med.id);
                                         if (onDeleteMedicine) onDeleteMedicine(med.id);

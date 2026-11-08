@@ -1,12 +1,13 @@
 import React from 'react';
 import { X, Printer, FileText, CheckCircle2 } from 'lucide-react';
+import { getPharmacyName } from '../utils/pharmacyIdentity';
 
 export function ExpiryReportModal({
   isOpen,
   onClose,
   batches,
   supplierFilter,
-  pharmacyName = 'صيدلية النخبة الحديثة'
+  pharmacyName = getPharmacyName()
 }) {
   if (!isOpen) return null;
 

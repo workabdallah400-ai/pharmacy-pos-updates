@@ -12,6 +12,7 @@ import {
   FileText
 } from 'lucide-react';
 import { sqliteService } from '../db/sqliteService';
+import { confirmDialog } from './ConfirmDialog';
 
 export function StockTakeModal({ isOpen, onClose, currentUser, onComplete }) {
   const [activeTab, setActiveTab] = useState('new'); // 'new' | 'history'
@@ -197,11 +198,20 @@ export function StockTakeModal({ isOpen, onClose, currentUser, onComplete }) {
 
   const handleSaveStockTake = async () => {
     if (discrepancies.length === 0) {
-      if (!window.confirm('لم يتم رصد أي فروقات بين الرصيد الفعلي والمسجل. هل تريد حفظ جلسة الجرد كمطابقة 100%؟')) {
+      if (!(await confirmDialog({
+        title: 'حفظ جلسة الجرد',
+        message: 'لم يتم رصد أي فروقات بين الرصيد الفعلي والمسجل. هل تريد حفظ جلسة الجرد كمطابقة 100%؟',
+        confirmLabel: 'حفظ الجرد'
+      }))) {
         return;
       }
     } else {
-      if (!window.confirm(`تم رصد فروقات في (${discrepancies.length}) صنف بقيمة إجمالية (${totalDiscrepancyValue.toFixed(2)} ج.م).\nهل تريد اعتماد التسوية وتحديث رصيد المخزن الفعلي فوراً؟`)) {
+      if (!(await confirmDialog({
+        title: 'اعتماد تسوية الجرد',
+        message: `تم رصد فروقات في (${discrepancies.length}) صنف بقيمة إجمالية (${totalDiscrepancyValue.toFixed(2)} ج.م).\nهل تريد اعتماد التسوية وتحديث رصيد المخزن الفعلي فوراً؟`,
+        confirmLabel: 'اعتماد التسوية',
+        danger: true
+      }))) {
         return;
       }
     }

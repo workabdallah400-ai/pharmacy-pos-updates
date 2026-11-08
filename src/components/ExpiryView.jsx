@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { EditBatchModal } from './EditBatchModal';
 import { ExpiryReportModal } from './ExpiryReportModal';
+import { confirmDialog } from './ConfirmDialog';
 import { playBarcodeBeep, playCashDrawerSound } from '../utils/sound';
 import { sqliteService } from '../db/sqliteService';
 
@@ -193,9 +194,12 @@ export function ExpiryView({
 
   // Destroy / Dispose of Batch (إتلاف وإعدام)
   const handleDisposeBatch = async (batch) => {
-    const confirm = window.confirm(
-      `هل أنت متأكد من رغبتك في إتلاف وإعدام تشغيلة (${batch.trade_name_ar || batch.trade_name}) رقم (${batch.batch_no}) وإخراجها من رصيد المخزن نهائياً؟`
-    );
+    const confirm = await confirmDialog({
+      title: 'إتلاف وإعدام تشغيلة',
+      message: `هل أنت متأكد من رغبتك في إتلاف وإعدام تشغيلة (${batch.trade_name_ar || batch.trade_name}) رقم (${batch.batch_no}) وإخراجها من رصيد المخزن نهائياً؟`,
+      confirmLabel: 'إتلاف التشغيلة',
+      danger: true
+    });
     if (!confirm) return;
 
     try {
@@ -242,11 +246,14 @@ export function ExpiryView({
 
     const supName = targetBatches[0]?.supplier_name || 'شركة التوزيع';
 
-    const confirm = window.confirm(
-      `تأكيد تحويل (${targetBatches.length}) تشغيلة بإجمالي قيمة (${totalReturnAmount.toFixed(
+    const confirm = await confirmDialog({
+      title: 'تحويل تشغيلات كمرتجع للمورد',
+      message: `تأكيد تحويل (${targetBatches.length}) تشغيلة بإجمالي قيمة (${totalReturnAmount.toFixed(
         2
-      )} ج.م) كمرتجع رسمي لـ [${supName}] وخصمها من المديونية؟`
-    );
+      )} ج.م) كمرتجع رسمي لـ [${supName}] وخصمها من المديونية؟`,
+      confirmLabel: 'تحويل كمرتجع',
+      danger: true
+    });
     if (!confirm) return;
 
     // Remove returned batches from active inventory (and from persisted purchase items)

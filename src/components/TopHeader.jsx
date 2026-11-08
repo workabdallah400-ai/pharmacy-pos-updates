@@ -2,9 +2,14 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Minus, Square, X, Clock, Calendar, CheckCircle2, Wifi, WifiOff, Cloud, RefreshCw, Sparkles, Sun, Moon, ZoomIn, ZoomOut } from 'lucide-react';
 import { useThemeAndFontSize } from '../utils/useThemeAndFontSize';
 import { sqliteService } from '../db/sqliteService';
+import { getPharmacyName } from '../utils/pharmacyIdentity';
+
+// Injected at build time from package.json so the header can never drift from
+// the real release version again.
+const APP_VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '1.4.18';
 
 export function TopHeader({
-  pharmacyName = 'صيدلية النخبة الحديثة',
+  pharmacyName = getPharmacyName(),
   shiftNumber = 1,
   isShiftOpen = true,
   licenseInfo = null,
@@ -208,7 +213,7 @@ export function TopHeader({
               الفرع الرئيسي
             </span>
           </div>
-          <div className="text-[11px] text-slate-400 font-medium">نظام نقاط البيع وإدارة الصيدليات v1.0</div>
+          <div className="text-[11px] text-slate-400 font-medium">نظام نقاط البيع وإدارة الصيدليات v{APP_VERSION}</div>
         </div>
       </div>
 

@@ -31,7 +31,7 @@ import { OpenShiftModal } from './OpenShiftModal';
 import { playBarcodeBeep, playCashDrawerSound } from '../utils/sound';
 import { sqliteService } from '../db/sqliteService';
 
-export function ShiftsView({ currentShift: propCurrentShift, onUpdateCurrentShift }) {
+export function ShiftsView({ currentShift: propCurrentShift, onUpdateCurrentShift, currentUser = null }) {
   // Current active shift
   const [currentShift, setCurrentShift] = useState(() => {
     if (propCurrentShift !== undefined) return propCurrentShift;
@@ -441,6 +441,7 @@ export function ShiftsView({ currentShift: propCurrentShift, onUpdateCurrentShif
       {showOpenModal && (
         <OpenShiftModal
           isOpen={true}
+          currentUser={currentUser}
           onClose={() => setShowOpenModal(false)}
           onOpenShift={handleOpenShift}
           nextShiftId={(shiftsHistory[0]?.id || 0) + 1}

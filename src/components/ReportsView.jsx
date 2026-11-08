@@ -21,6 +21,7 @@ import {
 import { hasPermission } from '../utils/permissions';
 import { sqliteService } from '../db/sqliteService';
 import { ReturnInvoiceModal } from './ReturnInvoiceModal';
+import { confirmDialog } from './ConfirmDialog';
 
 export function ReportsView({ currentUser }) {
   const [invoices, setInvoices] = useState([]);
@@ -29,9 +30,18 @@ export function ReportsView({ currentUser }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [paymentFilter, setPaymentFilter] = useState('ALL');
 
-  // Date range filters for invoices log
-  const [fromDate, setFromDate] = useState('');
-  const [toDate, setToDate] = useState('');
+  // Date range filters for invoices log.
+  // Default to TODAY so the headline "إجمالي مبيعات اليوم" really is today's
+  // figure. It used to sum the last 200 invoices regardless of date, which made
+  // the number cumulative on any pharmacy that had been running for a while.
+  const todayKey = () => {
+    const d = new Date();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${d.getFullYear()}-${m}-${day}`;
+  };
+  const [fromDate, setFromDate] = useState(todayKey);
+  const [toDate, setToDate] = useState(todayKey);
 
   const [selectedInvoiceForModal, setSelectedInvoiceForModal] = useState(null);
   const [modalInvoiceItems, setModalInvoiceItems] = useState([]);
@@ -98,6 +108,23 @@ export function ReportsView({ currentUser }) {
     return Number.isFinite(explicit) && explicit !== 0 ? explicit : Math.max(0, getInvoiceTotal(inv) - getInvoiceCost(inv));
   };
 
+  // Invoices inside the selected range (defaults to today). Every headline
+  // figure below is computed from this set, not from the whole history.
+  const dayKeyOf = (row) => {
+    const raw = row.created_at || row.date_time || row.date || '';
+    return String(raw).slice(0, 10);
+  };
+  const inRange = (row) => {
+    const key = dayKeyOf(row);
+    if (!key) return false;
+    if (fromDate && key < fromDate) return false;
+    if (toDate && key > toDate) return false;
+    return true;
+  };
+
+  const scopedInvoices = invoices.filter(inRange);
+  const scopedRefunds = refunds.filter(inRange);
+
   // Compute refunds breakdown by payment method
   let totalRefundsAmount = 0;
   let cashRefunds = 0;
@@ -105,7 +132,7 @@ export function ReportsView({ currentUser }) {
   let instapayRefunds = 0;
   let creditRefunds = 0;
 
-  for (const ref of refunds) {
+  for (const ref of scopedRefunds) {
     const refAmount = Number(ref.refund_amount) || 0;
     totalRefundsAmount += refAmount;
     const method = String(ref.payment_method || 'كاش');
@@ -133,9 +160,9 @@ export function ReportsView({ currentUser }) {
   }
 
   // Gross invoice totals
-  const grossSales = invoices.reduce((acc, inv) => acc + getInvoiceTotal(inv), 0);
-  const totalCost = invoices.reduce((acc, inv) => acc + getInvoiceCost(inv), 0);
-  const grossProfit = invoices.reduce((acc, inv) => acc + getInvoiceProfit(inv), 0);
+  const grossSales = scopedInvoices.reduce((acc, inv) => acc + getInvoiceTotal(inv), 0);
+  const totalCost = scopedInvoices.reduce((acc, inv) => acc + getInvoiceCost(inv), 0);
+  const grossProfit = scopedInvoices.reduce((acc, inv) => acc + getInvoiceProfit(inv), 0);
 
   // Net totals (gross invoices minus all refunds)
   const totalSales = Math.max(0, grossSales - totalRefundsAmount);
@@ -143,17 +170,17 @@ export function ReportsView({ currentUser }) {
   const profitMargin = grossSales > 0 ? (grossProfit / grossSales) : 0.25;
   const netProfit = grossProfit - (totalRefundsAmount * profitMargin);
 
-  const invoicesCount = invoices.length;
+  const invoicesCount = scopedInvoices.length;
   const avgInvoiceValue = invoicesCount > 0 ? totalSales / invoicesCount : 0;
 
-  const grossCash = invoices.reduce((acc, i) => {
+  const grossCash = scopedInvoices.reduce((acc, i) => {
     if (i.payment_method === 'كاش') return acc + getInvoiceTotal(i);
     if (i.payment_method === 'مختلط') return acc + (Number(i.paid_cash) || 0);
     return acc;
   }, 0);
-  const grossVisa = invoices.filter((i) => i.payment_method === 'فيزا').reduce((acc, i) => acc + getInvoiceTotal(i), 0);
-  const grossInstapay = invoices.filter((i) => i.payment_method === 'إنستاباي').reduce((acc, i) => acc + getInvoiceTotal(i), 0);
-  const grossCredit = invoices.reduce((acc, i) => {
+  const grossVisa = scopedInvoices.filter((i) => i.payment_method === 'فيزا').reduce((acc, i) => acc + getInvoiceTotal(i), 0);
+  const grossInstapay = scopedInvoices.filter((i) => i.payment_method === 'إنستاباي').reduce((acc, i) => acc + getInvoiceTotal(i), 0);
+  const grossCredit = scopedInvoices.reduce((acc, i) => {
     if (i.payment_method === 'آجل') return acc + getInvoiceTotal(i);
     if (i.payment_method === 'مختلط') return acc + (Number(i.paid_credit) || 0);
     return acc;
@@ -261,7 +288,9 @@ export function ReportsView({ currentUser }) {
           {/* Total Sales */}
           <div className="bg-[#111A2B] border border-[#23324D] rounded-2xl p-4 flex items-center justify-between shadow-sm">
             <div>
-              <span className="text-xs text-slate-400 font-medium block mb-1">إجمالي مبيعات اليوم</span>
+              <span className="text-xs text-slate-400 font-medium block mb-1">
+                {fromDate === toDate && fromDate === todayKey() ? 'إجمالي مبيعات اليوم' : 'إجمالي المبيعات (الفترة المحددة)'}
+              </span>
               <div className="text-2xl font-black text-white font-mono" dir="ltr">
                 {totalSales.toFixed(2)} <span className="text-xs font-bold text-teal-300">ج.م</span>
               </div>
@@ -717,7 +746,12 @@ export function ReportsView({ currentUser }) {
                       alert('تم استرجاع هذه الفاتورة بالكامل مسبقاً.');
                       return;
                     }
-                    if (!window.confirm(`هل أنت متأكد من استرجاع الفاتورة #${selectedInvoiceForModal.invoice_number || selectedInvoiceForModal.id} بقيمة ${remainingToRefund.toFixed(2)} ج.م ورد البضاعة للمخزن والمبلغ للعميل؟`)) return;
+                    if (!(await confirmDialog({
+                      title: 'تأكيد استرجاع الفاتورة',
+                      message: `هل أنت متأكد من استرجاع الفاتورة #${selectedInvoiceForModal.invoice_number || selectedInvoiceForModal.id} بقيمة ${remainingToRefund.toFixed(2)} ج.م ورد البضاعة للمخزن والمبلغ للعميل؟`,
+                      confirmLabel: 'استرجاع الفاتورة',
+                      danger: true
+                    }))) return;
                     try {
                       const items = await sqliteService.getInvoiceItems(selectedInvoiceForModal.id);
                       await sqliteService.refundInvoice({

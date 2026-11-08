@@ -28,6 +28,7 @@ import { AddCustomShortageModal } from './AddCustomShortageModal';
 import { WhatsAppPreviewModal } from './WhatsAppPreviewModal';
 import { PrintShortagesModal } from './PrintShortagesModal';
 import { playBarcodeSuccessSound } from '../utils/sound';
+import { getPharmacyName } from '../utils/pharmacyIdentity';
 
 export function ShortagesView({
   medicines,
@@ -292,7 +293,7 @@ export function ShortagesView({
     });
 
     let lines = [
-      `*📋 طلبيـة نواقـص - صيدلية النخبة الحديثة*`,
+      `*📋 طلبيـة نواقـص - ${getPharmacyName()}*`,
       `📅 التاريخ: ${dateStr}`,
       `🏢 موجهة إلى: *${companyName}*`,
       `-----------------------------------------`

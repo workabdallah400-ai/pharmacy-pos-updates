@@ -16,6 +16,7 @@ import {
   PackageCheck
 } from 'lucide-react';
 import { sqliteService } from '../db/sqliteService';
+import { confirmDialog } from './ConfirmDialog';
 
 export function ReturnInvoiceModal({
   isOpen,
@@ -195,7 +196,12 @@ export function ReturnInvoiceModal({
       return;
     }
 
-    if (!window.confirm(`تأكيد استرجاع (${itemsToSubmit.length}) صنف بقيمة صافية (${effectiveRefundAmount.toFixed(2)} ج.م) ورد الأصناف للمخزن؟`)) {
+    if (!(await confirmDialog({
+      title: 'تأكيد استرجاع الأصناف',
+      message: `تأكيد استرجاع (${itemsToSubmit.length}) صنف بقيمة صافية (${effectiveRefundAmount.toFixed(2)} ج.م) ورد الأصناف للمخزن؟`,
+      confirmLabel: 'استرجاع الأصناف',
+      danger: true
+    }))) {
       return;
     }
 

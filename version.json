@@ -1,11 +1,11 @@
 {
-  "version": "1.4.17",
-  "build_number": 22,
-  "release_date": "2026-11-07",
-  "title": "تحديث نظام صيدليتي 1.4.17",
-  "release_notes": "• إعداد حساب مدير جديد بدون قيود\n• حفظ هوية الصيدلية في قاعدة البيانات\n• فاتورة بيضاء دائماً\n• إزالة أكواد PIN وبوابة الموبايل",
-  "download_url": "https://github.com/workabdallah400-ai/pharmacy-pos-updates/releases/download/v1.4.17/PharmacyPOS-Setup-v1.4.17.exe",
-  "file_size_bytes": 142430213,
-  "sha256": "beb8fe705633a8230767b5ab74aa59e3157fedfc915fdf51fe0991d8162ab854",
+  "version": "1.4.18",
+  "build_number": 23,
+  "release_date": "2026-11-08",
+  "title": "تحديث نظام صيدليتي 1.4.18",
+  "release_notes": "• اسم الكاشير في الوردية بقى هو المستخدم المسجل فعلياً بدل اسم ثابت\n• استبدال نوافذ التأكيد المزمّنة بنوافذ React (منع تجميد التطبيق في Electron)\n• اسم الصيدلية بقى من الإعدادات في كل الإيصالات والتقارير ورسائل العملاء\n• إحصائيات التقارير بقت محصورة في الفترة المحددة (اليوم افتراضياً)\n• رقم الإصدار في الواجهة بقى من package.json\n• إغلاق تقرير الوردية بمفتاح Escape",
+  "download_url": "https://github.com/workabdallah400-ai/pharmacy-pos-updates/releases/download/v1.4.18/PharmacyPOS-Setup-v1.4.18.exe",
+  "file_size_bytes": 0,
+  "sha256": "",
   "mandatory": false
 }

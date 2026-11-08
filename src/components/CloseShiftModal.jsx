@@ -33,6 +33,7 @@ import {
   localDateKey,
   readSettings
 } from '../utils/reportServer';
+import { getPharmacyName } from '../utils/pharmacyIdentity';
 
 export function CloseShiftModal({
   isOpen = true,
@@ -44,7 +45,7 @@ export function CloseShiftModal({
   cashDiscrepancy: propDiscrepancy,
   onConfirmCloseShift,
   onConfirm,
-  pharmacyName = 'صيدلية النخبة الحديثة'
+  pharmacyName = getPharmacyName()
 }) {
   const activeShift = shiftData || shift;
   const onConfirmAction = onConfirmCloseShift || onConfirm;
@@ -68,6 +69,20 @@ export function CloseShiftModal({
   const [localReportUrl, setLocalReportUrl] = useState('');
   const [dailyUrl, setDailyUrl] = useState('');
   const [copiedDaily, setCopiedDaily] = useState(false);
+
+  // Escape closes the report. Without this the shift report stayed on top of the
+  // screen after a close and blocked every other action until dismissed by hand.
+  useEffect(() => {
+    if (!isOpen || typeof onClose !== 'function') return;
+    const onKey = (e) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isOpen, onClose]);
 
   // Load audit data & generate QR code
   useEffect(() => {

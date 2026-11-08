@@ -3,6 +3,7 @@ import { X, ShieldCheck, RefreshCw, ExternalLink, Copy, Link2 } from 'lucide-rea
 import QRCode from 'qrcode';
 import { sqliteService } from '../db/sqliteService';
 import { resolveShiftReportUrl, resolveLocalReportUrl, buildDailySummaryUrl, getReportBaseUrl, localDateKey, readSettings, ensureCloudToken } from '../utils/reportServer';
+import { getPharmacyName } from '../utils/pharmacyIdentity';
 
 export function MobileQRModal({ isOpen, onClose, shiftTotal = 0, itemsCount = 0 }) {
   const [qrDataUrl, setQrDataUrl] = useState('');
@@ -32,7 +33,7 @@ export function MobileQRModal({ isOpen, onClose, shiftTotal = 0, itemsCount = 0 
         // daily/permanent URLs are not rejected with 401.
         ensureCloudToken();
         const settings = readSettings() || {};
-        const pharmacyName = settings.pharmacyName || 'صيدلية النخبة الحديثة';
+        const pharmacyName = settings.pharmacyName || getPharmacyName();
         const pharmacyId = settings.cloudPharmacyId || 'PHARMACY-LOCAL';
         const shiftId = shift?.id || s?.id || '';
 

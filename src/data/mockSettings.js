@@ -1,7 +1,7 @@
 // Default System Configuration & Settings
 export const DEFAULT_SETTINGS = {
   // 1. Branding & Receipt Customization
-  pharmacyName: 'صيدلية النخبة الحديثة',
+  pharmacyName: 'صيدليتي',
   pharmacyBranch: 'الفرع الرئيسي - مدينة نصر',
   address: 'شارع مصطفى النحاس - تقاطع مكرم عبيد - القاهرة',
   phone: '0226710099',

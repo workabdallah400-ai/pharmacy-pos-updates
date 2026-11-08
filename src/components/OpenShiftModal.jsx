@@ -1,14 +1,54 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { X, Unlock, User, DollarSign, Clock, Sparkles, AlertCircle } from 'lucide-react';
 import { playCashDrawerSound } from '../utils/sound';
+import { sqliteService } from '../db/sqliteService';
 
-export function OpenShiftModal({ isOpen, onClose, onOpenShift }) {
-  const [cashierName, setCashierName] = useState('د. سارة أحمد');
+export function OpenShiftModal({ isOpen, onClose, onOpenShift, currentUser = null }) {
+  // The cashier defaults to whoever is actually logged in. A hardcoded name here
+  // used to stamp every shift with the same person, which broke accountability in
+  // pharmacies with more than one cashier.
+  const loggedInName = currentUser?.full_name || currentUser?.name || '';
+  const [cashierName, setCashierName] = useState(loggedInName);
+  const [cashiers, setCashiers] = useState([]);
   const [openingCash, setOpeningCash] = useState('500');
   const [shiftNumber, setShiftNumber] = useState('1');
   const [error, setError] = useState('');
 
+  // Load the real active users so the dropdown lists actual staff, not placeholders.
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const users = await sqliteService.getUsers();
+        if (cancelled || !Array.isArray(users)) return;
+        const active = users.filter((u) => Number(u.is_active) !== 0);
+        setCashiers(active);
+      } catch (e) {
+        // Non-fatal: the logged-in user is still selectable below.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [isOpen]);
+
+  // Re-sync the default whenever the modal opens for a different user.
+  useEffect(() => {
+    if (isOpen && loggedInName) setCashierName(loggedInName);
+  }, [isOpen, loggedInName]);
+
   if (!isOpen) return null;
+
+  // Always offer the logged-in user, even if the user list failed to load.
+  const options = (() => {
+    const list = cashiers.map((u) => ({
+      value: u.full_name || u.username,
+      label: `${u.full_name || u.username}${u.role === 'admin' ? ' (مدير)' : u.role === 'cashier' ? ' (كاشير)' : ''}`
+    }));
+    if (loggedInName && !list.some((o) => o.value === loggedInName)) {
+      list.unshift({ value: loggedInName, label: `${loggedInName} (المستخدم الحالي)` });
+    }
+    return list;
+  })();
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -90,10 +130,9 @@ export function OpenShiftModal({ isOpen, onClose, onOpenShift }) {
               onChange={(e) => setCashierName(e.target.value)}
               className="w-full bg-[#0B1220] border border-[#23324D] focus:border-teal-400 rounded-xl px-3.5 py-2.5 text-sm font-bold text-white focus:outline-none"
             >
-              <option value="د. سارة أحمد">د. سارة أحمد (كاشير مسائي)</option>
-              <option value="د. أحمد محمود">د. أحمد محمود (كاشير صباحي)</option>
-              <option value="أ. محمد طارق">أ. محمد طارق (صيدلي مساعد)</option>
-              <option value="المدير المسؤول">المدير المسؤول (Admin)</option>
+              {options.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
             </select>
           </div>
 

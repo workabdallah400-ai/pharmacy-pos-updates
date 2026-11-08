@@ -1,7 +1,8 @@
 import React from 'react';
 import { X, Printer, Barcode, CheckCircle2 } from 'lucide-react';
+import { getPharmacyName } from '../utils/pharmacyIdentity';
 
-export function BarcodeStickerModal({ isOpen, onClose, medicine, pharmacyName = 'صيدلية النخبة الحديثة' }) {
+export function BarcodeStickerModal({ isOpen, onClose, medicine, pharmacyName = getPharmacyName() }) {
   if (!isOpen || !medicine) return null;
 
   const handlePrint = () => {

@@ -17,6 +17,7 @@ import { PlaceholderView } from './components/PlaceholderView';
 import { ActivationScreen } from './components/ActivationScreen';
 import { FirstRunSetupScreen } from './components/FirstRunSetupScreen';
 import { OpenShiftModal } from './components/OpenShiftModal';
+import { ConfirmHost } from './components/ConfirmDialog';
 import { checkLicenseStatus } from './utils/licenseManager';
 import {
   initReportServer,
@@ -896,6 +897,7 @@ export default function App() {
           ) : activeTab === 'shifts' ? (
             <ShiftsView
               currentShift={currentShift}
+              currentUser={currentUser}
               onUpdateCurrentShift={setCurrentShift}
             />
           ) : activeTab === 'reports' ? (
@@ -926,10 +928,14 @@ export default function App() {
       {showOpenShiftModal && (
         <OpenShiftModal
           isOpen={true}
+          currentUser={currentUser}
           onClose={() => setShowOpenShiftModal(false)}
           onOpenShift={handleOpenShift}
         />
       )}
+
+      {/* Global non-blocking confirmation host (replaces window.confirm) */}
+      <ConfirmHost />
     </div>
   );
 }

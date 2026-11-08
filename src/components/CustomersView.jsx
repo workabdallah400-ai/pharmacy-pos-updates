@@ -26,6 +26,7 @@ import { PaymentReceiptModal } from './PaymentReceiptModal';
 import { CustomerStatementModal } from './CustomerStatementModal';
 import { playBarcodeBeep, playCashDrawerSound } from '../utils/sound';
 import { sqliteService } from '../db/sqliteService';
+import { getPharmacyName } from '../utils/pharmacyIdentity';
 
 export function CustomersView() {
   const [customers, setCustomers] = useState([]);
@@ -226,7 +227,7 @@ export function CustomersView() {
       return;
     }
 
-    const message = `مرحباً ${c.name}،\nتذكركم صيدلية النخبة الحديثة بأن إجمالي حسابكم الآجل المستحق حالياً هو: ${Number(c.balance || 0).toFixed(
+    const message = `مرحباً ${c.name}،\nتذكركم ${getPharmacyName()} بأن إجمالي حسابكم الآجل المستحق حالياً هو: ${Number(c.balance || 0).toFixed(
       2
     )} ج.م.\nشاكرين لكم حسن تعاونكم الدائم، ونتمنى لكم دوام الصحة والعافية!`;
 

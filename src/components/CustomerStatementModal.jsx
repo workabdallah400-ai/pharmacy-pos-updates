@@ -1,11 +1,12 @@
 import React from 'react';
 import { X, Printer, FileText, ArrowDownLeft, ArrowUpRight, User, Phone, MapPin, Calendar, DollarSign } from 'lucide-react';
+import { getPharmacyName } from '../utils/pharmacyIdentity';
 
 export function CustomerStatementModal({
   isOpen,
   onClose,
   customer,
-  pharmacyName = 'صيدلية النخبة الحديثة'
+  pharmacyName = getPharmacyName()
 }) {
   if (!isOpen || !customer) return null;
 

@@ -1,12 +1,13 @@
 import React, { useRef } from 'react';
 import { X, Printer, FileText, CheckCircle2 } from 'lucide-react';
+import { getPharmacyName } from '../utils/pharmacyIdentity';
 
 export function PrintShortagesModal({
   isOpen,
   onClose,
   items,
   supplierFilter,
-  pharmacyName = 'صيدلية النخبة الحديثة'
+  pharmacyName = getPharmacyName()
 }) {
   const printRef = useRef(null);
 

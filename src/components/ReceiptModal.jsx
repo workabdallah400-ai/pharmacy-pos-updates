@@ -1,7 +1,8 @@
 import React from 'react';
 import { X, Printer, CheckCircle2, Receipt } from 'lucide-react';
+import { getPharmacyName } from '../utils/pharmacyIdentity';
 
-export function ReceiptModal({ isOpen, onClose, invoice, pharmacyName = 'صيدلية النخبة الحديثة', cashierName = 'د. أحمد' }) {
+export function ReceiptModal({ isOpen, onClose, invoice, pharmacyName = getPharmacyName(), cashierName = 'د. أحمد' }) {
   if (!isOpen || !invoice) return null;
 
   const handlePrint = () => {
