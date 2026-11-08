@@ -5,7 +5,7 @@
   "title": "تحديث نظام صيدليتي 1.4.18",
   "release_notes": "• اسم الكاشير في الوردية بقى هو المستخدم المسجل فعلياً بدل اسم ثابت\n• استبدال نوافذ التأكيد المزمّنة بنوافذ React (منع تجميد التطبيق في Electron)\n• اسم الصيدلية بقى من الإعدادات في كل الإيصالات والتقارير ورسائل العملاء\n• إحصائيات التقارير بقت محصورة في الفترة المحددة (اليوم افتراضياً)\n• رقم الإصدار في الواجهة بقى من package.json\n• إغلاق تقرير الوردية بمفتاح Escape",
   "download_url": "https://github.com/workabdallah400-ai/pharmacy-pos-updates/releases/download/v1.4.18/PharmacyPOS-Setup-v1.4.18.exe",
-  "file_size_bytes": 0,
-  "sha256": "",
+  "file_size_bytes": 142431108,
+  "sha256": "e35b8ed8cec055833f7cce1dd3ea2ecf24bf1448a24cbd960d15a7a7224837d4",
   "mandatory": false
 }
