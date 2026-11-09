@@ -1,10 +1,10 @@
 {
-  "version": "1.4.18",
-  "build_number": 23,
-  "release_date": "2026-11-08",
-  "title": "تحديث نظام صيدليتي 1.4.18",
-  "release_notes": "• اسم الكاشير في الوردية بقى هو المستخدم المسجل فعلياً بدل اسم ثابت\n• استبدال نوافذ التأكيد المزمّنة بنوافذ React (منع تجميد التطبيق في Electron)\n• اسم الصيدلية بقى من الإعدادات في كل الإيصالات والتقارير ورسائل العملاء\n• إحصائيات التقارير بقت محصورة في الفترة المحددة (اليوم افتراضياً)\n• رقم الإصدار في الواجهة بقى من package.json\n• إغلاق تقرير الوردية بمفتاح Escape",
-  "download_url": "https://github.com/workabdallah400-ai/pharmacy-pos-updates/releases/download/v1.4.18/PharmacyPOS-Setup-v1.4.18.exe",
+  "version": "1.4.19",
+  "build_number": 24,
+  "release_date": "2026-11-09",
+  "title": "تحديث نظام صيدليتي 1.4.19",
+  "release_notes": "• تصحيح 3,569 باركود حقيقي للأصناف عبر مطابقة صارمة مع مصدر المنتجات\n• التحقق من صحة EAN-13 ومنع تكرار الباركودات\n• لم يتم تعديل أي سعر تلقائياً\n• الإبقاء على حسابات المستخدمين والبيانات الحالية",
+  "download_url": "https://github.com/workabdallah400-ai/pharmacy-pos-updates/releases/download/v1.4.19/PharmacyPOS-Setup-v1.4.19.exe",
   "file_size_bytes": 142431108,
   "sha256": "e35b8ed8cec055833f7cce1dd3ea2ecf24bf1448a24cbd960d15a7a7224837d4",
   "mandatory": false
