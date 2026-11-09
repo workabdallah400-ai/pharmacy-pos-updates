@@ -1,7 +1,7 @@
 {
   "name": "pharmacy-pos-ui",
   "private": true,
-  "version": "1.4.23",
+  "version": "1.4.24",
   "type": "module",
   "description": "PharmacyPOS — نظام إدارة صيدليات ونقاط بيع بواجهة عربية مع تقارير ورديات ذكية",
   "author": "PharmacyPOS",
@@ -47,11 +47,23 @@
     },
     "files": [
       "dist/**/*",
+      "!dist/pharmacy_pos.db",
+      "!dist/sql-wasm.wasm",
       "electron/**/*",
-      "server/**/*",
-      "!server/updates/**",
+      "server/index.cjs",
+      "server/report-core.cjs",
       "scripts/cloudflare-tunnel.cjs",
-      "package.json"
+      "package.json",
+      "!server/updates/**",
+      "!server/README.md",
+      "!node_modules/react/**",
+      "!node_modules/react-dom/**",
+      "!node_modules/lucide-react/**",
+      "!node_modules/qrcode/**",
+      "!node_modules/sql.js/**",
+      "!node_modules/xlsx/**",
+      "!node_modules/scheduler/**",
+      "!node_modules/loose-envify/**"
     ],
     "extraResources": [
       {
