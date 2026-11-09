@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Pill, Sparkles, Wand2, CheckCircle2, AlertCircle } from 'lucide-react';
+import { X, Pill, Sparkles, CheckCircle2, AlertCircle } from 'lucide-react';
 import { PHARMACY_DOSAGE_UNITS, getUnitDisplayInfo } from '../utils/pharmacyUnits';
 
 const CATEGORIES = [
@@ -42,12 +42,6 @@ export function ProductModal({ isOpen = true, onClose, medicine, medicineToEdit,
 
   const [error, setError] = useState('');
 
-  function generateBarcode() {
-    // 13-digit Egyptian EAN-13 format starting with 622
-    const random10 = Math.floor(1000000000 + Math.random() * 9000000000);
-    return `622${random10}`;
-  }
-
   useEffect(() => {
     if (targetMedicine) {
       setFormData({
@@ -76,7 +70,7 @@ export function ProductModal({ isOpen = true, onClose, medicine, medicineToEdit,
         trade_name_ar: '',
         trade_name: '',
         generic_name: '',
-        barcode: generateBarcode(),
+        barcode: '',
         category: 'مسكنات وخافض حرارة',
         shelf: 'A-01',
         unit_type: 'tablets',
@@ -161,6 +155,10 @@ export function ProductModal({ isOpen = true, onClose, medicine, medicineToEdit,
     }
     if (!formData.price_box || parseFloat(formData.price_box) <= 0) {
       setError('يرجى إدخال سعر بيع العلبة بشكل صحيح');
+      return;
+    }
+    if (!String(formData.barcode || '').trim()) {
+      setError('الباركود إجباري للصنف الجديد ولا يتم توليده تلقائياً.');
       return;
     }
 
@@ -273,26 +271,19 @@ export function ProductModal({ isOpen = true, onClose, medicine, medicineToEdit,
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-semibold text-slate-300 mb-1">
-                الباركود الدولي أو المحلي
+                الباركود الدولي أو المحلي <span className="text-rose-400">*</span>
               </label>
               <div className="flex gap-1.5">
                 <input
                   type="text"
-                  placeholder="622..."
+                  placeholder="أدخل الباركود الحقيقي..."
+                  required
                   value={formData.barcode}
                   onChange={(e) => setFormData({ ...formData, barcode: e.target.value })}
                   className="flex-1 h-10 bg-[#17233A] border border-[#23324D] focus:border-teal-400 rounded-xl px-3 text-teal-300 font-mono text-xs outline-none"
                   dir="ltr"
                 />
-                <button
-                  type="button"
-                  onClick={() => setFormData({ ...formData, barcode: generateBarcode() })}
-                  className="px-2.5 h-10 bg-[#17233A] hover:bg-[#202E4C] text-slate-300 hover:text-white border border-[#23324D] rounded-xl text-xs flex items-center gap-1 transition-colors"
-                  title="توليد باركود تلقائي"
-                >
-                  <Wand2 className="w-3.5 h-3.5 text-teal-400" />
-                  <span className="text-[10px]">توليد</span>
-                </button>
+
               </div>
             </div>
 

@@ -296,12 +296,13 @@ export default function App() {
   const handleOpenShift = async (newShift) => {
     try {
       await sqliteService.openShift(newShift);
+      setCurrentShift(newShift);
+      localStorage.setItem('PHARMACY_ACTIVE_SHIFT', JSON.stringify(newShift));
+      setShowOpenShiftModal(false);
     } catch (e) {
       console.warn('SQLite open shift error:', e);
+      // Do not show a shift as open when persistence rejected it.
     }
-    setCurrentShift(newShift);
-    localStorage.setItem('PHARMACY_ACTIVE_SHIFT', JSON.stringify(newShift));
-    setShowOpenShiftModal(false);
   };
 
   // Startup License & Activation Guard State
@@ -620,45 +621,11 @@ export default function App() {
     );
   };
 
-  // Convert Shortage items directly to a new Purchase invoice!
-  const handleConvertToPurchase = (shortageItems, companyFilter) => {
-    // Determine supplier id
-    let matchedSupplier = suppliers[0];
-    if (companyFilter && companyFilter !== 'ALL') {
-      const found = suppliers.find((s) => s.name.includes(companyFilter));
-      if (found) matchedSupplier = found;
-    } else if (shortageItems[0]?.preferred_supplier) {
-      const found = suppliers.find((s) => s.name.includes(shortageItems[0].preferred_supplier));
-      if (found) matchedSupplier = found;
-    }
-
-    // Convert shortage items into purchase line items
-    const purchaseLines = shortageItems.map((item) => {
-      const unitPrice = item.price_box || 40;
-      const discount = 25.0; // standard 25% pharmacist margin
-      const netUnit = unitPrice * (1 - discount / 100);
-      const qty = item.order_quantity || 5;
-
-      return {
-        medicine_id: typeof item.id === 'number' ? item.id : null,
-        trade_name_ar: item.trade_name_ar || item.trade_name,
-        trade_name: item.trade_name,
-        quantity: qty,
-        bonus: 0,
-        price_box: unitPrice,
-        discount_pct: discount,
-        net_box_price: parseFloat(netUnit.toFixed(2)),
-        total_net: parseFloat((qty * netUnit).toFixed(2)),
-        batch_no: `BCH-${Math.floor(1000 + Math.random() * 9000)}`,
-        expiry: '12/2028'
-      };
-    });
-
-    setPendingPurchaseData({
-      supplierId: matchedSupplier.id,
-      items: purchaseLines
-    });
-
+  // Open a blank purchase invoice from shortages. The operator enters every
+  // supplier, invoice number, quantity, batch, expiry, price and discount.
+  // Nothing is invented or prefilled by this shortcut.
+  const handleConvertToPurchase = () => {
+    setPendingPurchaseData({ supplierId: null, items: [] });
     setActiveTab('purchases');
   };
 

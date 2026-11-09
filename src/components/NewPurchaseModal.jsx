@@ -59,7 +59,7 @@ export function NewPurchaseModal({
   const [tradeNameAr, setTradeNameAr] = useState('');
   const [tradeNameEn, setTradeNameEn] = useState('');
   const [priceBox, setPriceBox] = useState('');
-  const [quantity, setQuantity] = useState('10');
+  const [quantity, setQuantity] = useState('');
   const [bonus, setBonus] = useState('0');
   const [discountPct, setDiscountPct] = useState('0'); // Default 0 as requested!
   const [batchNo, setBatchNo] = useState('');
@@ -91,9 +91,8 @@ export function NewPurchaseModal({
 
       if (initialSupplierId) {
         setSelectedSupplierId(initialSupplierId);
-      } else if (combined.length > 0 && !selectedSupplierId) {
-        setSelectedSupplierId(combined[0].id);
-        setCustomSupplierName(combined[0].name);
+        const initialSupplier = combined.find((s) => s.id === Number(initialSupplierId));
+        if (initialSupplier) setCustomSupplierName(initialSupplier.name);
       }
     }).catch(console.warn);
 
@@ -151,6 +150,9 @@ export function NewPurchaseModal({
     setMedicineSearch(med.trade_name_ar || med.trade_name || '');
     setBarcodeInput(med.barcode || '');
     setPriceBox(med.price_box != null ? String(med.price_box) : '0');
+    // Reuse the medicine's currently recorded nearest expiry when available.
+    // The user can overwrite it for the incoming batch before adding the line.
+    setExpiry(med.expiry || '');
     setShowSearchDropdown(false);
     setError('');
     playBarcodeBeep();
@@ -242,6 +244,11 @@ export function NewPurchaseModal({
       return;
     }
 
+    if (!expiry.trim()) {
+      setError('تاريخ الصلاحية إجباري لكل صنف. أدخله يدوياً أو استخدم الصلاحية المسجلة للصنف.');
+      return;
+    }
+
     const newItem = {
       medicine_id: selectedMedicine?.id || null,
       barcode: barcodeInput.trim() || selectedMedicine?.barcode || '',
@@ -261,8 +268,8 @@ export function NewPurchaseModal({
       total_net: parseFloat(lineTotalNet.toFixed(2)),
       profit_per_box: parseFloat((unitRetail - netUnitCost).toFixed(2)),
       profit_margin_pct: unitRetail > 0 ? parseFloat((((unitRetail - netUnitCost) / unitRetail) * 100).toFixed(1)) : 0,
-      batch_no: batchNo.trim() || `BCH-${Math.floor(1000 + Math.random() * 9000)}`,
-      expiry: expiry.trim() || '12/2028'
+      batch_no: batchNo.trim(),
+      expiry: expiry.trim()
     };
 
     setItems((prev) => [...prev, newItem]);
@@ -275,7 +282,7 @@ export function NewPurchaseModal({
     setTradeNameAr('');
     setTradeNameEn('');
     setPriceBox('');
-    setQuantity('10');
+    setQuantity('');
     setBonus('0');
     // Keep discountPct as is for user convenience if they enter consecutive items with same discount
     setBatchNo('');
@@ -303,6 +310,13 @@ export function NewPurchaseModal({
       return;
     }
 
+    // All invoice identity fields are entered by the operator; never invent them.
+    const enteredInvoiceNo = supplierInvoiceNo.trim();
+    if (!enteredInvoiceNo) {
+      setError('رقم الفاتورة الورقية إجباري ولا يتم توليده تلقائياً.');
+      return;
+    }
+
     // Determine supplier name and id
     let supName = customSupplierName.trim();
     let supId = selectedSupplierId;
@@ -313,7 +327,8 @@ export function NewPurchaseModal({
     }
 
     if (!supName) {
-      supName = 'مورد عام / نقدي';
+      setError('اسم المورد إجباري ولا يمكن اعتماد مورد عام تلقائياً.');
+      return;
     }
 
     // Ensure supplier exists in DB
@@ -341,7 +356,7 @@ export function NewPurchaseModal({
       id: invoiceCode,
       shift_id: currentShiftId,
       invoice_code: invoiceCode,
-      supplier_invoice_no: supplierInvoiceNo.trim() || `INV-${Math.floor(1000 + Math.random() * 9000)}`,
+      supplier_invoice_no: enteredInvoiceNo,
       supplier_id: supId || Date.now(),
       supplier_name: supName,
       date: invoiceDate,
@@ -397,7 +412,7 @@ export function NewPurchaseModal({
             <div className="flex items-center justify-between mb-1">
               <label className="text-slate-300 font-bold flex items-center gap-1">
                 <Building2 className="w-3.5 h-3.5 text-teal-400" />
-                <span>شركة التوزيع (المورد) *</span>
+                <span>شركة التوزيع (المورد) <span className="text-rose-400">*</span></span>
               </label>
               <button
                 type="button"
@@ -462,10 +477,11 @@ export function NewPurchaseModal({
 
           {/* Supplier Paper Invoice Number */}
           <div>
-            <label className="block text-slate-300 font-semibold mb-1">رقم الفاتورة الورقية</label>
+            <label className="block text-slate-300 font-semibold mb-1">رقم الفاتورة الورقية <span className="text-rose-400">*</span></label>
             <input
               type="text"
               placeholder="مثال: INV-98421"
+              required
               value={supplierInvoiceNo}
               onChange={(e) => setSupplierInvoiceNo(e.target.value)}
               className="w-full h-10 bg-[#17233A] border border-[#23324D] focus:border-teal-400 rounded-xl px-3 text-teal-300 font-mono outline-none font-bold"

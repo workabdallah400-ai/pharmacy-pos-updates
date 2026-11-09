@@ -1,7 +1,7 @@
 {
   "name": "pharmacy-pos-ui",
   "private": true,
-  "version": "1.4.19",
+  "version": "1.4.20",
   "type": "module",
   "description": "PharmacyPOS — نظام إدارة صيدليات ونقاط بيع بواجهة عربية مع تقارير ورديات ذكية",
   "author": "PharmacyPOS",

@@ -2583,8 +2583,15 @@ class SQLiteService {
       shift_number = 1,
       cashier_name,
       opened_at = new Date().toISOString(),
-      opening_cash = 500.0
+      opening_cash
     } = shiftData;
+
+    if (!Number.isFinite(Number(opening_cash)) || Number(opening_cash) < 0) {
+      throw new Error('عهدة بداية الوردية يجب أن تكون صفراً أو مبلغاً موجباً.');
+    }
+    if (!String(cashier_name || '').trim()) {
+      throw new Error('اسم مسؤول الوردية إجباري.');
+    }
 
     // Close any previously opened shift
     this.db.run("UPDATE shifts SET status = 'CLOSED' WHERE status = 'OPEN'");
@@ -3497,6 +3504,25 @@ class SQLiteService {
         items = []
       } = purchaseData;
 
+      if (!String(supplier_name || '').trim()) {
+        throw new Error('اسم المورد إجباري ولا يمكن حفظ الفاتورة بدونه.');
+      }
+      if (!String(supplier_invoice_no || '').trim()) {
+        throw new Error('رقم الفاتورة الورقية إجباري ولا يتم توليده تلقائياً.');
+      }
+      if (!Array.isArray(items) || items.length === 0) {
+        throw new Error('يجب إضافة صنف واحد على الأقل إلى الفاتورة.');
+      }
+      for (const item of items) {
+        const qty = Number(item.quantity);
+        if (!Number.isFinite(qty) || qty <= 0) {
+          throw new Error(`كمية الصنف [${item.trade_name_ar || item.trade_name || ''}] يجب إدخالها يدوياً وتكون أكبر من صفر.`);
+        }
+        if (!String(item.expiry || '').trim()) {
+          throw new Error(`تاريخ صلاحية الصنف [${item.trade_name_ar || item.trade_name || ''}] إجباري.`);
+        }
+      }
+
       let activeShiftId = shift_id;
       if (!activeShiftId) {
         const curShift = await this.getCurrentShift();
@@ -3539,7 +3565,7 @@ class SQLiteService {
           id, item.medicine_id, item.trade_name, item.trade_name_ar,
           item.quantity, item.bonus || 0, item.price_box,
           item.discount_pct || 0, item.net_box_price,
-          item.total_net, item.batch_no || 'BCH-AUTO', item.expiry || '12/2028'
+          item.total_net, item.batch_no || null, String(item.expiry).trim()
         ]);
 
         // Augment stock in medicines
@@ -3558,8 +3584,11 @@ class SQLiteService {
           `, [itemExp]);
           this._syncMedicineNearestExpiry(item.medicine_id);
         } else if (!item.medicine_id && item.trade_name_ar) {
-          const newMedId = Date.now() + Math.floor(Math.random() * 1000);
-          const barcode = item.barcode || `622${Math.floor(1000000000 + Math.random() * 9000000000)}`;
+          if (!String(item.barcode || '').trim()) {
+            throw new Error(`الباركود إجباري للصنف الجديد [${item.trade_name_ar}].`);
+          }
+          const newMedId = Date.now();
+          const barcode = String(item.barcode).trim();
           this.db.run(`
             INSERT INTO medicines (id, trade_name, trade_name_ar, barcode, price_box, price_strip, strips_per_box, stock_boxes, stock_strips, shelf, category, reorder_level, expiry)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)

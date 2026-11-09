@@ -10,7 +10,7 @@ export function OpenShiftModal({ isOpen, onClose, onOpenShift, currentUser = nul
   const loggedInName = currentUser?.full_name || currentUser?.name || '';
   const [cashierName, setCashierName] = useState(loggedInName);
   const [cashiers, setCashiers] = useState([]);
-  const [openingCash, setOpeningCash] = useState('500');
+  const [openingCash, setOpeningCash] = useState('');
   const [shiftNumber, setShiftNumber] = useState('1');
   const [error, setError] = useState('');
 
@@ -53,8 +53,8 @@ export function OpenShiftModal({ isOpen, onClose, onOpenShift, currentUser = nul
   const handleSubmit = (e) => {
     e.preventDefault();
     const floatVal = parseFloat(openingCash);
-    if (isNaN(floatVal) || floatVal < 0) {
-      setError('يرجى إدخال مبلغ عهدة صحيح (ج.م)');
+    if (!openingCash.trim() || !Number.isFinite(floatVal) || floatVal < 0) {
+      setError('يرجى إدخال عهدة صحيحة (0 أو أي مبلغ موجب، بدون قيم سالبة أو فارغة).');
       return;
     }
 
@@ -162,7 +162,7 @@ export function OpenShiftModal({ isOpen, onClose, onOpenShift, currentUser = nul
                 <input
                   type="number"
                   min="0"
-                  step="50"
+                  step="0.01"
                   required
                   value={openingCash}
                   onChange={(e) => setOpeningCash(e.target.value)}
