@@ -572,6 +572,25 @@ ipcMain.handle('db:read', async () => {
   return null;
 });
 
+ipcMain.handle('catalog:read', async () => {
+  const candidates = [
+    path.join(process.resourcesPath || '', 'catalog-v1423.json'),
+    path.join(process.resourcesPath || '', 'app.asar', 'dist', 'catalog-v1423.json'),
+    path.join(__dirname, '../dist/catalog-v1423.json'),
+    path.join(__dirname, '../public/catalog-v1423.json'),
+    path.join(process.cwd(), 'catalog-v1423.json'),
+    path.join(process.cwd(), 'public/catalog-v1423.json')
+  ];
+  try {
+    const hit = candidates.find((p) => fs.existsSync(p));
+    if (!hit) return null;
+    return JSON.parse(fs.readFileSync(hit, 'utf8'));
+  } catch (e) {
+    console.error('catalog:read error:', e);
+    return null;
+  }
+});
+
 ipcMain.handle('db:write', async (event, buffer) => {
   try {
     const targetPath = getDatabasePath();

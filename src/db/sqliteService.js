@@ -214,6 +214,8 @@ class SQLiteService {
           console.warn('Schema ensure warning:', schemaErr);
         }
 
+        await this._runFullCatalogMigration();
+
         this.isInitialized = true;
         console.log('🚀 SQLite Database Service Ready with 30,000 Egyptian Medicines!');
         return this.db;
@@ -259,6 +261,105 @@ class SQLiteService {
     }
   }
 
+  async _runFullCatalogMigration() {
+    const MIGRATION_KEY = 'full_catalog_v1423_applied';
+    try {
+      const meta = this.db.exec(`SELECT value FROM app_meta WHERE key = '${MIGRATION_KEY}' LIMIT 1`);
+      if (meta.length && meta[0].values.length && meta[0].values[0][0] === '1') return;
+
+      let catalog = null;
+      const isElectron = typeof window !== 'undefined' && window.require;
+      if (isElectron) {
+        try {
+          const { ipcRenderer } = window.require('electron');
+          if (ipcRenderer && ipcRenderer.invoke) catalog = await ipcRenderer.invoke('catalog:read');
+        } catch (e) {}
+        try {
+          const fs = window.require('fs');
+          const path = window.require('path');
+          const candidates = [
+            path.join(process.resourcesPath || '', 'catalog-v1423.json'),
+            path.join(__dirname, '../dist/catalog-v1423.json'),
+            path.join(__dirname, '../public/catalog-v1423.json'),
+            path.join(process.cwd(), 'catalog-v1423.json'),
+            path.join(process.cwd(), 'public/catalog-v1423.json')
+          ];
+          const hit = candidates.find((p) => fs.existsSync(p));
+          if (hit) catalog = JSON.parse(fs.readFileSync(hit, 'utf8'));
+        } catch (e) {
+          console.warn('Catalog file read warning:', e);
+        }
+      }
+      if (!catalog && typeof window !== 'undefined') {
+        try {
+          const res = await fetch('./catalog-v1423.json?t=' + Date.now(), { cache: 'no-store' });
+          if (res.ok) catalog = await res.json();
+        } catch (e) {
+          console.warn('Catalog fetch warning:', e);
+        }
+      }
+      if (!catalog || !Array.isArray(catalog.catalog) || catalog.catalog.length === 0) {
+        console.warn('Full catalog migration skipped: catalog-v1423.json is unavailable.');
+        return;
+      }
+
+      const related = ['invoice_items', 'purchase_items', 'expiry_batches'];
+      const relatedCounts = related.map((table) => {
+        try { return { table, count: Number(this.db.exec(`SELECT COUNT(*) FROM ${table}`)[0].values[0][0]) }; }
+        catch (e) { return { table, count: 0 }; }
+      });
+      if (relatedCounts.some((x) => x.count > 0)) {
+        console.warn('Full catalog migration skipped: historical transaction rows exist.', relatedCounts);
+        return;
+      }
+
+      try {
+        const ipc = isElectron ? window.require('electron').ipcRenderer : null;
+        if (ipc) await ipc.invoke('db:backup', 'catalog-v1423-before-replace');
+      } catch (e) {
+        console.warn('Catalog backup warning:', e);
+      }
+
+      const columns = [
+        'id', 'trade_name', 'trade_name_ar', 'generic_name', 'barcode',
+        'price_box', 'price_strip', 'strips_per_box', 'stock_boxes', 'stock_strips',
+        'shelf', 'category', 'reorder_level', 'preferred_supplier', 'unit_type',
+        'units_per_strip', 'price_unit', 'stock_units', 'expiry', 'source_code',
+        'source_slug', 'description', 'uses'
+      ];
+      const placeholders = columns.map(() => '?').join(', ');
+      const stmt = this.db.prepare(`INSERT INTO medicines (${columns.join(', ')}) VALUES (${placeholders})`);
+      this.db.run('BEGIN TRANSACTION;');
+      try {
+        this.db.run('DELETE FROM medicines;');
+        for (const item of catalog.catalog) {
+          const priceBox = Number(item.priceBox) || 0;
+          const priceStrip = Number(item.priceStrip) || 0;
+          const units = Math.max(1, Number(item.unitsPerStrip) || 1);
+          const strips = Math.max(1, Number(item.stripsPerBox) || 1);
+          stmt.run([
+            Number(item.id), String(item.tradeName || ''), String(item.tradeNameAr || item.tradeName || ''),
+            item.genericName || null, item.barcode || null, priceBox, priceStrip, strips,
+            0, 0, null, item.category || 'other', 5, item.supplier || null, item.unitType || 'tablets',
+            units, Number(item.priceUnit) || priceBox, 0, null, String(item.sourceCode || item.id),
+            item.sourceSlug || null, item.description || item.category || null, item.uses || null
+          ]);
+        }
+        stmt.free();
+        this.db.run(`INSERT OR REPLACE INTO app_meta (key, value) VALUES ('${MIGRATION_KEY}', '1');`);
+        this.db.run('COMMIT;');
+      } catch (e) {
+        try { stmt.free(); } catch (freeErr) {}
+        this.db.run('ROLLBACK;');
+        throw e;
+      }
+      this.saveToDisk();
+      console.log(`✅ Full medicine catalog replaced from source: ${catalog.catalog.length} rows.`);
+    } catch (e) {
+      console.warn('Full catalog migration warning:', e);
+    }
+  }
+
   // Ensure tables exist
   createSchema() {
     this.db.run(`
@@ -280,7 +381,12 @@ class SQLiteService {
         unit_type TEXT DEFAULT 'tablets',
         units_per_strip INTEGER DEFAULT 10,
         price_unit REAL DEFAULT 0,
-        stock_units INTEGER DEFAULT 0
+        stock_units INTEGER DEFAULT 0,
+        expiry TEXT,
+        source_code TEXT,
+        source_slug TEXT,
+        description TEXT,
+        uses TEXT
       );
       CREATE INDEX IF NOT EXISTS idx_med_barcode ON medicines(barcode);
       CREATE INDEX IF NOT EXISTS idx_med_name ON medicines(trade_name);
@@ -571,6 +677,10 @@ class SQLiteService {
     try { this.db.run("ALTER TABLE medicines ADD COLUMN price_unit REAL DEFAULT 0;"); } catch (e) {}
     try { this.db.run("ALTER TABLE medicines ADD COLUMN stock_units INTEGER DEFAULT 0;"); } catch (e) {}
     try { this.db.run("ALTER TABLE medicines ADD COLUMN expiry TEXT;"); } catch (e) {}
+    try { this.db.run("ALTER TABLE medicines ADD COLUMN source_code TEXT;"); } catch (e) {}
+    try { this.db.run("ALTER TABLE medicines ADD COLUMN source_slug TEXT;"); } catch (e) {}
+    try { this.db.run("ALTER TABLE medicines ADD COLUMN description TEXT;"); } catch (e) {}
+    try { this.db.run("ALTER TABLE medicines ADD COLUMN uses TEXT;"); } catch (e) {}
     try { this.db.run("ALTER TABLE invoice_items ADD COLUMN unit_type TEXT DEFAULT 'box';"); } catch (e) {}
     try { this.db.run("ALTER TABLE invoice_items ADD COLUMN batch_no TEXT;"); } catch (e) {}
     try { this.db.run("ALTER TABLE invoice_items ADD COLUMN expiry TEXT;"); } catch (e) {}
