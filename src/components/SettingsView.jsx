@@ -199,7 +199,7 @@ export function SettingsView({ onUpdatePharmacyName, onRevokeDevice, currentUser
   const handleCheckUpdates = async () => {
     setUpdateBusy(true);
     try {
-      const res = await checkForUpdates(resolveUpdateFeedUrl());
+      const res = await checkForUpdates();
       if (res?.available) {
         showToast(`يتوفر تحديث ${res.version} — حمّله ثم ثبّته`);
       } else if (res?.reason === 'no-feed') {
@@ -222,8 +222,12 @@ export function SettingsView({ onUpdatePharmacyName, onRevokeDevice, currentUser
     setUpdateBusy(true);
     try {
       const res = await downloadUpdate();
-      if (res?.success) showToast('جاري تحميل التحديث…');
-      else showToast(res?.error || 'تعذر تحميل التحديث');
+      if (res?.success) {
+        showToast('تم تحميل التحديث — سيتم تثبيته وإعادة تشغيل البرنامج الآن…');
+        await installUpdate();
+      } else {
+        showToast(res?.error || 'تعذر تحميل التحديث');
+      }
     } finally {
       setUpdateBusy(false);
     }
@@ -1031,7 +1035,7 @@ export function SettingsView({ onUpdatePharmacyName, onRevokeDevice, currentUser
                   <div className="text-xs font-bold text-slate-300">مستودع التحديثات المعتمد (GitHub Releases):</div>
                   <div className="font-mono text-xs text-teal-400" dir="ltr">workabdallah400-ai/pharmacy-pos-updates</div>
                   <p className="text-[11px] text-slate-400 leading-relaxed pt-1">
-                    عند توفر إصدار جديد يمكنك فحصه وتحميله وتثبيته مباشرة، وسيقوم البرنامج بالإغلاق وتثبيت التحديث وإعادة التشغيل تلقائياً.
+                    البرنامج يفحص GitHub تلقائياً عند التشغيل وكل دقيقة. عند توفر إصدار جديد يظهر هنا، وبالضغط على التحميل يتم تثبيته ثم إغلاق البرنامج وإعادة تشغيله تلقائياً.
                   </p>
                 </div>
 

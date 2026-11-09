@@ -25,11 +25,11 @@ export async function getAppInfo() {
   }
 }
 
-export async function checkForUpdates(feedUrl) {
+export async function checkForUpdates() {
   const ipc = getIpc();
   if (!ipc) return { available: false, reason: 'browser' };
   try {
-    return await ipc.invoke('app:update-check', { feedUrl });
+    return await ipc.invoke('app:update-check');
   } catch (e) {
     return { available: false, reason: 'error', error: e.message };
   }

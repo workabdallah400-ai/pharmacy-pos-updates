@@ -217,23 +217,16 @@ export default function App() {
 
   useEffect(() => {
     let cancelled = false;
-    let settings = {};
-    try {
-      settings = JSON.parse(localStorage.getItem('PHARMACY_SETTINGS') || '{}') || {};
-    } catch (e) {}
-    if (settings.autoCheckUpdates === false) return undefined;
-
     const run = async () => {
-      const info = await initReportServer().catch(() => null);
-      const configured = String(settings.updateFeedUrl || '').trim();
-      const feed = configured || (info && info.autoBase ? `${info.autoBase}/updates/` : '');
-      if (!feed) return;
-      const res = await checkForUpdates(feed);
+      // Updates always come from the official GitHub Releases feed. Do not
+      // use a saved LAN/report-server URL, which may contain an old feed.
+      const res = await checkForUpdates();
       if (!cancelled && res && res.available) {
         setUpdateBanner({ version: res.version });
       }
     };
     run();
+    const interval = window.setInterval(run, 60 * 1000);
 
     const off = onUpdateStatus((payload) => {
       if (payload && payload.status === 'available' && !cancelled) {
@@ -242,13 +235,18 @@ export default function App() {
     });
     return () => {
       cancelled = true;
+      window.clearInterval(interval);
       if (typeof off === 'function') off();
     };
   }, []);
 
   const handleApplyUpdate = async () => {
-    await downloadUpdate();
-    await installUpdate();
+    setUpdateBanner(null);
+    const res = await downloadUpdate();
+    if (res && res.success) {
+      // The main process installs and relaunches after the download event.
+      await installUpdate();
+    }
   };
 
   const updateBannerNode = updateBanner ? (

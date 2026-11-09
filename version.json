@@ -1,11 +1,11 @@
 {
-  "version": "1.4.20",
-  "build_number": 25,
+  "version": "1.4.21",
+  "build_number": 26,
   "release_date": "2026-11-09",
-  "title": "تحديث نظام صيدليتي 1.4.20",
+  "title": "تحديث نظام صيدليتي 1.4.21",
   "release_notes": "• عهدة بداية الوردية تبدأ فارغة وتقبل 0 أو أي مبلغ موجب بدون تقييد 50 جنيه\n• الكمية في فاتورة الشراء تبدأ فارغة ولا يتم توليدها تلقائياً\n• رقم فاتورة المورد واسم المورد إلزاميان ولا يتم توليدهما تلقائياً\n• تاريخ الصلاحية إلزامي لكل صنف في فاتورة الشراء\n• الباركود والصنف ورقم الصنف يظهرون عند المسح، والصلاحية المسجلة تُعرض ويمكن تعديلها\n• منع توليد أرقام تشغيلة أو صلاحيات أو باركودات وهمية تلقائياً\n• التحقق من نفس الشروط داخل SQLite قبل الحفظ",
-  "download_url": "https://github.com/workabdallah400-ai/pharmacy-pos-updates/releases/download/v1.4.20/PharmacyPOS-Setup-v1.4.20.exe",
-  "file_size_bytes": 142431108,
-  "sha256": "e35b8ed8cec055833f7cce1dd3ea2ecf24bf1448a24cbd960d15a7a7224837d4",
+  "download_url": "https://github.com/workabdallah400-ai/pharmacy-pos-updates/releases/download/v1.4.21/PharmacyPOS-Setup-v1.4.21.exe",
+  "file_size_bytes": 144886676,
+  "sha256": "6cd52f33331b60ecd1ff7bf2fe38e2cb3e98b12b8c2be922a639b0f5fac044d9",
   "mandatory": false
 }

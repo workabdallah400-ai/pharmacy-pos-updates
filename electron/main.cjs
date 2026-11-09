@@ -170,13 +170,20 @@ ipcMain.handle('report:downloadCloudflared', async (event, options = {}) => {
 // The app can update itself from any static host that exposes an
 // `latest.yml` feed (the bundled report server serves `/updates`).
 let autoUpdater = null;
+let updateCheckInFlight = false;
+const GITHUB_UPDATE_PROVIDER = {
+  provider: 'github',
+  owner: 'workabdallah400-ai',
+  repo: 'pharmacy-pos-updates',
+  private: false
+};
 let updateState = {
   status: 'idle', // idle | checking | available | not-available | downloading | downloaded | error
   version: null,
   currentVersion: '',
   progress: 0,
   message: '',
-  feedUrl: ''
+  feedUrl: 'github:workabdallah400-ai/pharmacy-pos-updates'
 };
 
 function getAutoUpdater() {
@@ -184,7 +191,7 @@ function getAutoUpdater() {
   try {
     const { autoUpdater: updater } = require('electron-updater');
     updater.autoDownload = false;
-    updater.autoInstallOnAppQuit = true;
+    updater.autoInstallOnAppQuit = false;
     updater.disableWebInstaller = true;
     updater.logger = null;
 
@@ -300,53 +307,60 @@ ipcMain.handle('app:version', async () => {
   return { version: app.getVersion(), packaged: app.isPackaged, state: updateState };
 });
 
-ipcMain.handle('app:update-check', async (event, options = {}) => {
+ipcMain.handle('app:update-check', async () => {
   updateState.currentVersion = app.getVersion();
   if (!app.isPackaged) {
     return { available: false, reason: 'dev', version: app.getVersion() };
   }
-  const feedUrl = normalizeFeedUrl(options.feedUrl);
-  updateState.feedUrl = feedUrl;
-  if (!feedUrl) {
-    updateState = { ...updateState, status: 'idle', message: 'لم يتم ضبط رابط التحديثات بعد' };
-    broadcastUpdateState();
-    return { available: false, reason: 'no-feed', version: app.getVersion() };
+  if (updateCheckInFlight) {
+    return {
+      available: updateState.status === 'available',
+      version: updateState.version,
+      currentVersion: app.getVersion(),
+      reason: 'already-checking'
+    };
   }
+
   const updater = getAutoUpdater();
   if (!updater) {
     return { available: false, reason: 'unavailable', version: app.getVersion() };
   }
+
+  updateCheckInFlight = true;
+  updateState = {
+    ...updateState,
+    currentVersion: app.getVersion(),
+    feedUrl: 'github:workabdallah400-ai/pharmacy-pos-updates',
+    status: 'checking',
+    message: 'جاري البحث عن آخر إصدار على GitHub...'
+  };
+  broadcastUpdateState();
+
   try {
-    if (feedUrl && feedUrl.includes('github.com')) {
-      updater.setFeedURL({
-        provider: 'github',
-        owner: 'workabdallah400-ai',
-        repo: 'pharmacy-pos-updates'
-      });
-    } else if (feedUrl) {
-      updater.setFeedURL({ provider: 'generic', url: feedUrl });
-    } else {
-      updater.setFeedURL({
-        provider: 'github',
-        owner: 'workabdallah400-ai',
-        repo: 'pharmacy-pos-updates'
-      });
-    }
+    // GitHub Releases is the only update source. Ignore old local/LAN feed
+    // settings so a stale bundled feed can never surface an old version.
+    updater.setFeedURL(GITHUB_UPDATE_PROVIDER);
     const result = await updater.checkForUpdates();
     const info = result && result.updateInfo ? result.updateInfo : null;
-    const available = !!(result && result.updateInfo && result.updateInfo.version !== app.getVersion());
+    const available = !!(info && info.version && info.version !== app.getVersion());
     updateState = {
       ...updateState,
       status: available ? 'available' : 'not-available',
       version: info ? info.version : null,
-      message: available ? `يتوفر إصدار ${info.version}` : 'أنت على آخر إصدار'
+      message: available ? `يتوفر إصدار ${info.version}` : 'أنت على آخر إصدار من GitHub'
     };
     broadcastUpdateState();
     return { available, version: info ? info.version : null, currentVersion: app.getVersion() };
   } catch (err) {
-    updateState = { ...updateState, status: 'error', message: (err && err.message) || 'فشل التحقق من التحديثات' };
+    updateState = {
+      ...updateState,
+      status: 'error',
+      message: (err && err.message) || 'فشل التحقق من تحديثات GitHub'
+    };
     broadcastUpdateState();
     return { available: false, reason: 'error', error: err.message, version: app.getVersion() };
+  } finally {
+    updateCheckInFlight = false;
   }
 });
 
