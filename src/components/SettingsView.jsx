@@ -84,7 +84,7 @@ export function SettingsView({ onUpdatePharmacyName, onRevokeDevice, currentUser
   const [syncRunning, setSyncRunning] = useState(false);
   const [reportServerInfo, setReportServerInfo] = useState(null);
   const [appInfo, setAppInfo] = useState({
-    version: typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '1.5.0',
+    version: typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '1.5.1',
     packaged: false
   });
   const [updateState, setUpdateState] = useState({ status: 'idle', message: '', progress: 0, version: null });
@@ -1237,7 +1237,7 @@ export function SettingsView({ onUpdatePharmacyName, onRevokeDevice, currentUser
                     </div>
                   </div>
                   <span className="text-xs font-mono font-bold text-teal-300 px-3 py-1 rounded-full border border-teal-500/30 bg-teal-500/10">
-                    الإصدار الحالي: v{typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : (appInfo?.version || '1.5.0')}
+                    الإصدار الحالي: v{typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : (appInfo?.version || '1.5.1')}
                   </span>
                 </div>
 

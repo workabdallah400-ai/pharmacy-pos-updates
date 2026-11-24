@@ -451,11 +451,20 @@ server.listen(PORT, HOST, async () => {
   // Fail fast if the private key is missing or encrypted without a passphrase.
   try {
     await loadPrivateKey();
+    const url = `http://${HOST}:${PORT}/`;
     console.log('');
     console.log('🔐 لوحة التراخيص جاهزة:');
-    console.log(`   http://${HOST}:${PORT}/`);
+    console.log(`   ${url}`);
     console.log('   (محلية فقط — لإيقافها اضغط Ctrl+C)');
     console.log('');
+
+    // Double-click convenience: open the panel in the default browser.
+    if (process.platform === 'win32' && !process.env.PHARMACY_LICENSE_ADMIN_NO_OPEN) {
+      try {
+        const { spawn } = await import('node:child_process');
+        spawn('cmd', ['/c', 'start', '', url], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
+      } catch (e) {}
+    }
   } catch (e) {
     console.error(`\n❌ ${e.message}\n`);
     server.close();

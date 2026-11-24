@@ -8,7 +8,7 @@
  * this source tree, even if the customer never enters the REVOKE code and
  * never connects to the internet.
  */
-export const BUNDLED_REVOCATIONS_VERSION = "2026-11-24T21:18:47.224Z";
+export const BUNDLED_REVOCATIONS_VERSION = "2026-11-24T22:13:01.458Z";
 
 /** @type {Record<string, { mid: string, lid?: string, reason?: string, iat: number }>} */
 export const BUNDLED_REVOCATIONS = {
