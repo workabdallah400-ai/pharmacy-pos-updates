@@ -90,6 +90,16 @@ export function encodeToken(payloadBase64Url, signatureBytes) {
 }
 
 /**
+ * Old symmetric licence formats from before the Ed25519 migration.
+ * They are rejected before any signature check — permanently.
+ */
+export function isLegacyLicenseKeyFormat(value) {
+  return /^(LIC-LIFE|LIC-EXP|LIC-ANNUAL|LIC-YEAR|REVOKE|REV-|RST-ADMIN)/i.test(
+    String(value || '').trim()
+  );
+}
+
+/**
  * Decodes token into payload and signature without verification.
  */
 export function decodeToken(token) {

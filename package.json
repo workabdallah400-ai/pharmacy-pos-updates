@@ -17,14 +17,16 @@
     "test:server": "node scripts/test-report-server.cjs",
     "test:worker": "node scripts/test-worker.mjs",
     "worker:core": "node scripts/sync-worker-core.cjs",
-    "dist": "vite build && electron-builder --win nsis && node scripts/build-updates.cjs",
+    "dist": "node scripts/build-revocations.mjs && vite build && electron-builder --win nsis && node scripts/build-updates.cjs",
     "dist:updates": "node scripts/build-updates.cjs",
     "keygen": "node scripts/license-keygen.mjs",
     "license:keygen": "node scripts/license-keygen.mjs",
     "license:issue": "node scripts/license-tool.mjs issue",
     "license:revoke": "node scripts/license-tool.mjs revoke",
     "license:inspect": "node scripts/license-tool.mjs inspect",
-    "license:test": "node scripts/test-license-token.mjs && node scripts/test-license-parity.mjs"
+    "license:revocations": "node scripts/build-revocations.mjs",
+    "license:admin": "node scripts/license-admin.mjs",
+    "license:test": "node scripts/test-license-token.mjs && node scripts/test-license-parity.mjs && node scripts/test-license-revocation.mjs"
   },
   "dependencies": {
     "electron-updater": "^6.8.11",

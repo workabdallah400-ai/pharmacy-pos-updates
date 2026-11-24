@@ -1,6 +1,8 @@
 import { sqliteService } from '../db/sqliteService.js';
-import { verifyLicenseToken, decodeToken } from './licenseToken.js';
+import { verifyLicenseToken, decodeToken, isLegacyLicenseKeyFormat } from './licenseToken.js';
 import { LICENSE_PUBLIC_KEYS } from './licensePublicKey.js';
+import { normalizeMid, isRevokedPayload, mergeRevocations } from './licenseRevocation.js';
+import { BUNDLED_REVOCATIONS } from './licenseRevocations.js';
 
 const LICENSE_STORAGE_KEY = 'PHARMACY_LICENSE_DATA';
 const MACHINE_ID_STORAGE_KEY = 'PHARMACY_MACHINE_ID';
@@ -8,13 +10,6 @@ const LAST_TIME_STORAGE_KEY = 'PHARMACY_SYS_CLOCK_TIMESTAMP';
 const REVOCATION_STORAGE_KEY = 'PHARMACY_LICENSE_REVOCATIONS';
 
 const TOKEN_PREFIX = 'LIC2.';
-
-/**
- * Normalize an optional separator-less machine code for comparison.
- */
-function normalizeMid(value) {
-  return String(value || '').replace(/[^A-Z0-9]/g, '').toUpperCase();
-}
 
 function emptyStatus(machineId, status = 'UNLICENSED') {
   return {
@@ -55,7 +50,10 @@ function saveLocalRevocations(map) {
 }
 
 async function loadRevocations() {
-  const map = loadLocalRevocations();
+  // 1) Revocations shipped with this build (work offline, no user action).
+  // 2) Revocations stored on this device (localStorage + signed DB rows).
+  const map = mergeRevocations(BUNDLED_REVOCATIONS, loadLocalRevocations());
+
   try {
     const rows = await sqliteService.getRevocations();
     for (const row of rows || []) {
@@ -65,7 +63,7 @@ async function loadRevocations() {
       const seconds = Number.isFinite(Date.parse(iso)) ? Math.floor(Date.parse(iso) / 1000) : 0;
       const existing = map[mid];
       if (!existing || Number(existing.iat || 0) < seconds) {
-        map[mid] = { mid, lid: row.lid || '', reason: row.reason || '', iat: seconds };
+        map[mid] = { mid: String(row.mid || '').toUpperCase(), lid: row.lid || '', reason: row.reason || '', iat: seconds };
       }
     }
   } catch (e) {}
@@ -77,12 +75,7 @@ async function loadRevocations() {
  * A token issued after the revocation moment is a deliberate re-activation.
  */
 function isRevokedToken(payload, revocations) {
-  const mid = normalizeMid(payload.mid);
-  const revocation = revocations[mid];
-  if (!revocation) return false;
-  const revokedAt = Number(revocation.iat || 0);
-  if (!revokedAt) return true;
-  return Number(payload.iat || 0) <= revokedAt;
+  return isRevokedPayload(payload, revocations);
 }
 
 /**
@@ -294,7 +287,7 @@ export async function activateLicenseKey(rawKey) {
 
   // Legacy symmetric keys are no longer accepted (security migration).
   if (!isLicenseTokenFormat(key)) {
-    if (/^(LIC-LIFE|LIC-EXP|LIC-ANNUAL|LIC-YEAR|REVOKE|REV-|RST-ADMIN)/i.test(key)) {
+    if (isLegacyLicenseKeyFormat(key)) {
       return {
         success: false,
         legacyKey: true,

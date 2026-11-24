@@ -62,7 +62,12 @@ await assert.rejects(
 console.log('✅ Tampered payload byte rejected');
 
 // 4. Modifying 1 byte in signature fails verification
-const tamperedSigB64 = parts[2].slice(0, -1) + (parts[2].slice(-1) === 'X' ? 'Y' : 'X');
+//    (flip a middle character: the very last base64url char can encode only
+//    padding bits, so flipping it may decode to the same signature)
+const sigB64 = parts[2];
+const sigIdx = Math.floor(sigB64.length / 2);
+const sigFlip = sigB64[sigIdx] === 'A' ? 'B' : 'A';
+const tamperedSigB64 = sigB64.slice(0, sigIdx) + sigFlip + sigB64.slice(sigIdx + 1);
 const tamperedSigToken = `LIC2.${parts[1]}.${tamperedSigB64}`;
 
 await assert.rejects(
