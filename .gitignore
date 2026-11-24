@@ -1,6 +1,7 @@
 node_modules/
 dist/
 dist-installer/
+license-studio/release/
 *.db
 *.exe
 private/

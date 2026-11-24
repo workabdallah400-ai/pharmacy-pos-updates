@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:;" />
+  <title>PharmacyPOS License Studio</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<!-- Setup overlay: shown until a private key is imported -->
+<div id="setup" class="overlay hidden">
+  <div class="setup-card">
+    <div class="logo">🔐</div>
+    <h1>PharmacyPOS License Studio</h1>
+    <p class="muted">أداة إدارة تراخيص صيدليتي — تعمل على جهازك فقط.</p>
+
+    <div class="alert info">
+      استورد المفتاح الخاص <b>مرة واحدة</b> (ملف <code>private/license-private-key.jwk.json</code> من مجلد المشروع).
+      سيُحفظ مشفّراً بحماية ويندوز داخل الأداة، ولن يغادر جهازك.
+    </div>
+
+    <div class="row">
+      <button class="btn primary" id="setupBrowse">استيراد ملف المفتاح…</button>
+      <button class="btn ghost" id="setupPaste">لصق المفتاح يدوياً</button>
+    </div>
+
+    <div id="pasteBox" class="hidden">
+      <textarea id="pasteKey" class="mono" placeholder='{"kty":"OKP","crv":"Ed25519","d":"…","x":"…"}'></textarea>
+      <button class="btn primary" id="setupSavePaste">حفظ المفتاح</button>
+    </div>
+
+    <div id="setupMsg" class="msg"></div>
+  </div>
+</div>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-icon">💊</span>
+    <div>
+      <div class="brand-title">License Studio</div>
+      <div class="brand-sub">إدارة تراخيص صيدليتي</div>
+    </div>
+  </div>
+  <div class="topright">
+    <span class="chip" id="keyChip">…</span>
+    <span class="chip soft" id="countChip">…</span>
+  </div>
+</header>
+
+<main class="shell">
+  <nav class="tabs" id="tabs">
+    <button class="tab active" data-view="issue">① إصدار ترخيص</button>
+    <button class="tab" data-view="revoke">② إلغاء ترخيص</button>
+    <button class="tab" data-view="revoked">③ الأجهزة الملغاة</button>
+    <button class="tab" data-view="log">④ سجل التراخيص</button>
+    <button class="tab" data-view="export">⑤ تصدير قائمة الإلغاء</button>
+    <button class="tab" data-view="key">⚙️ المفتاح</button>
+  </nav>
+
+  <div class="content">
+
+    <!-- ① ISSUE -->
+    <section class="view active" data-view="issue">
+      <div class="card">
+        <h2>إصدار ترخيص لجهاز</h2>
+        <p class="hint">كود الجهاز يظهر على شاشة التفعيل عند العميل بصيغة <code>EGYP-XXXX-YYYY-ZZZZ</code>.</p>
+
+        <label>كود الجهاز</label>
+        <input id="issueMid" class="mono ltr" placeholder="EGYP-9B4C-D478-B27C" autocomplete="off" />
+
+        <label>نوع الترخيص</label>
+        <div class="segmented" id="issueType">
+          <button class="seg active" data-type="LIFETIME">مدى الحياة</button>
+          <button class="seg" data-type="TIMED">مدة محددة</button>
+        </div>
+
+        <div id="timedBox" class="hidden">
+          <div class="grid2">
+            <div>
+              <label>عدد الأيام</label>
+              <input id="issueDays" type="number" min="1" max="3650" value="365" />
+            </div>
+            <div>
+              <label>أو تاريخ انتهاء</label>
+              <input id="issueUntil" class="ltr" placeholder="2027-12-31" autocomplete="off" />
+            </div>
+          </div>
+          <p class="hint">لو كتبت تاريخاً، يُستخدم بدل عدد الأيام.</p>
+        </div>
+
+        <div class="row">
+          <button class="btn primary" id="btnIssue">إصدار المفتاح</button>
+          <button class="btn ghost" id="btnIssueClear">تفريغ</button>
+        </div>
+        <div id="issueMsg" class="msg"></div>
+
+        <div id="issueResult" class="result hidden">
+          <div class="result-head">
+            <span class="chip ok">تم التوقيع والتحقق ✓</span>
+            <span class="chip soft" id="issueMeta"></span>
+          </div>
+          <textarea id="issueToken" class="mono ltr token" readonly></textarea>
+          <div class="row">
+            <button class="btn primary" id="btnCopyIssue">نسخ المفتاح</button>
+            <button class="btn ghost" id="btnIssueAgain">إصدار لجهاز آخر</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ② REVOKE -->
+    <section class="view" data-view="revoke">
+      <div class="card danger-card">
+        <h2>إلغاء ترخيص جهاز</h2>
+        <p class="hint">
+          الإلغاء يوقف كل ترخيص صادر لهذا الجهاز قبل لحظة الإلغاء.
+          سلّم العميل رمز <b>REVOKE</b> ليدخله في شاشة التفعيل، فيتوقف فوراً.
+        </p>
+
+        <label>كود الجهاز</label>
+        <input id="revokeMid" class="mono ltr" placeholder="EGYP-9B4C-D478-B27C" autocomplete="off" />
+
+        <label>سبب الإلغاء (اختياري)</label>
+        <input id="revokeReason" placeholder="عدم سداد — إساءة استخدام…" autocomplete="off" />
+
+        <div class="row">
+          <button class="btn danger" id="btnRevoke">إلغاء وإصدار رمز REVOKE</button>
+        </div>
+        <div id="revokeMsg" class="msg"></div>
+
+        <div id="revokeResult" class="result hidden">
+          <div class="chip ok">تم تسجيل الإلغاء ✓</div>
+          <textarea id="revokeToken" class="mono ltr token" readonly></textarea>
+          <div class="row">
+            <button class="btn primary" id="btnCopyRevoke">نسخ رمز الإلغاء</button>
+          </div>
+          <p class="hint">
+            لإيقافه حتى بدون إدخال العميل للرمز: اذهب إلى «تصدير قائمة الإلغاء» وصدّرها ثم ابنِ إصداراً جديداً.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ③ REVOKED -->
+    <section class="view" data-view="revoked">
+      <div class="card">
+        <div class="card-head">
+          <h2>الأجهزة الملغاة</h2>
+          <button class="btn ghost small" id="btnRefreshRevoked">تحديث</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>كود الجهاز</th><th>السبب</th><th>وقت الإلغاء</th><th></th></tr>
+            </thead>
+            <tbody id="revokedBody"></tbody>
+          </table>
+        </div>
+        <p class="hint">«إزالة» تحذف الجهاز من قائمة الإلغاء المحلية فقط (لتصحيح إلغاء بالخطأ) قبل التصدير.</p>
+      </div>
+    </section>
+
+    <!-- ④ LOG -->
+    <section class="view" data-view="log">
+      <div class="card">
+        <div class="card-head">
+          <h2>سجل التراخيص الصادرة</h2>
+          <input id="logFilter" class="filter ltr" placeholder="بحث بكود الجهاز…" autocomplete="off" />
+        </div>
+        <div class="table-wrap tall">
+          <table>
+            <thead>
+              <tr><th>كود الجهاز</th><th>النوع</th><th>رقم الترخيص</th><th>صدر في</th><th>ينتهي</th></tr>
+            </thead>
+            <tbody id="logBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ⑤ EXPORT -->
+    <section class="view" data-view="export">
+      <div class="card">
+        <h2>تصدير قائمة الإلغاء المدمجة</h2>
+        <p class="hint">
+          هذه القائمة تُدمج داخل البرنامج في الإصدار الجديد. أي جهاز فيها يُرفض حتى بدون إنترنت
+          وبدون أن يدخل العميل رمز الإلغاء.
+        </p>
+
+        <label>مجلد مشروع PharmacyPOS</label>
+        <div class="row">
+          <input id="projectDir" class="ltr" readonly placeholder="لم يتم اختيار مجلد بعد" />
+          <button class="btn ghost" id="btnChooseProject">اختيار المجلد</button>
+        </div>
+        <p class="hint">اختر المجلد الذي يحتوي على <code>src/utils</code> (مثلاً <code>D:\New folder</code>).</p>
+
+        <div class="row">
+          <button class="btn primary" id="btnExport">تصدير licenseRevocations.js</button>
+          <button class="btn ghost" id="btnOpenProject">فتح المجلد</button>
+        </div>
+        <div id="exportMsg" class="msg"></div>
+
+        <div class="steps">
+          <div class="step"><b>1</b> صدّر القائمة هنا.</div>
+          <div class="step"><b>2</b> في مجلد المشروع: <code>npm run dist</code> لبناء المثبت.</div>
+          <div class="step"><b>3</b> ارفع الإصدار الجديد — الأجهزة الملغاة تُرفض تلقائياً.</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ⑥ KEY -->
+    <section class="view" data-view="key">
+      <div class="card">
+        <h2>المفتاح الخاص</h2>
+        <div id="keyStatus" class="key-status"></div>
+        <div class="row">
+          <button class="btn ghost" id="btnReimportKey">استيراد مفتاح آخر…</button>
+          <button class="btn danger" id="btnForgetKey">حذف المفتاح من الأداة</button>
+        </div>
+        <p class="hint">
+          المفتاح محفوظ مشفّراً بحماية ويندوز (DPAPI). حذفه لا يؤثر على أي ترخيص صدر،
+          لكن لن تستطيع إصدار تراخيص جديدة حتى تستورده مرة أخرى.
+        </p>
+      </div>
+
+      <div class="card">
+        <h2>معلومات النظام</h2>
+        <table class="kv">
+          <tr><td>مفتاح التطبيق العام (kid)</td><td class="mono ltr" id="infoKid">—</td></tr>
+          <tr><td>بصمة المفتاح العام</td><td class="mono ltr" id="infoPub">—</td></tr>
+          <tr><td>المفتاح المستورد يطابق التطبيق</td><td id="infoMatch">—</td></tr>
+          <tr><td>حماية المفتاح</td><td id="infoProtected">—</td></tr>
+        </table>
+      </div>
+    </section>
+
+  </div>
+</main>
+
+<div id="toast" class="toast"></div>
+
+<script src="renderer.js"></script>
+</body>
+</html>

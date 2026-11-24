@@ -1,0 +1,45 @@
+{
+  "name": "pharmacypos-license-studio",
+  "productName": "PharmacyPOS License Studio",
+  "version": "1.0.0",
+  "description": "Standalone licence manager for PharmacyPOS (issue, revoke, revocations export)",
+  "main": "main.cjs",
+  "author": "PharmacyPOS",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win portable"
+  },
+  "devDependencies": {
+    "electron": "22.3.27",
+    "electron-builder": "26.18.0"
+  },
+  "build": {
+    "appId": "com.pharmacypos.licensestudio",
+    "productName": "PharmacyPOS License Studio",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "main.cjs",
+      "preload.cjs",
+      "core.cjs",
+      "index.html",
+      "styles.css",
+      "renderer.js"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "portable": {
+      "artifactName": "PharmacyPOS-License-Studio-${version}.exe"
+    }
+  }
+}
