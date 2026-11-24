@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, UserPlus, User, Phone, MapPin, DollarSign, FileText, Sparkles, AlertCircle } from 'lucide-react';
+import { isValidPhone } from '../utils/validation';
 
 export function AddCustomerModal({ isOpen, onClose, customerToEdit, onSaveCustomer }) {
   const [name, setName] = useState('');
@@ -37,6 +38,10 @@ export function AddCustomerModal({ isOpen, onClose, customerToEdit, onSaveCustom
     }
     if (!phone.trim()) {
       setError('يرجى إدخال رقم هاتف العميل للتواصل');
+      return;
+    }
+    if (!isValidPhone(phone)) {
+      setError('رقم الهاتف غير صحيح. أدخل 7 إلى 15 رقماً مع السماح بمسافات أو شرطات (مثال: 01012345678).');
       return;
     }
 
@@ -128,6 +133,7 @@ export function AddCustomerModal({ isOpen, onClose, customerToEdit, onSaveCustom
                 <input
                   type="tel"
                   required
+                  maxLength={20}
                   value={phone}
                   onChange={(e) => setPhone(e.target.value)}
                   placeholder="010XXXXXXXX"
@@ -145,7 +151,7 @@ export function AddCustomerModal({ isOpen, onClose, customerToEdit, onSaveCustom
                 <input
                   type="number"
                   min="0"
-                  step="100"
+                  step="0.01"
                   required
                   value={creditLimit}
                   onChange={(e) => setCreditLimit(e.target.value)}

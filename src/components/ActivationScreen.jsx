@@ -89,7 +89,7 @@ export function ActivationScreen({
     try {
       const text = await navigator.clipboard.readText();
       if (text) {
-        setLicenseKeyInput(text.trim().toUpperCase());
+        setLicenseKeyInput(text.trim());
         setErrorMsg('');
         playBarcodeBeep();
       }
@@ -103,7 +103,7 @@ export function ActivationScreen({
     e.preventDefault();
     setErrorMsg('');
     setSuccessMsg('');
-    const key = licenseKeyInput.trim().toUpperCase();
+    const key = licenseKeyInput.trim();
 
     if (!key) {
       setErrorMsg('يرجى إدخال مفتاح التفعيل أولاً.');
@@ -288,19 +288,23 @@ export function ActivationScreen({
                   <Key className="w-4 h-4 text-teal-400" />
                 </div>
 
-                {/* Input Field with Auto-Uppercase */}
+                {/* Input Field — LIC2 tokens are case-sensitive, never transform them */}
                 <input
                   type="text"
                   value={licenseKeyInput}
                   onChange={(e) => {
-                    setLicenseKeyInput(e.target.value.toUpperCase());
+                    setLicenseKeyInput(e.target.value);
                     setErrorMsg('');
                     setSuccessMsg('');
                     setIsSuccess(false);
                   }}
-                  placeholder="XXXX-XXXX-XXXX-XXXX أو LIC-LIFE-..."
-                  className="w-full bg-[#0B1220] border border-[#23324D] focus:border-teal-400 rounded-xl pr-10 pl-28 py-3 text-sm text-white font-mono font-bold tracking-wider placeholder:text-slate-600 placeholder:font-sans focus:outline-none focus:ring-1 focus:ring-teal-400 transition-all uppercase"
+                  placeholder="LIC2.xxxxx.yyyyy"
+                  className="w-full bg-[#0B1220] border border-[#23324D] focus:border-teal-400 rounded-xl pr-10 pl-28 py-3 text-sm text-white font-mono font-bold tracking-wider placeholder:text-slate-600 placeholder:font-sans focus:outline-none focus:ring-1 focus:ring-teal-400 transition-all"
                   dir="ltr"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  autoComplete="off"
+                  spellCheck={false}
                   autoFocus
                 />
 

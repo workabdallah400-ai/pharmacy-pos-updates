@@ -250,7 +250,7 @@ export default function App() {
   };
 
   const updateBannerNode = updateBanner ? (
-    <div className="fixed top-3 left-1/2 -translate-x-1/2 z-[60] bg-gradient-to-l from-teal-600 to-emerald-600 text-white px-4 py-2.5 rounded-xl shadow-2xl border border-teal-300/40 flex items-center gap-3 text-xs font-bold animate-fadeIn">
+    <div className="fixed top-3 left-1/2 -translate-x-1/2 z-[60] bg-gradient-to-l from-teal-600 to-emerald-600 text-white px-4 py-2.5 rounded-xl shadow-2xl border border-teal-300/40 flex items-center gap-3 text-xs font-bold animate-fadeIn" role="status" aria-live="polite">
       <span>⬆️ يتوفر تحديث جديد للبرنامج {updateBanner.version ? `v${updateBanner.version}` : ''}</span>
       <button
         type="button"
@@ -263,6 +263,7 @@ export default function App() {
         type="button"
         onClick={() => setUpdateBanner(null)}
         className="px-2 py-1 rounded-lg hover:bg-white/20 text-[11px]"
+        aria-label="إغلاق إشعار التحديث"
       >
         ✕
       </button>

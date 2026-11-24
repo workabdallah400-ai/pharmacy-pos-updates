@@ -170,7 +170,7 @@ export function LoginScreen({ onLoginSuccess }) {
                   onChange={(e) => { setUsername(e.target.value); setErrorMessage(''); }}
                   placeholder="أدخل اسم المستخدم..."
                   autoComplete="username"
-                  className="w-full bg-[#0B1220] border border-[#23324D] focus:border-teal-400 rounded-xl pr-10 pl-4 py-3 text-sm text-white font-medium focus:outline-none focus:ring-1 focus:ring-teal-500/30 placeholder:text-slate-600 transition-colors"
+                  className="w-full bg-[#0B1220] border border-[#23324D] focus:border-teal-400 rounded-xl pr-10 pl-4 py-3 text-sm text-white font-medium focus:outline-none focus:ring-1 focus:ring-teal-500/30 placeholder:text-slate-400 transition-colors"
                   disabled={isLoading || isSuccess}
                 />
               </div>
@@ -192,14 +192,15 @@ export function LoginScreen({ onLoginSuccess }) {
                   onChange={(e) => { setPassword(e.target.value); setErrorMessage(''); }}
                   placeholder="أدخل كلمة المرور..."
                   autoComplete="current-password"
-                  className="w-full bg-[#0B1220] border border-[#23324D] focus:border-teal-400 rounded-xl pr-10 pl-11 py-3 text-sm text-white font-medium focus:outline-none focus:ring-1 focus:ring-teal-500/30 placeholder:text-slate-600 transition-colors"
+                  className="w-full bg-[#0B1220] border border-[#23324D] focus:border-teal-400 rounded-xl pr-10 pl-11 py-3 text-sm text-white font-medium focus:outline-none focus:ring-1 focus:ring-teal-500/30 placeholder:text-slate-400 transition-colors"
                   disabled={isLoading || isSuccess}
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
                   className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-teal-400 transition-colors"
-                  tabIndex={-1}
+                  aria-label={showPassword ? 'إخفاء كلمة المرور' : 'إظهار كلمة المرور'}
+                  aria-pressed={showPassword}
                 >
                   {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>

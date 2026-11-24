@@ -2,11 +2,50 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Minus, Square, X, Clock, Calendar, CheckCircle2, Wifi, WifiOff, Cloud, RefreshCw, Sparkles, Sun, Moon, ZoomIn, ZoomOut } from 'lucide-react';
 import { useThemeAndFontSize } from '../utils/useThemeAndFontSize';
 import { sqliteService } from '../db/sqliteService';
-import { getPharmacyName } from '../utils/pharmacyIdentity';
+import { getPharmacyName, getPharmacyBranch, PHARMACY_IDENTITY_EVENT } from '../utils/pharmacyIdentity';
 
 // Injected at build time from package.json so the header can never drift from
 // the real release version again.
 const APP_VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '1.4.18';
+
+/**
+ * Isolated live clock. Keeping the 1-second tick inside this component means
+ * the whole header (branding, license, sync, window controls) is not
+ * re-rendered every second on low-end pharmacy PCs.
+ */
+function LiveClock() {
+  const [now, setNow] = useState(new Date());
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const time = now.toLocaleTimeString('ar-EG', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: true
+  });
+  const date = now.toLocaleDateString('ar-EG', {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric'
+  });
+
+  return (
+    <div className="flex items-center gap-2.5 bg-[#17233A] border border-[#23324D] px-3.5 py-1.5 rounded-xl shadow-inner">
+      <Clock className="w-4 h-4 text-teal-400" />
+      <span className="font-bold text-white text-sm font-mono tracking-wider min-w-[90px] text-center" dir="ltr">
+        {time}
+      </span>
+      <span className="text-slate-500 text-xs hidden xl:inline">|</span>
+      <Calendar className="w-3.5 h-3.5 text-slate-400 hidden xl:block" />
+      <span className="text-xs text-slate-300 font-medium hidden xl:inline">{date}</span>
+    </div>
+  );
+}
 
 export function TopHeader({
   pharmacyName = getPharmacyName(),
@@ -15,7 +54,6 @@ export function TopHeader({
   licenseInfo = null,
   onOpenActivation = null
 }) {
-  const [currentTime, setCurrentTime] = useState(new Date());
   const [isOnline, setIsOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true);
   const [isSyncing, setIsSyncing] = useState(false);
   const [lastSyncText, setLastSyncText] = useState('الآن');
@@ -25,6 +63,28 @@ export function TopHeader({
   const [cloudConfigured, setCloudConfigured] = useState(false);
   const syncBusyRef = useRef(false);
   const { theme, fontSize, toggleTheme, increaseFontSize, decreaseFontSize } = useThemeAndFontSize();
+  // Branch name is read from the saved settings, but kept in state so saving
+  // the identity from Settings updates this header immediately (no reload).
+  const [identity, setIdentity] = useState(() => ({
+    name: getPharmacyName(),
+    branch: getPharmacyBranch()
+  }));
+
+  useEffect(() => {
+    const syncIdentity = () => {
+      setIdentity({ name: getPharmacyName(), branch: getPharmacyBranch() });
+    };
+    window.addEventListener(PHARMACY_IDENTITY_EVENT, syncIdentity);
+    // `storage` fires in OTHER tabs, so two open windows stay consistent too.
+    window.addEventListener('storage', syncIdentity);
+    return () => {
+      window.removeEventListener(PHARMACY_IDENTITY_EVENT, syncIdentity);
+      window.removeEventListener('storage', syncIdentity);
+    };
+  }, []);
+
+  const displayName = String(pharmacyName || '').trim() || identity.name;
+  const branchName = identity.branch;
 
   const triggerToast = (msg) => {
     setSyncToast(msg);
@@ -68,13 +128,6 @@ export function TopHeader({
         }
       } catch (e) {}
     }, 15000);
-    return () => clearInterval(timer);
-  }, []);
-
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setCurrentTime(new Date());
-    }, 1000);
     return () => clearInterval(timer);
   }, []);
 
@@ -159,21 +212,6 @@ export function TopHeader({
     }
   };
 
-  // Format Arabic Time and Date
-  const formattedTime = currentTime.toLocaleTimeString('ar-EG', {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: true
-  });
-
-  const formattedDate = currentTime.toLocaleDateString('ar-EG', {
-    weekday: 'long',
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric'
-  });
-
   // License badge label derived from the real license state (not a fixed text)
   const licenseStatus = licenseInfo?.status || 'UNLICENSED';
   const isLicensed = !!licenseInfo?.isLicensed;
@@ -184,7 +222,7 @@ export function TopHeader({
     licenseLabel = licenseStatus === 'REVOKED' ? 'الترخيص ملغي 🚫' : 'الترخيص غير مفعل ⚠️';
     licenseClasses = 'bg-rose-500/10 border-rose-500/30 text-rose-300';
     licenseIconClass = 'text-rose-400';
-  } else if (licenseStatus === 'DURATION' || licenseStatus === 'ANNUAL') {
+  } else if (licenseStatus === 'TIMED' || licenseStatus === 'DURATION' || licenseStatus === 'ANNUAL') {
     licenseLabel = `مرخص حتى ${licenseInfo?.expiresAt || '—'}${licenseInfo?.daysRemaining != null ? ` (${licenseInfo.daysRemaining} يوم)` : ''}`;
     licenseClasses = 'bg-amber-500/10 border-amber-500/30 text-amber-300';
     licenseIconClass = 'text-amber-400';
@@ -208,27 +246,23 @@ export function TopHeader({
         </div>
         <div>
           <div className="flex items-center gap-2">
-            <span className="font-extrabold text-white text-base tracking-tight">{pharmacyName}</span>
-            <span className="text-[10px] bg-teal-500/15 text-teal-300 border border-teal-500/30 font-semibold px-2 py-0.5 rounded-full">
-              الفرع الرئيسي
-            </span>
+            <span className="font-extrabold text-white text-base tracking-tight">{displayName}</span>
+            {branchName && (
+              <span
+                className="text-[10px] bg-teal-500/15 text-teal-300 border border-teal-500/30 font-semibold px-2 py-0.5 rounded-full hidden sm:inline max-w-[180px] truncate"
+                title={branchName}
+              >
+                {branchName}
+              </span>
+            )}
           </div>
-          <div className="text-[11px] text-slate-400 font-medium">نظام نقاط البيع وإدارة الصيدليات v{APP_VERSION}</div>
+          <div className="text-[11px] text-slate-400 font-medium hidden md:block">نظام نقاط البيع وإدارة الصيدليات v{APP_VERSION}</div>
         </div>
       </div>
 
       {/* Center Section: Live Clock, Date & Shift Status */}
       <div className="flex items-center gap-4">
-        {/* Live Clock with Seconds */}
-        <div className="flex items-center gap-2.5 bg-[#17233A] border border-[#23324D] px-3.5 py-1.5 rounded-xl shadow-inner">
-          <Clock className="w-4 h-4 text-teal-400" />
-          <span className="font-bold text-white text-sm font-mono tracking-wider min-w-[90px] text-center" dir="ltr">
-            {formattedTime}
-          </span>
-          <span className="text-slate-500 text-xs">|</span>
-          <Calendar className="w-3.5 h-3.5 text-slate-400" />
-          <span className="text-xs text-slate-300 font-medium">{formattedDate}</span>
-        </div>
+        <LiveClock />
 
         {/* Shift Status Pill */}
         <div className="flex items-center gap-2 bg-[#17233A] border border-[#23324D] px-3 py-1.5 rounded-xl">
@@ -264,6 +298,7 @@ export function TopHeader({
             onClick={toggleTheme}
             className="w-7 h-7 rounded-lg bg-[#17233A] hover:bg-[#23324D] text-amber-300 hover:text-white flex items-center justify-center transition-all cursor-pointer shadow-sm"
             title={theme === 'dark' ? 'التبديل إلى الوضع الفاتح (Light Mode)' : 'التبديل إلى الوضع الداكن (Dark Mode)'}
+            aria-label={theme === 'dark' ? 'التبديل إلى الوضع الفاتح' : 'التبديل إلى الوضع الداكن'}
           >
             {theme === 'dark' ? <Sun className="w-3.5 h-3.5 text-amber-400" /> : <Moon className="w-3.5 h-3.5 text-cyan-300" />}
           </button>
@@ -275,13 +310,14 @@ export function TopHeader({
             disabled={fontSize === 'sm'}
             className="w-7 h-7 rounded-lg bg-[#17233A] hover:bg-[#23324D] disabled:opacity-40 text-slate-300 hover:text-white flex items-center justify-center transition-all cursor-pointer shadow-sm"
             title="تصغير حجم الخط (A-)"
+            aria-label="تصغير حجم الخط"
           >
             <ZoomOut className="w-3.5 h-3.5" />
           </button>
 
           {/* Current Font Indicator */}
           <span
-            className="text-[10px] font-mono font-bold text-teal-300 bg-[#0B1220] border border-[#23324D] px-1.5 py-0.5 rounded-md"
+            className="text-[10px] font-mono font-bold text-teal-300 bg-[#0B1220] border border-[#23324D] px-1.5 py-0.5 rounded-md hidden lg:inline"
             title="مستوى حجم الخط الحالي"
           >
             {fontSize === 'sm' ? 'صغير' : fontSize === 'md' ? 'عادي' : fontSize === 'lg' ? 'كبير' : 'ضخم'}
@@ -294,6 +330,7 @@ export function TopHeader({
             disabled={fontSize === 'xl'}
             className="w-7 h-7 rounded-lg bg-[#17233A] hover:bg-[#23324D] disabled:opacity-40 text-slate-300 hover:text-white flex items-center justify-center transition-all cursor-pointer shadow-sm"
             title="تكبير حجم الخط (A+)"
+            aria-label="تكبير حجم الخط"
           >
             <ZoomIn className="w-3.5 h-3.5" />
           </button>
@@ -306,6 +343,7 @@ export function TopHeader({
             onClick={() => sendWindowCommand('window:minimize')}
             className="w-7 h-7 rounded-lg hover:bg-[#17233A] active:bg-[#202E4C] text-slate-400 hover:text-white flex items-center justify-center transition-colors"
             title="تصغير"
+            aria-label="تصغير النافذة"
           >
             <Minus className="w-3.5 h-3.5" />
           </button>
@@ -314,6 +352,7 @@ export function TopHeader({
             onClick={() => sendWindowCommand('window:maximize')}
             className="w-7 h-7 rounded-lg hover:bg-[#17233A] active:bg-[#202E4C] text-slate-400 hover:text-white flex items-center justify-center transition-colors"
             title="تكبير"
+            aria-label="تكبير النافذة"
           >
             <Square className="w-3 h-3" />
           </button>
@@ -322,6 +361,7 @@ export function TopHeader({
             onClick={() => sendWindowCommand('window:close')}
             className="w-7 h-7 rounded-lg hover:bg-rose-500 active:bg-rose-600 text-slate-400 hover:text-white flex items-center justify-center transition-colors"
             title="إغلاق"
+            aria-label="إغلاق التطبيق"
           >
             <X className="w-4 h-4" />
           </button>

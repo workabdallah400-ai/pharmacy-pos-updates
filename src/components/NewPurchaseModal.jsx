@@ -21,6 +21,12 @@ import {
 import { sqliteService } from '../db/sqliteService';
 import { playBarcodeBeep } from '../utils/sound';
 import { getUnitDisplayInfo, getUnitName } from '../utils/pharmacyUnits';
+import {
+  isExpiryInPast,
+  isValidISODate,
+  todayISODate,
+  validateExpiryInput
+} from '../utils/validation';
 import { ProductModal } from './ProductModal';
 
 export function NewPurchaseModal({
@@ -42,7 +48,7 @@ export function NewPurchaseModal({
 
   // --- 2. Invoice Metadata ---
   const [supplierInvoiceNo, setSupplierInvoiceNo] = useState('');
-  const [invoiceDate, setInvoiceDate] = useState(new Date().toISOString().slice(0, 10));
+  const [invoiceDate, setInvoiceDate] = useState(todayISODate());
   const [paymentMethod, setPaymentMethod] = useState('آجل');
 
   // --- 3. Items in Invoice ---
@@ -93,6 +99,14 @@ export function NewPurchaseModal({
         setSelectedSupplierId(initialSupplierId);
         const initialSupplier = combined.find((s) => s.id === Number(initialSupplierId));
         if (initialSupplier) setCustomSupplierName(initialSupplier.name);
+      } else {
+        // The dropdown visually shows the first supplier, so the form state
+        // must match it; otherwise confirmation fails with an empty supplier.
+        const firstSupplier = combined[0];
+        if (firstSupplier) {
+          setSelectedSupplierId((prev) => (prev ? prev : String(firstSupplier.id)));
+          setCustomSupplierName((prev) => (prev && prev.trim() ? prev : firstSupplier.name));
+        }
       }
     }).catch(console.warn);
 
@@ -244,8 +258,26 @@ export function NewPurchaseModal({
       return;
     }
 
-    if (!expiry.trim()) {
-      setError('تاريخ الصلاحية إجباري لكل صنف. أدخله يدوياً أو استخدم الصلاحية المسجلة للصنف.');
+    if (parsedBonus < 0) {
+      setError('البونص المجاني لا يمكن أن يكون رقماً سالباً.');
+      return;
+    }
+
+    const rawDiscount = String(discountPct).trim();
+    const discountNumber = rawDiscount === '' ? 0 : parseFloat(rawDiscount);
+    if (!Number.isFinite(discountNumber) || discountNumber < 0 || discountNumber > 100) {
+      setError('نسبة الخصم يجب أن تكون رقماً بين 0 و 100.');
+      return;
+    }
+
+    const expiryCheck = validateExpiryInput(expiry, { required: true });
+    if (!expiryCheck.valid) {
+      setError(expiryCheck.error);
+      return;
+    }
+
+    if (isExpiryInPast(expiry)) {
+      setError(`تاريخ صلاحية الصنف [${name}] منتهي بالفعل (${expiry.trim()}). لا يمكن تسجيل بضاعة منتهية الصلاحية.`);
       return;
     }
 
@@ -317,6 +349,37 @@ export function NewPurchaseModal({
       return;
     }
 
+    if (!invoiceDate || !isValidISODate(invoiceDate)) {
+      setError('تاريخ فاتورة الشراء إجباري ويجب أن يكون تاريخاً صحيحاً (يوم/شهر/سنة).');
+      return;
+    }
+    if (invoiceDate > todayISODate()) {
+      setError('لا يمكن تسجيل فاتورة شراء بتاريخ مستقبلي. اختر تاريخ اليوم أو تاريخاً سابقاً.');
+      return;
+    }
+
+    // Re-validate every line, including items pre-filled from another screen.
+    for (const item of items) {
+      const itemName = item.trade_name_ar || item.trade_name || 'صنف غير مسمى';
+      if (!Number.isFinite(Number(item.quantity)) || Number(item.quantity) <= 0) {
+        setError(`كمية الصنف [${itemName}] يجب أن تكون أكبر من صفر.`);
+        return;
+      }
+      if (Number(item.bonus) < 0) {
+        setError(`بونص الصنف [${itemName}] لا يمكن أن يكون سالباً.`);
+        return;
+      }
+      const itemExpiry = validateExpiryInput(item.expiry, { required: true });
+      if (!itemExpiry.valid) {
+        setError(`الصنف [${itemName}]: ${itemExpiry.error}`);
+        return;
+      }
+      if (isExpiryInPast(item.expiry)) {
+        setError(`الصنف [${itemName}] منتهي الصلاحية (${String(item.expiry).trim()}). لا يمكن إضافته لفاتورة توريد.`);
+        return;
+      }
+    }
+
     // Determine supplier name and id
     let supName = customSupplierName.trim();
     let supId = selectedSupplierId;
@@ -351,6 +414,9 @@ export function NewPurchaseModal({
 
     const now = new Date();
     const invoiceCode = `PUR-${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getTime()).slice(-6)}`;
+    // The operator-selected paper-invoice date must be what the app stores;
+    // previously it was entered and then silently replaced with "now".
+    const invoiceDateTime = `${invoiceDate}T${now.toTimeString().slice(0, 8)}`;
 
     const completedInvoice = {
       id: invoiceCode,
@@ -360,7 +426,7 @@ export function NewPurchaseModal({
       supplier_id: supId || Date.now(),
       supplier_name: supName,
       date: invoiceDate,
-      date_time: new Date().toISOString(),
+      date_time: invoiceDateTime,
       payment_method: paymentMethod,
       payment_status: paymentMethod === 'نقدي' ? 'تم السداد' : 'مستحق السداد',
       items_count: items.length,
@@ -502,12 +568,15 @@ export function NewPurchaseModal({
               </select>
             </div>
             <div className="flex-1">
-              <label className="block text-slate-300 font-semibold mb-1">التاريخ</label>
+              <label className="block text-slate-300 font-semibold mb-1">التاريخ <span className="text-rose-400">*</span></label>
               <input
                 type="date"
+                required
+                max={todayISODate()}
                 value={invoiceDate}
                 onChange={(e) => setInvoiceDate(e.target.value)}
                 className="w-full h-10 bg-[#17233A] border border-[#23324D] focus:border-teal-400 rounded-xl px-2 text-white outline-none font-mono text-xs"
+                title="تاريخ الفاتورة الورقية: اليوم أو تاريخ سابق فقط"
               />
             </div>
           </div>
@@ -666,8 +735,8 @@ export function NewPurchaseModal({
               <label className="block text-slate-400 text-[11px] font-semibold mb-1">سعر الجمهور *</label>
               <input
                 type="number"
-                step="0.25"
-                min="0"
+                step="0.01"
+                min="0.01"
                 placeholder="0.00"
                 value={priceBox}
                 onChange={(e) => setPriceBox(e.target.value)}
@@ -708,9 +777,9 @@ export function NewPurchaseModal({
               <label className="block text-slate-400 text-[11px] font-semibold mb-1">خصم %</label>
               <input
                 type="number"
-                step="0.5"
+                step="0.01"
                 min="0"
-                max="95"
+                max="100"
                 value={discountPct}
                 onChange={(e) => setDiscountPct(e.target.value)}
                 className="w-full h-10 bg-[#17233A] border border-[#23324D] focus:border-teal-400 text-center font-mono font-bold text-amber-300 rounded-xl outline-none"

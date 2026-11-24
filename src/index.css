@@ -2,36 +2,50 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ======================================================== */
+/* CAIRO (self-hosted — the app must work 100% offline)      */
+/* ======================================================== */
+@font-face {
+  font-family: 'Cairo';
+  font-style: normal;
+  font-weight: 200 1000;
+  font-display: swap;
+  src: url('./assets/fonts/cairo-arabic.woff2') format('woff2');
+  unicode-range: U+0600-06FF, U+0750-077F, U+0870-0891, U+0897-08E1, U+08E3-08FF, U+200C-200E, U+2010-2011, U+204F, U+2E41, U+FB50-FDFF, U+FE70-FE74, U+FE76-FEFC;
+}
+@font-face {
+  font-family: 'Cairo';
+  font-style: normal;
+  font-weight: 200 1000;
+  font-display: swap;
+  src: url('./assets/fonts/cairo-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Cairo';
+  font-style: normal;
+  font-weight: 200 1000;
+  font-display: swap;
+  src: url('./assets/fonts/cairo-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
 @layer base {
   body {
     background-color: #0B1220;
     color: #E2E8F0;
-    font-family: 'Cairo', sans-serif;
-    user-select: none;
-    -webkit-user-select: none;
-    transition: filter 0.25s ease, font-size 0.2s ease;
+    font-family: 'Cairo', 'Segoe UI', Tahoma, sans-serif;
+    transition: filter 0.25s ease;
   }
 }
 
 /* ======================================================== */
-/* FONT SIZES & PROPORTIONAL ZOOM (تكبير وتصغير الزووم)      */
+/* ZOOM                                                      */
 /* ======================================================== */
-html[data-font-size="sm"] {
-  font-size: 15px;
-  zoom: 0.92;
-}
-html[data-font-size="md"] {
-  font-size: 16px;
-  zoom: 1;
-}
-html[data-font-size="lg"] {
-  font-size: 16px;
-  zoom: 1.08;
-}
-html[data-font-size="xl"] {
-  font-size: 16px;
-  zoom: 1.16;
-}
+/* Intentionally no CSS `zoom` / root font-size scaling here.
+   The UI uses ONE mechanism: Electron's native webFrame zoom
+   (see src/utils/useThemeAndFontSize.js). Applying both was
+   multiplying the zoom (0.78x–1.39x instead of 0.9x–1.2x). */
 
 /* Ensure no text distortion, word collisions or container overflow */
 * {
@@ -76,4 +90,28 @@ html.theme-light .receipt-paper {
 }
 ::-webkit-scrollbar-thumb:hover {
   background: #14B8A6;
+}
+
+/* Keyboard focus must stay visible even where components use
+   Tailwind's focus:outline-none. */
+:where(button, a, input, select, textarea, [role="button"], [tabindex]):focus-visible {
+  outline: 2px solid #2DD4BF !important;
+  outline-offset: 2px;
+}
+
+::selection {
+  background: #14B8A6;
+  color: #04211F;
+}
+
+/* Respect the OS "reduce motion" setting. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

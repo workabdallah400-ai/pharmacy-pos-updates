@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
-import { X, Building2, Phone, User, MapPin, DollarSign, CheckCircle2, Search, ArrowUpRight } from 'lucide-react';
+import { X, Building2, Phone, User, MapPin, DollarSign, CheckCircle2, Search, ArrowUpRight, AlertCircle } from 'lucide-react';
 
 export function SuppliersModal({ isOpen, onClose, suppliers, onPaySupplier }) {
   const [search, setSearch] = useState('');
   const [payingSupplier, setPayingSupplier] = useState(null);
   const [paymentAmount, setPaymentAmount] = useState('');
+  const [paymentError, setPaymentError] = useState('');
 
   if (!isOpen) return null;
 
@@ -22,12 +23,25 @@ export function SuppliersModal({ isOpen, onClose, suppliers, onPaySupplier }) {
 
   const handleConfirmPayment = (e) => {
     e.preventDefault();
+    if (!payingSupplier) return;
+
+    setPaymentError('');
     const amount = parseFloat(paymentAmount);
-    if (!amount || amount <= 0 || !payingSupplier) return;
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setPaymentError('يرجى إدخال مبلغ سداد صحيح أكبر من صفر.');
+      return;
+    }
+
+    const balance = Math.max(0, Number(payingSupplier.balance) || 0);
+    if (amount > balance + 0.001) {
+      setPaymentError(`المبلغ (${amount.toFixed(2)} ج.م) أكبر من المديونية المستحقة (${balance.toFixed(2)} ج.م).`);
+      return;
+    }
 
     onPaySupplier(payingSupplier.id, amount);
     setPayingSupplier(null);
     setPaymentAmount('');
+    setPaymentError('');
   };
 
   return (
@@ -115,7 +129,8 @@ export function SuppliersModal({ isOpen, onClose, suppliers, onPaySupplier }) {
                     type="button"
                     onClick={() => {
                       setPayingSupplier(sup);
-                      setPaymentAmount(sup.balance.toString());
+                      setPaymentAmount(String(Math.max(0, Number(sup.balance) || 0)));
+                      setPaymentError('');
                     }}
                     className="px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 text-xs font-bold border border-amber-500/30 flex items-center gap-1 transition-colors"
                   >
@@ -165,14 +180,22 @@ export function SuppliersModal({ isOpen, onClose, suppliers, onPaySupplier }) {
               </label>
               <input
                 type="number"
-                step="0.5"
+                step="0.01"
+                min="0.01"
+                max={Math.max(0, Number(payingSupplier.balance) || 0)}
                 required
                 autoFocus
                 value={paymentAmount}
-                onChange={(e) => setPaymentAmount(e.target.value)}
+                onChange={(e) => { setPaymentAmount(e.target.value); setPaymentError(''); }}
                 className="w-full h-11 bg-[#17233A] border border-[#23324D] focus:border-amber-400 rounded-xl px-3 text-amber-300 font-mono font-bold text-base outline-none"
                 dir="ltr"
               />
+              {paymentError && (
+                <div className="mt-1.5 text-[11px] font-bold text-rose-400 flex items-center gap-1">
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                  <span>{paymentError}</span>
+                </div>
+              )}
             </div>
 
             <div className="flex items-center gap-2 pt-2">

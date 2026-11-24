@@ -122,27 +122,35 @@ export function POSView({
     searchInputRef.current?.focus();
   }, []);
 
+  /**
+   * Re-read the live shift counters from SQLite. Used on mount, after a sale
+   * and after a refund, so the footer never shows a stale total.
+   */
+  const refreshShiftStats = async () => {
+    if (!currentShift?.id) {
+      setShiftSalesTotal(0);
+      setShiftInvoicesCount(0);
+      return;
+    }
+    try {
+      const fresh = (await sqliteService.getCurrentShift()) || currentShift;
+      const total = Number(fresh.total_sales)
+        || ['cash_sales', 'visa_sales', 'instapay_sales', 'credit_sales']
+          .reduce((sum, key) => sum + (Number(fresh[key]) || 0), 0);
+      setShiftSalesTotal(total);
+      const audit = await sqliteService.getShiftFullAudit(fresh.id || currentShift.id);
+      const invoiceCount = audit?.invoices?.length || 0;
+      setShiftInvoicesCount(invoiceCount);
+      // Keep the on-screen draft number unique per shift instead of always
+      // restarting at INV-1001 after remounting the POS screen.
+      setInvoiceSeq(1001 + invoiceCount);
+    } catch (e) {}
+  };
+
   // Initialise the footer shift counters from the real shift, so switching
   // tabs (which remounts POSView) no longer resets "shift sales" to zero.
   useEffect(() => {
-    let alive = true;
-    const loadShiftStats = async () => {
-      if (!currentShift?.id) {
-        setShiftSalesTotal(0);
-        setShiftInvoicesCount(0);
-        return;
-      }
-      const total = Number(currentShift.total_sales)
-        || ['cash_sales', 'visa_sales', 'instapay_sales', 'credit_sales']
-          .reduce((sum, key) => sum + (Number(currentShift[key]) || 0), 0);
-      setShiftSalesTotal(total);
-      try {
-        const audit = await sqliteService.getShiftFullAudit(currentShift.id);
-        if (alive) setShiftInvoicesCount(audit?.invoices?.length || 0);
-      } catch (e) {}
-    };
-    loadShiftStats();
-    return () => { alive = false; };
+    refreshShiftStats();
   }, [currentShift?.id]);
 
   const showToast = (msg, type = 'success') => {
@@ -172,7 +180,23 @@ export function POSView({
   // 3. Global Keyboard Shortcuts Listener (F1, F2, F3, F4, F5, F6, F7, F8, F12)
   useEffect(() => {
     const handleGlobalShortcuts = (e) => {
-      // Avoid triggering when typing in modal inputs
+      // Never fire POS shortcuts while a modal is open, or while the user is
+      // typing in any field. Before this guard, pressing F4 inside the product
+      // modal silently cleared the cart and F1 could attempt a checkout.
+      const anyModalOpen =
+        showAltModal || showReceiptModal || showParkedModal ||
+        showExpenseModal || showQRModal || showReturnModal || !!fefoAlertModal;
+      if (anyModalOpen) return;
+      if (typeof document !== 'undefined' && document.querySelector('[role="dialog"], [aria-modal="true"]')) return;
+
+      const target = e.target;
+      const tag = target && target.tagName;
+      const isTyping =
+        tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' ||
+        (target && target.isContentEditable);
+      // F5 only refocuses the search box, so it stays useful while typing.
+      if (isTyping && e.key !== 'F5') return;
+
       if (e.key === 'F1') {
         e.preventDefault();
         handleCheckout();
@@ -524,9 +548,15 @@ export function POSView({
     }
 
     const newParked = {
-      id: parkedBills.length + 1,
+      id: parkedBills.reduce((max, b) => Math.max(max, Number(b.id) || 0), 0) + 1,
       items: [...cart],
       total: calculateTotal(),
+      // Keep the whole bill context, not just the items: the customer (needed
+      // for آجل), discount, payment method and the cash amount entered.
+      customerId: selectedCustomerId,
+      discount,
+      paymentMethod,
+      paidAmount,
       time: new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })
     };
 
@@ -534,6 +564,8 @@ export function POSView({
     setCart([]);
     setDiscount(0);
     setPaidAmount('');
+    setSelectedCustomerId(0);
+    setPaymentMethod('كاش');
     showToast(`تم تعليق الفاتورة #${newParked.id} بنجاح (F2)`, 'success');
     searchInputRef.current?.focus();
   };
@@ -541,6 +573,10 @@ export function POSView({
   // Resume Parked Bill
   const handleResumeParkedBill = (bill) => {
     setCart(bill.items);
+    setDiscount(bill.discount ?? 0);
+    setPaymentMethod(bill.paymentMethod || 'كاش');
+    setPaidAmount(bill.paidAmount ?? '');
+    setSelectedCustomerId(bill.customerId ?? 0);
     setParkedBills((prev) => prev.filter((b) => b.id !== bill.id));
     showToast(`تم استدعاء الفاتورة المعلقة #${bill.id} للسلة بنجاح!`, 'success');
     searchInputRef.current?.focus();
@@ -561,6 +597,15 @@ export function POSView({
         ipcRenderer.invoke('hardware:kickDrawer');
       } catch (e) {}
     }
+    sqliteService
+      .recordAudit(
+        'DRAWER_OPEN',
+        'shift',
+        String(currentShift?.id || ''),
+        'فتح درج النقدية يدوياً من نقطة البيع (F7)',
+        currentUser?.username || currentUser?.full_name || 'المستخدم'
+      )
+      .catch(() => {});
     showToast('تم إرسال نبضة فتح درج النقدية الإلكتروني (F7) 💵', 'success');
   };
 
@@ -675,12 +720,29 @@ export function POSView({
       splitPaidCredit = Math.round((currentTotal - splitPaidCash) * 100) / 100;
     }
 
+    if (paymentMethod === 'كاش' && String(paidAmount).trim() !== '') {
+      const cashReceived = parseFloat(paidAmount);
+      if (!Number.isFinite(cashReceived) || cashReceived < 0) {
+        showToast('⚠️ المبلغ المستلم غير صالح. أدخل مبلغاً صفراً أو أكبر.', 'warning');
+        return;
+      }
+      if (cashReceived < currentTotal) {
+        showToast(`⚠️ المبلغ المستلم (${cashReceived.toFixed(2)} ج.م) أقل من إجمالي الفاتورة (${currentTotal.toFixed(2)} ج.م).`, 'warning');
+        return;
+      }
+    }
+
     if ((paymentMethod === 'آجل' || paymentMethod === 'مختلط') && customer) {
       const limit = Number(customer.credit_limit) || 0;
       const balance = Number(customer.balance) || 0;
       const addedDebt = paymentMethod === 'مختلط' ? splitPaidCredit : currentTotal;
       if (limit > 0 && balance + addedDebt > limit) {
-        showToast(`⚠️ إجمالي مديونية العميل سيتجاوز سقف الائتمان (${limit} ج.م).`, 'warning');
+        const remaining = Math.max(0, limit - balance);
+        showToast(
+          `❌ لا يمكن إتمام البيع: إجمالي مديونية العميل (${(balance + addedDebt).toFixed(2)} ج.م) سيتجاوز سقف الائتمان (${limit.toFixed(2)} ج.م). المتاح على الحساب: ${remaining.toFixed(2)} ج.م فقط.`,
+          'warning'
+        );
+        return;
       }
     }
 
@@ -787,25 +849,31 @@ export function POSView({
   };
 
   return (
-    <div className="flex-1 h-full flex flex-col bg-[#0B1220] text-slate-100 overflow-hidden select-none font-cairo">
+    <div className="flex-1 h-full flex flex-col bg-[#0B1220] text-slate-100 overflow-hidden font-cairo">
       
-      {/* Toast Alert */}
-      {toastMessage && (
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 animate-in fade-in slide-in-from-top-4 duration-200">
-          <div
-            className={`px-4 py-2.5 rounded-2xl shadow-glow-teal flex items-center gap-2 border text-xs font-bold ${
-              toastType === 'warning'
-                ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
-                : toastType === 'info'
-                ? 'bg-blue-500/20 text-blue-300 border-blue-500/40'
-                : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
-            }`}
-          >
-            <Sparkles className="w-4 h-4" />
-            <span>{toastMessage}</span>
+      {/* Toast Alert (persistent live region so screen readers announce it) */}
+      <div
+        className="absolute top-4 left-1/2 -translate-x-1/2 z-50 pointer-events-none"
+        role="status"
+        aria-live="polite"
+      >
+        {toastMessage && (
+          <div className="animate-in fade-in slide-in-from-top-4 duration-200">
+            <div
+              className={`px-4 py-2.5 rounded-2xl shadow-glow-teal flex items-center gap-2 border text-xs font-bold ${
+                toastType === 'warning'
+                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                  : toastType === 'info'
+                  ? 'bg-blue-500/20 text-blue-300 border-blue-500/40'
+                  : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+              }`}
+            >
+              <Sparkles className="w-4 h-4" />
+              <span>{toastMessage}</span>
+            </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* Main Split Layout: 60% Catalog on Right | 40% Cart on Left */}
       <div className="flex-1 flex flex-row overflow-hidden">
@@ -813,7 +881,7 @@ export function POSView({
         {/* ======================================================== */}
         {/* RIGHT SECTION (60%): Smart Search & Drug Catalog Grid    */}
         {/* ======================================================== */}
-        <section className="w-[60%] border-l border-[#23324D] flex flex-col bg-[#0B1220] overflow-hidden">
+        <section className="flex-1 min-w-0 border-l border-[#23324D] flex flex-col bg-[#0B1220] overflow-hidden">
           
           {/* Top Search Bar */}
           <div className="p-3.5 bg-[#111A2B] border-b border-[#23324D] shadow-sm">
@@ -855,9 +923,9 @@ export function POSView({
           </div>
 
           {/* Medicines Grid */}
-          <div className="flex-1 overflow-y-auto p-3.5 grid grid-cols-1 md:grid-cols-2 gap-2.5 content-start">
+          <div className="flex-1 overflow-y-auto p-3.5 grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-2.5 content-start">
             {filteredMedicines.length === 0 ? (
-              <div className="col-span-2 text-center py-16 text-slate-400">
+              <div className="col-span-full text-center py-16 text-slate-400">
                 <Inbox className="w-12 h-12 text-slate-600 mx-auto mb-2" />
                 <p className="font-bold text-sm text-slate-300">
                   {searchQuery ? 'لم يتم العثور على أدوية مطابقة لكلمة البحث' : 'دليل الأدوية فارغ حالياً (0 أصناف)'}
@@ -1058,7 +1126,7 @@ export function POSView({
         {/* ======================================================== */}
         {/* LEFT SECTION (40%): Current Bill & Cart & Summary        */}
         {/* ======================================================== */}
-        <section className="w-[40%] flex flex-col bg-[#111A2B] overflow-hidden justify-between">
+        <section className="w-[40%] min-w-[360px] max-w-[560px] shrink-0 flex flex-col bg-[#111A2B] overflow-hidden justify-between">
           
           {/* Bill Top Bar */}
           <div className="p-3 border-b border-[#23324D] bg-[#141E30] flex items-center justify-between">
@@ -1128,6 +1196,7 @@ export function POSView({
                 onClick={handleClearCart}
                 className="w-8 h-8 rounded-lg bg-[#17233A] hover:bg-rose-500/20 text-slate-400 hover:text-rose-300 border border-[#23324D] flex items-center justify-center transition-colors"
                 title="تفريغ السلة (F4)"
+                aria-label="تفريغ السلة"
               >
                 <RotateCcw className="w-3.5 h-3.5" />
               </button>
@@ -1267,7 +1336,7 @@ export function POSView({
                 <div className="relative">
                   <input
                     type="number"
-                    step="0.5"
+                    step="0.01"
                     min="0"
                     placeholder="0"
                     disabled={
@@ -1307,10 +1376,13 @@ export function POSView({
                   <span className="text-slate-400">المدفوع كاش:</span>
                   <input
                     type="number"
+                    min="0"
+                    step="0.01"
                     value={paidAmount}
                     onChange={(e) => setPaidAmount(e.target.value)}
                     placeholder="0"
                     className="w-20 bg-[#0B1220] border border-[#23324D] text-emerald-400 px-2 py-0.5 rounded text-xs font-mono font-bold text-left"
+                    aria-label="المبلغ المدفوع كاش"
                     dir="ltr"
                   />
                 </div>
@@ -1353,10 +1425,13 @@ export function POSView({
                 ) : (
                   <input
                     type="number"
+                    min="0"
+                    step="0.01"
                     placeholder={currentTotal.toFixed(0)}
                     value={paidAmount}
                     onChange={(e) => setPaidAmount(e.target.value)}
                     className="w-20 text-left bg-transparent text-white font-mono font-bold outline-none text-xs"
+                    aria-label="المبلغ المستلم من العميل"
                     dir="ltr"
                   />
                 )}
@@ -1569,6 +1644,9 @@ export function POSView({
             const refreshed = await sqliteService.searchMedicines(searchQuery, 50);
             if (Array.isArray(refreshed)) setSqliteMedicines(refreshed);
           } catch (e) {}
+          // The refund decreased the live shift totals — refresh the footer
+          // counters immediately instead of waiting for a tab remount.
+          await refreshShiftStats();
           if (typeof onSaleCompleted === 'function') {
             await onSaleCompleted();
           }

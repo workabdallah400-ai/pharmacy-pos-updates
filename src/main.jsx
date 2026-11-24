@@ -37,6 +37,24 @@ try {
   }
 } catch (e) {}
 
+// Apply the saved theme + zoom before the first render so the login screen
+// does not flash dark / at the wrong scale on every launch.
+try {
+  const savedTheme = localStorage.getItem('PHARMACY_APP_THEME_MODE');
+  if (savedTheme === 'light') document.documentElement.classList.add('theme-light');
+
+  const savedSize = localStorage.getItem('PHARMACY_APP_FONT_SIZE') || 'md';
+  const factor = { sm: 0.9, md: 1, lg: 1.1, xl: 1.2 }[savedSize] || 1;
+  if (window.require) {
+    const { webFrame } = window.require('electron');
+    if (webFrame && typeof webFrame.setZoomFactor === 'function') {
+      webFrame.setZoomFactor(factor);
+    }
+  } else {
+    document.documentElement.style.zoom = factor === 1 ? '' : String(factor);
+  }
+} catch (e) {}
+
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <App />

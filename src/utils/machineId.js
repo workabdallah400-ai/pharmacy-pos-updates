@@ -119,7 +119,7 @@ export function buildMachineId(macList, machineGuid = '') {
  * Resolves machine identity taking into account legacy migrated customers.
  */
 export function resolveMachineIdentity({ hardwareId, storedMachineId, storedStatus, keyValidForStoredId }) {
-  if (storedMachineId && keyValidForStoredId && (storedStatus === 'LIFETIME' || storedStatus === 'DURATION')) {
+  if (storedMachineId && keyValidForStoredId && (storedStatus === 'LIFETIME' || storedStatus === 'TIMED' || storedStatus === 'DURATION')) {
     return {
       machineId: storedMachineId,
       source: 'LEGACY',

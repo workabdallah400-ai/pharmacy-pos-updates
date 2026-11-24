@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { X, Plus, User, Phone, Package, Building2, AlertCircle, FileText, Sparkles } from 'lucide-react';
+import { isValidPhone } from '../utils/validation';
 
 export function AddCustomShortageModal({ isOpen, onClose, suppliers, onAddCustomItem }) {
   const [tradeName, setTradeName] = useState('');
@@ -26,6 +27,21 @@ export function AddCustomShortageModal({ isOpen, onClose, suppliers, onAddCustom
     if (!qty || qty <= 0) {
       setError('يرجى تحديد كمية صحيحة بالعلب');
       return;
+    }
+
+    if (type === 'CUSTOMER_REQUEST') {
+      if (!customerName.trim()) {
+        setError('اسم العميل إجباري في طلبات العملاء المخصصة.');
+        return;
+      }
+      if (!customerPhone.trim()) {
+        setError('رقم موبايل العميل إجباري في طلبات العملاء المخصصة.');
+        return;
+      }
+      if (!isValidPhone(customerPhone)) {
+        setError('رقم موبايل العميل غير صحيح. أدخل 7 إلى 15 رقماً مع السماح بمسافات أو شرطات.');
+        return;
+      }
     }
 
     const customItem = {
@@ -196,9 +212,12 @@ export function AddCustomShortageModal({ isOpen, onClose, suppliers, onAddCustom
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-[11px] text-slate-400 mb-1">اسم العميل</label>
+                  <label className="block text-[11px] text-slate-400 mb-1">
+                    اسم العميل <span className="text-rose-400">*</span>
+                  </label>
                   <input
                     type="text"
+                    required={type === 'CUSTOMER_REQUEST'}
                     value={customerName}
                     onChange={(e) => setCustomerName(e.target.value)}
                     placeholder="مثال: أ. محمود الشناوي"
@@ -206,9 +225,13 @@ export function AddCustomShortageModal({ isOpen, onClose, suppliers, onAddCustom
                   />
                 </div>
                 <div>
-                  <label className="block text-[11px] text-slate-400 mb-1">رقم الموبايل (واتساب)</label>
+                  <label className="block text-[11px] text-slate-400 mb-1">
+                    رقم الموبايل (واتساب) <span className="text-rose-400">*</span>
+                  </label>
                   <input
                     type="tel"
+                    required={type === 'CUSTOMER_REQUEST'}
+                    maxLength={20}
                     value={customerPhone}
                     onChange={(e) => setCustomerPhone(e.target.value)}
                     placeholder="01012345678"

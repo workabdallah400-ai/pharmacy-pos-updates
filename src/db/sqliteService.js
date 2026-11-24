@@ -11,7 +11,7 @@ import {
   isPrivateHost
 } from '../utils/reportServer';
 import { DEFAULT_SETTINGS } from '../data/mockSettings.js';
-import { validateInvoiceDiscount, validateDebtCollection } from '../utils/validation.js';
+import { validateInvoiceDiscount, validateDebtCollection, parseExpiryDate, todayISODate } from '../utils/validation.js';
 import { normalizePermissions, canManageUser } from '../utils/permissions.js';
 import { hashPassword, verifyPassword, validatePasswordPolicy } from '../utils/password.js';
 
@@ -261,45 +261,90 @@ class SQLiteService {
     }
   }
 
-  async _runFullCatalogMigration() {
-    const MIGRATION_KEY = 'full_catalog_v1423_applied';
-    try {
-      const meta = this.db.exec(`SELECT value FROM app_meta WHERE key = '${MIGRATION_KEY}' LIMIT 1`);
-      if (meta.length && meta[0].values.length && meta[0].values[0][0] === '1') return;
+  _medicineColumns() {
+    return [
+      'id', 'trade_name', 'trade_name_ar', 'generic_name', 'barcode',
+      'price_box', 'price_strip', 'strips_per_box', 'stock_boxes', 'stock_strips',
+      'shelf', 'category', 'reorder_level', 'preferred_supplier', 'unit_type',
+      'units_per_strip', 'price_unit', 'stock_units', 'expiry', 'source_code',
+      'source_slug', 'description', 'uses'
+    ];
+  }
 
-      let catalog = null;
-      const isElectron = typeof window !== 'undefined' && window.require;
-      if (isElectron) {
-        try {
-          const { ipcRenderer } = window.require('electron');
-          if (ipcRenderer && ipcRenderer.invoke) catalog = await ipcRenderer.invoke('catalog:read');
-        } catch (e) {}
+  // Convert one baked-catalog entry into the medicines table column order.
+  // Stock fields are always zero: the shipped catalog is a price list, not inventory.
+  _catalogItemToRow(item) {
+    const priceBox = Number(item.priceBox) || 0;
+    const priceStrip = Number(item.priceStrip) || 0;
+    const units = Math.max(1, Number(item.unitsPerStrip) || 1);
+    const strips = Math.max(1, Number(item.stripsPerBox) || 1);
+    return [
+      Number(item.id), String(item.tradeName || ''), String(item.tradeNameAr || item.tradeName || ''),
+      item.genericName || null, item.barcode ? String(item.barcode).trim() : null,
+      priceBox, priceStrip, strips, 0, 0, null, item.category || 'other', 5,
+      item.supplier || null, item.unitType || 'tablets', units,
+      Number(item.priceUnit) || 0, 0, null,
+      item.sourceCode ? String(item.sourceCode) : String(item.id),
+      item.sourceSlug || null, item.description || item.category || null, item.uses || null
+    ];
+  }
+
+  // Read the baked-in fixed catalogue (ships with the app, zero stock).
+  async _loadBakedCatalog() {
+    const fileName = 'catalog-v1500.json';
+    const fallbackName = 'catalog-v1423.json';
+    let catalog = null;
+    const isElectron = typeof window !== 'undefined' && window.require;
+    if (isElectron) {
+      try {
+        const { ipcRenderer } = window.require('electron');
+        if (ipcRenderer && ipcRenderer.invoke) catalog = await ipcRenderer.invoke('catalog:read');
+      } catch (e) {}
+      if (!catalog) {
         try {
           const fs = window.require('fs');
           const path = window.require('path');
-          const candidates = [
-            path.join(process.resourcesPath || '', 'catalog-v1423.json'),
-            path.join(__dirname, '../dist/catalog-v1423.json'),
-            path.join(__dirname, '../public/catalog-v1423.json'),
-            path.join(process.cwd(), 'catalog-v1423.json'),
-            path.join(process.cwd(), 'public/catalog-v1423.json')
+          const dirs = [
+            process.resourcesPath || '',
+            path.join(__dirname, '../dist'),
+            path.join(__dirname, '../public'),
+            process.cwd(),
+            path.join(process.cwd(), 'public'),
+            path.join(process.cwd(), 'dist')
           ];
-          const hit = candidates.find((p) => fs.existsSync(p));
+          const candidates = [];
+          for (const d of dirs) { candidates.push(path.join(d, fileName)); }
+          for (const d of dirs) { candidates.push(path.join(d, fallbackName)); }
+          const hit = candidates.find((p) => { try { return fs.existsSync(p); } catch (e) { return false; } });
           if (hit) catalog = JSON.parse(fs.readFileSync(hit, 'utf8'));
         } catch (e) {
           console.warn('Catalog file read warning:', e);
         }
       }
-      if (!catalog && typeof window !== 'undefined') {
+    }
+    if (!catalog && typeof window !== 'undefined') {
+      for (const name of [fileName, fallbackName]) {
         try {
-          const res = await fetch('./catalog-v1423.json?t=' + Date.now(), { cache: 'no-store' });
-          if (res.ok) catalog = await res.json();
+          const res = await fetch(`./${name}?t=` + Date.now(), { cache: 'no-store' });
+          if (res.ok) { catalog = await res.json(); break; }
         } catch (e) {
           console.warn('Catalog fetch warning:', e);
         }
       }
-      if (!catalog || !Array.isArray(catalog.catalog) || catalog.catalog.length === 0) {
-        console.warn('Full catalog migration skipped: catalog-v1423.json is unavailable.');
+    }
+    if (!catalog || !Array.isArray(catalog.catalog) || catalog.catalog.length === 0) return null;
+    return catalog;
+  }
+
+  async _runFullCatalogMigration() {
+    const MIGRATION_KEY = 'full_catalog_v1500_applied';
+    try {
+      const meta = this.db.exec(`SELECT value FROM app_meta WHERE key = '${MIGRATION_KEY}' LIMIT 1`);
+      if (meta.length && meta[0].values.length && meta[0].values[0][0] === '1') return;
+
+      const catalog = await this._loadBakedCatalog();
+      if (!catalog) {
+        console.warn('Full catalog migration skipped: catalog-v1500.json is unavailable.');
         return;
       }
 
@@ -313,37 +358,24 @@ class SQLiteService {
         return;
       }
 
+      const isElectron = typeof window !== 'undefined' && window.require;
       try {
         const ipc = isElectron ? window.require('electron').ipcRenderer : null;
-        if (ipc) await ipc.invoke('db:backup', 'catalog-v1423-before-replace');
+        if (ipc) await ipc.invoke('db:backup', 'catalog-before-replace');
       } catch (e) {
         console.warn('Catalog backup warning:', e);
       }
 
-      const columns = [
-        'id', 'trade_name', 'trade_name_ar', 'generic_name', 'barcode',
-        'price_box', 'price_strip', 'strips_per_box', 'stock_boxes', 'stock_strips',
-        'shelf', 'category', 'reorder_level', 'preferred_supplier', 'unit_type',
-        'units_per_strip', 'price_unit', 'stock_units', 'expiry', 'source_code',
-        'source_slug', 'description', 'uses'
-      ];
+      const columns = this._medicineColumns();
       const placeholders = columns.map(() => '?').join(', ');
       const stmt = this.db.prepare(`INSERT INTO medicines (${columns.join(', ')}) VALUES (${placeholders})`);
       this.db.run('BEGIN TRANSACTION;');
       try {
         this.db.run('DELETE FROM medicines;');
         for (const item of catalog.catalog) {
-          const priceBox = Number(item.priceBox) || 0;
-          const priceStrip = Number(item.priceStrip) || 0;
-          const units = Math.max(1, Number(item.unitsPerStrip) || 1);
-          const strips = Math.max(1, Number(item.stripsPerBox) || 1);
-          stmt.run([
-            Number(item.id), String(item.tradeName || ''), String(item.tradeNameAr || item.tradeName || ''),
-            item.genericName || null, item.barcode || null, priceBox, priceStrip, strips,
-            0, 0, null, item.category || 'other', 5, item.supplier || null, item.unitType || 'tablets',
-            units, Number(item.priceUnit) || priceBox, 0, null, String(item.sourceCode || item.id),
-            item.sourceSlug || null, item.description || item.category || null, item.uses || null
-          ]);
+          try { stmt.run(this._catalogItemToRow(item)); } catch (rowErr) {
+            console.warn('Skipped catalog row', item && item.id, rowErr && rowErr.message);
+          }
         }
         stmt.free();
         this.db.run(`INSERT OR REPLACE INTO app_meta (key, value) VALUES ('${MIGRATION_KEY}', '1');`);
@@ -354,7 +386,7 @@ class SQLiteService {
         throw e;
       }
       this.saveToDisk();
-      console.log(`✅ Full medicine catalog replaced from source: ${catalog.catalog.length} rows.`);
+      console.log(`✅ Fixed medicine catalogue installed: ${catalog.catalog.length} rows (stock zeroed).`);
     } catch (e) {
       console.warn('Full catalog migration warning:', e);
     }
@@ -685,6 +717,35 @@ class SQLiteService {
     try { this.db.run("ALTER TABLE invoice_items ADD COLUMN batch_no TEXT;"); } catch (e) {}
     try { this.db.run("ALTER TABLE invoice_items ADD COLUMN expiry TEXT;"); } catch (e) {}
 
+    // Migration: freeze the real net cost per box (after supplier discount AND
+    // bonus) on each purchase line. batch quantity/bonus are mutated by FEFO,
+    // so deriving the cost from them after the first sale drifts upward.
+    try { this.db.run("ALTER TABLE purchase_items ADD COLUMN unit_net_cost REAL;"); } catch (e) {}
+    try {
+      this.db.run(`
+        UPDATE purchase_items
+        SET unit_net_cost = ROUND(
+          CASE
+            WHEN COALESCE(total_net, 0) > 0 AND (COALESCE(quantity,0) + COALESCE(bonus,0)) > 0
+              THEN total_net / (quantity + bonus)
+            ELSE COALESCE(net_box_price, price_box, 0) * COALESCE(quantity,0) /
+                 NULLIF(COALESCE(quantity,0) + COALESCE(bonus,0), 0)
+          END, 4)
+        WHERE unit_net_cost IS NULL
+          AND COALESCE(net_box_price, price_box, 0) > 0
+          AND (COALESCE(quantity,0) + COALESCE(bonus,0)) > 0
+      `);
+      // Fully depleted legacy batches have no ratio left; their net box price
+      // is the closest stable estimate.
+      this.db.run(`
+        UPDATE purchase_items
+        SET unit_net_cost = COALESCE(net_box_price, price_box, 0)
+        WHERE unit_net_cost IS NULL
+          AND COALESCE(net_box_price, price_box, 0) > 0
+          AND (COALESCE(quantity,0) + COALESCE(bonus,0)) <= 0
+      `);
+    } catch (e) {}
+
     // Migration safe check for setup_completed and legacy admin
     this._runUserMigration();
     this._runMedicineDosageUnitMigration();
@@ -726,6 +787,7 @@ class SQLiteService {
 
   async saveSettings(settings) {
     await this.init();
+    this._requireAuth();
     try {
       this._initSettingsTable();
       const json = JSON.stringify(settings);
@@ -884,14 +946,97 @@ class SQLiteService {
     this._currentUser = null;
   }
 
+  _requireAuth() {
+    if (!this._currentUser) {
+      throw new Error('يجب تسجيل الدخول أولاً لتنفيذ هذه العملية.');
+    }
+    return this._currentUser;
+  }
+
   _requirePermission(key) {
-    if (!this._currentUser) return; // Legacy mode (no user session set)
-    if (this._currentUser.role === 'admin') return;
-    const perms = this._currentUser.permissions || {};
+    const user = this._requireAuth();
+    if (user.role === 'admin') return;
+    const perms = user.permissions || {};
     if (perms[key] !== true) {
       throw new Error(`عذراً، ليس لديك الصلاحية الكافية لتنفيذ هذه العملية (${key}).`);
     }
   }
+
+  /**
+   * Applies a credit amount to a customer inside the caller's transaction.
+   * Creates the customer when missing, enforces the credit ceiling in the
+   * SERVICE layer (not only in POSView), updates the balance and writes the
+   * matching DEBIT row in customer_ledger so the SQL consistency check
+   * (balance = SUM(debit - credit)) always holds.
+   */
+  _applyCreditCharge(customerName, customerPhone, amount, refNo, dateTime, description) {
+    const charge = Number(amount) || 0;
+    if (charge <= 0) return null;
+
+    const safeName = String(customerName || '').trim() || 'عميل نقدي';
+    let rows = this._formatRows(
+      this.db.exec(`SELECT id, name, balance, credit_limit FROM customers WHERE name = '${safeName.replace(/'/g, "''")}' LIMIT 1`)
+    );
+    if (rows.length === 0) {
+      this.db.run(
+        `INSERT INTO customers (name, phone, address, credit_limit, balance, notes) VALUES (?, ?, ?, ?, 0, ?)`,
+        [safeName, customerPhone || '', '', 2000, 'عميل آجل']
+      );
+      rows = this._formatRows(
+        this.db.exec(`SELECT id, name, balance, credit_limit FROM customers WHERE name = '${safeName.replace(/'/g, "''")}' LIMIT 1`)
+      );
+    }
+    const customer = rows[0];
+    if (!customer) throw new Error('تعذر العثور على العميل أو إنشاؤه.');
+
+    const currentBalance = Number(customer.balance) || 0;
+    const creditLimit = Number(customer.credit_limit) || 0;
+    const newBalance = Math.round((currentBalance + charge) * 100) / 100;
+
+    // A zero/negative limit means "no ceiling configured".
+    if (creditLimit > 0 && newBalance > creditLimit + 0.009) {
+      const available = Math.max(0, Math.round((creditLimit - currentBalance) * 100) / 100);
+      throw new Error(
+        `لا يمكن إتمام البيع الآجل: إجمالي مديونية العميل [${safeName}] سيصبح ${newBalance.toFixed(2)} ج.م وهو يتجاوز سقف الائتمان ${creditLimit.toFixed(2)} ج.م. المتاح على الحساب: ${available.toFixed(2)} ج.م فقط.`
+      );
+    }
+
+    this.db.run(`UPDATE customers SET balance = ? WHERE id = ?`, [newBalance, customer.id]);
+    this.db.run(
+      `INSERT INTO customer_ledger (customer_id, date_time, type, ref_no, description, debit, credit, balance)
+       VALUES (?, ?, 'SALE', ?, ?, ?, 0, ?)`,
+      [customer.id, dateTime || new Date().toISOString(), refNo || '', description || 'بيع آجل', charge, newBalance]
+    );
+
+    return { id: customer.id, newBalance };
+  }
+
+  /**
+   * Reverses part of a customer debt (credit refund) and writes the matching
+   * CREDIT row in customer_ledger.
+   */
+  _applyCreditRefund(customerName, amount, refNo, dateTime, description) {
+    const refund = Number(amount) || 0;
+    if (refund <= 0) return null;
+
+    const safeName = String(customerName || '').trim();
+    if (!safeName) return null;
+    const rows = this._formatRows(
+      this.db.exec(`SELECT id, balance FROM customers WHERE name = '${safeName.replace(/'/g, "''")}' LIMIT 1`)
+    );
+    const customer = rows[0];
+    if (!customer) return null;
+
+    const newBalance = Math.max(0, Math.round(((Number(customer.balance) || 0) - refund) * 100) / 100);
+    this.db.run(`UPDATE customers SET balance = ? WHERE id = ?`, [newBalance, customer.id]);
+    this.db.run(
+      `INSERT INTO customer_ledger (customer_id, date_time, type, ref_no, description, debit, credit, balance)
+       VALUES (?, ?, 'REFUND', ?, ?, 0, ?, ?)`,
+      [customer.id, dateTime || new Date().toISOString(), refNo || '', description || 'مرتجع آجل', refund, newBalance]
+    );
+    return { id: customer.id, newBalance };
+  }
+
 
   // --- SETUP STATE & OWNER CREATION API ---
 
@@ -1054,7 +1199,14 @@ class SQLiteService {
 
   async changeUserPassword(userId, newPassword) {
     await this.init();
-    const userRes = this.db.exec(`SELECT * FROM app_users WHERE id = ${Number(userId)} LIMIT 1`);
+    // Fail closed and stop privilege escalation: only owners can change
+    // someone else's password; every other user may change only their own.
+    const actor = this._requireAuth();
+    const targetId = Number(userId);
+    if (actor.role !== 'admin' && Number(actor.id) !== targetId) {
+      throw new Error('عذراً، لا يمكنك تغيير كلمة مرور مستخدم آخر.');
+    }
+    const userRes = this.db.exec(`SELECT * FROM app_users WHERE id = ${targetId} LIMIT 1`);
     const users = this._formatRows(userRes);
     if (!users.length) return { success: false, error: 'المستخدم غير موجود.' };
     const user = users[0];
@@ -1086,7 +1238,7 @@ class SQLiteService {
 
   async createUser({ username, password, full_name, role = 'cashier', permissions = {}, created_by = 'admin', actor = null }) {
     await this.init();
-    const effectiveActor = actor || this._currentUser || { role: 'admin', is_owner: 1, permissions: {} };
+    const effectiveActor = actor || this._currentUser || null;
     const safeUsername = String(username).trim();
 
     if (!safeUsername || !password || !full_name) {
@@ -1144,7 +1296,7 @@ class SQLiteService {
   async updateUser({ id, full_name, role, is_active, permissions, newPassword, updated_by = 'admin', actor = null }) {
     await this.init();
     if (!id) return { success: false, error: 'معرف المستخدم مطلوب.' };
-    const effectiveActor = actor || this._currentUser || { role: 'admin', is_owner: 1, permissions: {} };
+    const effectiveActor = actor || this._currentUser || null;
 
     const userRes = this.db.exec(`SELECT * FROM app_users WHERE id = ${id}`);
     const targetUser = this._formatRows(userRes)[0];
@@ -1201,7 +1353,7 @@ class SQLiteService {
 
   async deleteUser(id, deleted_by = 'admin', actor = null) {
     await this.init();
-    const effectiveActor = actor || this._currentUser || { role: 'admin', is_owner: 1, permissions: {} };
+    const effectiveActor = actor || this._currentUser || null;
 
     const userRes = this.db.exec(`SELECT * FROM app_users WHERE id = ${id}`);
     const targetUser = this._formatRows(userRes)[0];
@@ -1339,6 +1491,7 @@ class SQLiteService {
 
   async saveMedicine(med) {
     await this.init();
+    this._requireAuth();
     const id = med.id || Date.now();
     const existingRows = this._formatRows(this.db.exec(`SELECT * FROM medicines WHERE id = ${id} LIMIT 1`));
     const isUpdate = existingRows.length > 0;
@@ -1370,6 +1523,18 @@ class SQLiteService {
     const stockUnits = parseInt(med.stock_units, 10) || 0;
     const expiry = (med.expiry || '').trim();
 
+    // Normalize every bound value: new products do not carry all legacy
+    // columns (for example preferred_supplier), and binding `undefined`
+    // makes sql.js throw and silently loses the whole insert.
+    const tradeName = med.trade_name || '';
+    const tradeNameAr = med.trade_name_ar || '';
+    const genericName = med.generic_name || '';
+    const barcode = String(med.barcode ?? '').trim();
+    const shelf = med.shelf || '';
+    const category = med.category || '';
+    const reorderLevel = parseInt(med.reorder_level, 10) || 5;
+    const preferredSupplier = med.preferred_supplier || '';
+
     if (isUpdate) {
       // Update
       const stmt = this.db.prepare(`
@@ -1381,10 +1546,10 @@ class SQLiteService {
         WHERE id = ?
       `);
       stmt.run([
-        med.trade_name, med.trade_name_ar, med.generic_name, med.barcode,
+        tradeName, tradeNameAr, genericName, barcode,
         priceBox, priceStrip, stripsPerBox, stockBoxes,
-        stockStrips, med.shelf, med.category, med.reorder_level || 5,
-        med.preferred_supplier, unitType, unitsPerStrip, priceUnit, stockUnits, expiry, id
+        stockStrips, shelf, category, reorderLevel,
+        preferredSupplier, unitType, unitsPerStrip, priceUnit, stockUnits, expiry, id
       ]);
       stmt.free();
 
@@ -1409,10 +1574,10 @@ class SQLiteService {
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       stmt.run([
-        id, med.trade_name, med.trade_name_ar, med.generic_name, med.barcode,
+        id, tradeName, tradeNameAr, genericName, barcode,
         priceBox, priceStrip, stripsPerBox, stockBoxes,
-        stockStrips, med.shelf, med.category, med.reorder_level || 5,
-        med.preferred_supplier, unitType, unitsPerStrip, priceUnit, stockUnits, expiry
+        stockStrips, shelf, category, reorderLevel,
+        preferredSupplier, unitType, unitsPerStrip, priceUnit, stockUnits, expiry
       ]);
       stmt.free();
     }
@@ -1423,6 +1588,7 @@ class SQLiteService {
 
   async deleteMedicine(id) {
     await this.init();
+    this._requireAuth();
     this._requirePermission('canDeleteItem');
     const safeId = Number(id);
     const existingRows = this._formatRows(this.db.exec(`SELECT trade_name, trade_name_ar FROM medicines WHERE id = ${safeId} LIMIT 1`));
@@ -1435,6 +1601,10 @@ class SQLiteService {
 
   async clearAllMedicines() {
     await this.init();
+    const actor = this._requireAuth();
+    if (actor.role !== 'admin') {
+      throw new Error('عذراً، حذف كل الأصناف مخصص لمدير النظام فقط.');
+    }
     try {
       this.db.run('DELETE FROM medicines;');
       try { this.db.run('DELETE FROM medicines_fts;'); } catch (e) {}
@@ -1450,6 +1620,7 @@ class SQLiteService {
 
   async importMedicines(medicinesList) {
     await this.init();
+    this._requirePermission('canManageStock');
     if (!Array.isArray(medicinesList) || medicinesList.length === 0) return 0;
 
     this.db.run('BEGIN TRANSACTION;');
@@ -1521,6 +1692,9 @@ class SQLiteService {
 
   async saveInvoice(invoiceData) {
     await this.init();
+    // Fail closed: no authenticated session means no sale, even when the
+    // caller invokes the service directly from the console.
+    this._requireAuth();
 
     const items = Array.isArray(invoiceData.items) ? invoiceData.items : [];
     if (items.length === 0) throw new Error('لا يمكن حفظ فاتورة بدون أصناف');
@@ -1547,8 +1721,94 @@ class SQLiteService {
 
     const { discount: safeDiscount } = validateInvoiceDiscount(invoiceData.discount, invoiceData.subtotal);
 
-    const totalCost = Number(invoiceData.total_cost) || 0;
-    const totalProfit = Number(invoiceData.total_profit) || 0;
+    // Discount is a privileged operation: enforce it in the service layer so a
+    // cashier cannot bypass the disabled input by calling saveInvoice directly.
+    if (safeDiscount > 0) {
+      const actor = this._requireAuth();
+      const canDiscount =
+        actor.role === 'admin' ||
+        actor.permissions?.canDiscount === true ||
+        actor.permissions?.canGiveDiscount === true;
+      if (!canDiscount) {
+        throw new Error('عذراً، لا تملك صلاحية منح خصم على الفاتورة (canDiscount).');
+      }
+    }
+
+    // Validate every line against stock batches *before* touching the DB:
+    //  - never sell an expired medicine silently (I2),
+    //  - never let a non-privileged user change the unit price directly: that
+    //    would bypass the discount permission checked above,
+    //  - compute the real cost from the batches FEFO will actually consume, so
+    //    supplier bonus/discount and multi-batch purchases are reflected (M4/B6).
+    const fefoStates = new Map();
+    const saleLineMeta = items.map((item) => {
+      const medicineId = Number(item.medicine_id);
+      const qty = Number(item.quantity) || 0;
+      const unitPrice = Number(item.unit_price) || 0;
+      const lineTotal = Number(item.total_price) || (unitPrice * qty);
+      const unitType = item.unitType || (item.is_strip ? 'strip' : 'box');
+      if (!medicineId) {
+        return {
+          unitCost: Number(item.unit_cost) || 0,
+          lineCost: (Number(item.unit_cost) || 0) * qty,
+          lineTotal
+        };
+      }
+
+      const medRows = this._formatRows(
+        this.db.exec(`SELECT trade_name, trade_name_ar, expiry, strips_per_box, units_per_strip, price_box, price_strip, price_unit FROM medicines WHERE id = ${medicineId} LIMIT 1`)
+      );
+      const med = medRows[0];
+      if (!med) {
+        return { unitCost: Number(item.unit_cost) || 0, lineCost: (Number(item.unit_cost) || 0) * qty, lineTotal };
+      }
+
+      const rawExpiry = String(med.expiry || '').trim();
+      if (rawExpiry) {
+        const parsed = parseExpiryDate(rawExpiry);
+        if (parsed && parsed.effectiveDate < todayISODate()) {
+          const name = med.trade_name_ar || med.trade_name || `#${medicineId}`;
+          throw new Error(`لا يمكن بيع الصنف [${name}] لأنه منتهي الصلاحية (${rawExpiry}).`);
+        }
+      }
+
+      const spb = Math.max(1, parseInt(med.strips_per_box, 10) || 1);
+      const ups = Math.max(1, parseInt(med.units_per_strip, 10) || 1);
+      const perBoxUnits = spb * ups;
+      const priceBox = Number(med.price_box) || 0;
+      const priceStrip = Number(med.price_strip) > 0 ? Number(med.price_strip) : (priceBox / spb);
+      const priceUnit = Number(med.price_unit) > 0 ? Number(med.price_unit) : (priceStrip / ups);
+      const expectedPrice = unitType === 'box' ? priceBox : (unitType === 'strip' ? priceStrip : priceUnit);
+      if (expectedPrice > 0 && Math.abs(unitPrice - expectedPrice) > 0.01) {
+        // Any manual price deviation is a privileged operation (canEditPrice).
+        this._requirePermission('canEditPrice');
+      }
+
+      let neededUnits = 0;
+      if (unitType === 'box') neededUnits = qty * perBoxUnits;
+      else if (unitType === 'strip') neededUnits = qty * ups;
+      else neededUnits = qty;
+
+      let state = fefoStates.get(medicineId);
+      if (!state) {
+        state = this._buildFEFOState(medicineId, spb, ups);
+        fefoStates.set(medicineId, state);
+      }
+      const { cost: lineCost } = this._consumeFEFOState(state, neededUnits, priceBox);
+      const unitCost = qty > 0 ? Math.round((lineCost / qty) * 100) / 100 : 0;
+      return {
+        unitCost,
+        lineCost: Math.round(lineCost * 100) / 100,
+        lineTotal
+      };
+    });
+
+    const computedTotalCost = Math.round(saleLineMeta.reduce((sum, m) => sum + (Number(m.lineCost) || 0), 0) * 100) / 100;
+    // Invoice-level discount reduces revenue, so it reduces profit as well.
+    const computedTotalProfit = Math.round((totalRetail - computedTotalCost) * 100) / 100;
+
+    const totalCost = computedTotalCost;
+    const totalProfit = computedTotalProfit;
     const discount = safeDiscount;
     const cashierName = invoiceData.cashier_name || 'الكاشير';
 
@@ -1613,10 +1873,12 @@ class SQLiteService {
           quantity, unit_price, total_price, unit_cost, profit, batch_no, expiry
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
-      for (const item of items) {
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
         const qty = Number(item.quantity) || 0;
         const unitPrice = Number(item.unit_price) || 0;
         const unitType = item.unitType || (item.is_strip ? 'strip' : 'box');
+        const meta = saleLineMeta[i] || {};
         
         // Find earliest expiring batch for this medicine
         let itemBatchNo = item.batch_no || null;
@@ -1629,12 +1891,16 @@ class SQLiteService {
           }
         }
 
+        const lineTotal = Number(item.total_price) || (unitPrice * qty);
+        const lineUnitCost = Number(meta.unitCost) || 0;
+        const lineProfit = Math.round((lineTotal - (Number(meta.lineCost) || 0)) * 100) / 100;
+
         itemStmt.run([
           invoiceId, item.medicine_id || null, item.trade_name || '', item.trade_name_ar || '',
           unitType === 'box' ? 0 : 1, unitType, qty, unitPrice,
-          Number(item.total_price) || (unitPrice * qty),
-          Number(item.unit_cost) || (unitPrice * 0.75),
-          Number(item.profit) || ((Number(item.total_price) || (unitPrice * qty)) * 0.25),
+          lineTotal,
+          lineUnitCost,
+          lineProfit,
           itemBatchNo,
           itemExpiry
         ]);
@@ -1732,20 +1998,14 @@ class SQLiteService {
             [totalRetail, totalRetail, shiftId]
           );
 
-          // Make sure the customer exists, then add the debt
-          const safeName = String(customerName).replace(/'/g, "''");
-          const existingCustomer = this._formatRows(
-            this.db.exec(`SELECT id FROM customers WHERE name = '${safeName}' LIMIT 1`)
-          );
-          if (existingCustomer.length === 0) {
-            this.db.run(
-              `INSERT INTO customers (name, phone, address, credit_limit, balance, notes) VALUES (?, ?, ?, ?, 0, ?)`,
-              [customerName, customerPhone, '', 2000, 'عميل آجل']
-            );
-          }
-          this.db.run(
-            `UPDATE customers SET balance = balance + ? WHERE name = ?`,
-            [totalRetail, customerName]
+          // Service-level credit ceiling + customer_ledger DEBIT entry.
+          this._applyCreditCharge(
+            customerName,
+            customerPhone,
+            totalRetail,
+            invoiceId,
+            dateTime,
+            `بيع آجل - فاتورة ${invoiceId}`
           );
         } else if (paymentMethod === 'مختلط') {
           this.db.run(
@@ -1754,19 +2014,13 @@ class SQLiteService {
           );
 
           if (paidCredit > 0) {
-            const safeName = String(customerName).replace(/'/g, "''");
-            const existingCustomer = this._formatRows(
-              this.db.exec(`SELECT id FROM customers WHERE name = '${safeName}' LIMIT 1`)
-            );
-            if (existingCustomer.length === 0) {
-              this.db.run(
-                `INSERT INTO customers (name, phone, address, credit_limit, balance, notes) VALUES (?, ?, ?, ?, 0, ?)`,
-                [customerName, customerPhone, '', 2000, 'عميل آجل']
-              );
-            }
-            this.db.run(
-              `UPDATE customers SET balance = balance + ? WHERE name = ?`,
-              [paidCredit, customerName]
+            this._applyCreditCharge(
+              customerName,
+              customerPhone,
+              paidCredit,
+              invoiceId,
+              dateTime,
+              `بيع مختلط (آجل) - فاتورة ${invoiceId}`
             );
           }
         }
@@ -1904,6 +2158,106 @@ class SQLiteService {
       console.warn('Check older expiry error:', e);
       return null;
     }
+  }
+
+  /**
+   * Real purchase cost per BOX, after the supplier discount and the bonus
+   * (net_box_price is per box before bonus). Falls back to 75% of the retail
+   * price only when the item was never purchased in this pharmacy.
+   */
+  _getActualBoxCost(medicineId, fallbackPrice = 0) {
+    const safeId = Number(medicineId);
+    if (safeId) {
+      try {
+        const rows = this._formatRows(this.db.exec(`
+          SELECT net_box_price, price_box, quantity, bonus, unit_net_cost
+          FROM purchase_items
+          WHERE medicine_id = ${safeId}
+          ORDER BY id DESC
+          LIMIT 1
+        `));
+        const row = rows && rows[0];
+        if (row) {
+          // Prefer the frozen cost saved at purchase time: FEFO mutates
+          // quantity/bonus later, so the old ratio would drift after a sale.
+          const frozen = Number(row.unit_net_cost) || 0;
+          if (frozen > 0) return Math.round(frozen * 100) / 100;
+
+          const qty = Math.max(0, Number(row.quantity) || 0);
+          const bonus = Math.max(0, Number(row.bonus) || 0);
+          const netBox = Number(row.net_box_price) || Number(row.price_box) || 0;
+          const totalBoxes = qty + bonus;
+          if (netBox > 0 && totalBoxes > 0) {
+            return Math.round((netBox * qty / totalBoxes) * 100) / 100;
+          }
+        }
+      } catch (e) {}
+    }
+    return Math.round((Number(fallbackPrice) || 0) * 0.75 * 100) / 100;
+  }
+
+  /**
+   * Builds a mutable FEFO state (earliest-expiring batches first) for one
+   * medicine, with the frozen per-box cost of every batch. The state is
+   * consumed line by line so an invoice that splits the same medicine across
+   * several cart lines still charges the right batch costs.
+   */
+  _buildFEFOState(medicineId, spb, ups) {
+    const safeId = Number(medicineId);
+    const perBoxUnits = Math.max(1, (parseInt(spb, 10) || 1) * (parseInt(ups, 10) || 1));
+    let rows = [];
+    try {
+      if (safeId) {
+        rows = this._formatRows(this.db.exec(`
+          SELECT id, batch_no, expiry, quantity, bonus, unit_net_cost, net_box_price, price_box
+          FROM purchase_items
+          WHERE medicine_id = ${safeId} AND (quantity > 0 OR bonus > 0)
+        `));
+      }
+    } catch (e) { rows = []; }
+
+    rows.sort((a, b) => {
+      const ea = this._normalizeExpiry(a.expiry);
+      const eb = this._normalizeExpiry(b.expiry);
+      return ea.localeCompare(eb) || (Number(a.id) - Number(b.id));
+    });
+
+    const state = rows.map((r) => {
+      const qty = Math.max(0, Number(r.quantity) || 0);
+      const bonus = Math.max(0, Number(r.bonus) || 0);
+      const boxes = qty + bonus;
+      const frozen = Number(r.unit_net_cost) || 0;
+      const netBox = Number(r.net_box_price) || Number(r.price_box) || 0;
+      const boxCost = frozen > 0 ? frozen : (boxes > 0 ? (netBox * qty / boxes) : netBox);
+      return { id: r.id, units: boxes * perBoxUnits, boxCost };
+    }).filter((r) => r.units > 0);
+
+    return { rows: state, perBoxUnits };
+  }
+
+  /**
+   * Consumes `soldUnits` smallest units from a FEFO state and returns the real
+   * cost of the consumed batches. Falls back to 75% of the retail box price
+   * only for units that have no purchase history at all.
+   */
+  _consumeFEFOState(state, soldUnits, fallbackBoxPrice = 0) {
+    let remaining = Math.max(0, Number(soldUnits) || 0);
+    let cost = 0;
+
+    for (const batch of state.rows) {
+      if (remaining <= 0) break;
+      if (batch.units <= 0) continue;
+      const take = Math.min(batch.units, remaining);
+      cost += take * (batch.boxCost / state.perBoxUnits);
+      batch.units -= take;
+      remaining -= take;
+    }
+
+    if (remaining > 0) {
+      cost += remaining * ((Number(fallbackBoxPrice) || 0) * 0.75 / state.perBoxUnits);
+    }
+
+    return { cost: Math.round(cost * 100) / 100, remaining };
   }
 
   // Get earliest active batch for a medicine
@@ -2054,6 +2408,25 @@ class SQLiteService {
     return this._formatRows(res);
   }
 
+  /**
+   * Medicine IDs that were actually purchased or sold at least once.
+   * The seeded catalogue has ~27k items with zero stock that were never part of
+   * this pharmacy's inventory; the shortages screen must not treat them all as
+   * "out of stock" (it produced a 395M EGP fake order).
+   */
+  async getTrackedMedicineIds() {
+    await this.init();
+    const res = this.db.exec(`
+      SELECT DISTINCT medicine_id FROM invoice_items
+      WHERE medicine_id IS NOT NULL
+      UNION
+      SELECT DISTINCT medicine_id FROM purchase_items
+      WHERE medicine_id IS NOT NULL
+    `);
+    if (!res || !res[0]) return [];
+    return res[0].values.map((v) => Number(v[0])).filter((n) => Number.isFinite(n));
+  }
+
   // --- 3. CUSTOMERS & CASH DEBT COLLECTION ---
 
   async getCustomers() {
@@ -2064,14 +2437,24 @@ class SQLiteService {
 
   async saveCustomer(customer) {
     await this.init();
+    const actor = this._requireAuth();
     const id = Number(customer.id) || Date.now();
     const name = (customer.name || '').trim();
     if (!name) throw new Error('اسم العميل مطلوب');
     const phone = (customer.phone || '').trim();
     const address = (customer.address || '').trim();
     const credit_limit = parseFloat(customer.credit_limit) || 0;
-    const balance = parseFloat(customer.balance) || 0;
+    let balance = parseFloat(customer.balance) || 0;
     const notes = (customer.notes || '').trim();
+
+    // Debt is only moved by invoices/payments, never by editing a customer
+    // card. Non-owners keep the stored balance even if the payload changes it.
+    if (actor.role !== 'admin') {
+      const existing = this._formatRows(
+        this.db.exec(`SELECT balance FROM customers WHERE id = ${id} LIMIT 1`)
+      );
+      if (existing.length > 0) balance = Number(existing[0].balance) || 0;
+    }
 
     this.db.run(`
       INSERT OR REPLACE INTO customers (
@@ -2100,6 +2483,7 @@ class SQLiteService {
 
   async collectCustomerPayment(customerId, amountPaid, receiptData) {
     await this.init();
+    this._requireAuth();
     this.db.run('BEGIN TRANSACTION;');
 
     try {
@@ -2168,12 +2552,29 @@ class SQLiteService {
 
   async recordExpense(amount, reason, shiftId, cashierName = '') {
     await this.init();
+    this._requireAuth();
     const parsedAmount = parseFloat(amount) || 0;
     if (!shiftId) {
       throw new Error('لا توجد وردية مفتوحة! لا يمكن خصم مصروف من الدرج بدون وردية.');
     }
     if (parsedAmount <= 0) {
       throw new Error('قيمة المصروف يجب أن تكون أكبر من صفر.');
+    }
+
+    // Never allow the drawer to go negative: a petty expense cannot exceed the
+    // cash that is actually expected to be inside the drawer right now.
+    const safeShiftId = String(shiftId).replace(/'/g, "''");
+    const shiftRow = this._formatRows(
+      this.db.exec(`SELECT expected_cash FROM shifts WHERE id = '${safeShiftId}' LIMIT 1`)
+    )[0];
+    if (!shiftRow) {
+      throw new Error('الوردية المحددة غير موجودة! لا يمكن خصم مصروف من الدرج.');
+    }
+    const drawerAvailable = Number(shiftRow.expected_cash) || 0;
+    if (parsedAmount > drawerAvailable + 0.009) {
+      throw new Error(
+        `المبلغ المطلوب (${parsedAmount.toFixed(2)} ج.م) يتجاوز النقدية المتاحة في الدرج (${drawerAvailable.toFixed(2)} ج.م).`
+      );
     }
 
     this.db.run('BEGIN TRANSACTION;');
@@ -2224,6 +2625,23 @@ class SQLiteService {
       LEFT JOIN invoices inv ON sr.invoice_id = inv.id
       ORDER BY sr.date_time DESC
       LIMIT ${Number(limit) || 200}
+    `);
+    return this._formatRows(res);
+  }
+
+  /**
+   * Refunds recorded against one specific invoice.
+   * ReportsView used to call this method before it existed, which made the
+   * invoice preview swallow the error and always show "0 items".
+   */
+  async getInvoiceRefunds(invoiceId) {
+    await this.init();
+    const safeId = String(invoiceId || '').replace(/'/g, "''");
+    const res = this.db.exec(`
+      SELECT *
+      FROM sale_refunds
+      WHERE invoice_id = '${safeId}'
+      ORDER BY date_time ASC
     `);
     return this._formatRows(res);
   }
@@ -2409,13 +2827,20 @@ class SQLiteService {
       // 3. Deduct from Shift and/or Customer Balance according to original payment method
       // Note: Drawer cash is deducted from the CURRENT open shift because actual cash is given out now.
       if (paymentMethod === 'كاش') {
-        this.db.run(`
-          UPDATE shifts 
-          SET cash_sales = CASE WHEN cash_sales >= ${refundAmount} THEN cash_sales - ${refundAmount} ELSE 0 END,
-              total_sales = CASE WHEN total_sales >= ${refundAmount} THEN total_sales - ${refundAmount} ELSE 0 END,
-              expected_cash = opening_cash + cash_sales + debt_collections - petty_expenses
-          WHERE id = '${shiftId}'
-        `);
+        this.db.run(
+          `UPDATE shifts
+           SET cash_sales = CASE WHEN cash_sales >= ? THEN cash_sales - ? ELSE 0 END,
+               total_sales = CASE WHEN total_sales >= ? THEN total_sales - ? ELSE 0 END
+           WHERE id = ?`,
+          [refundAmount, refundAmount, refundAmount, refundAmount, shiftId]
+        );
+        // Recompute in a SECOND statement: SQLite evaluates every SET expression
+        // against the OLD row, so the expected drawer cash would otherwise keep
+        // the pre-refund cash_sales (the drawer showed 58 EGP too much).
+        this.db.run(
+          'UPDATE shifts SET expected_cash = opening_cash + cash_sales + debt_collections - petty_expenses WHERE id = ?',
+          [shiftId]
+        );
       } else if (paymentMethod === 'فيزا') {
         this.db.run(`
           UPDATE shifts 
@@ -2438,9 +2863,12 @@ class SQLiteService {
           WHERE id = '${shiftId}'
         `);
         if (origInvoice.customer_name) {
-          this.db.run(
-            `UPDATE customers SET balance = CASE WHEN balance >= ? THEN balance - ? ELSE 0 END WHERE name = ?`,
-            [refundAmount, refundAmount, origInvoice.customer_name]
+          this._applyCreditRefund(
+            origInvoice.customer_name,
+            refundAmount,
+            refundId,
+            nowIso,
+            `مرتجع آجل - فاتورة ${invoiceId}`
           );
         }
       } else if (paymentMethod === 'مختلط') {
@@ -2466,20 +2894,33 @@ class SQLiteService {
           }
         }
 
-        this.db.run(`
-          UPDATE shifts 
-          SET cash_sales = CASE WHEN cash_sales >= ${refundCash} THEN cash_sales - ${refundCash} ELSE 0 END,
-              credit_sales = CASE WHEN credit_sales >= ${refundCredit} THEN credit_sales - ${refundCredit} ELSE 0 END,
-              visa_sales = CASE WHEN visa_sales >= ${refundCard} THEN visa_sales - ${refundCard} ELSE 0 END,
-              total_sales = CASE WHEN total_sales >= ${refundAmount} THEN total_sales - ${refundAmount} ELSE 0 END,
-              expected_cash = opening_cash + cash_sales + debt_collections - petty_expenses
-          WHERE id = '${shiftId}'
-        `);
+        this.db.run(
+          `UPDATE shifts
+           SET cash_sales = CASE WHEN cash_sales >= ? THEN cash_sales - ? ELSE 0 END,
+               credit_sales = CASE WHEN credit_sales >= ? THEN credit_sales - ? ELSE 0 END,
+               visa_sales = CASE WHEN visa_sales >= ? THEN visa_sales - ? ELSE 0 END,
+               total_sales = CASE WHEN total_sales >= ? THEN total_sales - ? ELSE 0 END
+           WHERE id = ?`,
+          [
+            refundCash, refundCash,
+            refundCredit, refundCredit,
+            refundCard, refundCard,
+            refundAmount, refundAmount,
+            shiftId
+          ]
+        );
+        this.db.run(
+          'UPDATE shifts SET expected_cash = opening_cash + cash_sales + debt_collections - petty_expenses WHERE id = ?',
+          [shiftId]
+        );
 
         if (refundCredit > 0 && origInvoice.customer_name) {
-          this.db.run(
-            `UPDATE customers SET balance = CASE WHEN balance >= ? THEN balance - ? ELSE 0 END WHERE name = ?`,
-            [refundCredit, refundCredit, origInvoice.customer_name]
+          this._applyCreditRefund(
+            origInvoice.customer_name,
+            refundCredit,
+            refundId,
+            nowIso,
+            `مرتجع آجل - فاتورة ${invoiceId}`
           );
         }
       }
@@ -2688,6 +3129,7 @@ class SQLiteService {
 
   async openShift(shiftData) {
     await this.init();
+    this._requireAuth();
     const {
       id,
       shift_number = 1,
@@ -2723,6 +3165,7 @@ class SQLiteService {
 
   async closeShift(shiftIdOrData, actualCashParam) {
     await this.init();
+    this._requirePermission('canCloseShift');
     let shiftId = typeof shiftIdOrData === 'object' ? shiftIdOrData.id : shiftIdOrData;
     let actualCashCounted = typeof shiftIdOrData === 'object' 
       ? (shiftIdOrData.actual_cash !== undefined ? shiftIdOrData.actual_cash : actualCashParam) 
@@ -3597,6 +4040,7 @@ class SQLiteService {
 
   async savePurchase(purchaseData) {
     await this.init();
+    this._requireAuth();
     this.db.run('BEGIN TRANSACTION;');
 
     try {
@@ -3620,6 +4064,13 @@ class SQLiteService {
       if (!String(supplier_invoice_no || '').trim()) {
         throw new Error('رقم الفاتورة الورقية إجباري ولا يتم توليده تلقائياً.');
       }
+      const parsedInvoiceDate = new Date(date_time);
+      if (Number.isNaN(parsedInvoiceDate.getTime())) {
+        throw new Error('تاريخ فاتورة الشراء غير صحيح. أدخل تاريخاً صالحاً بصيغة يوم/شهر/سنة.');
+      }
+      if (todayISODate(parsedInvoiceDate) > todayISODate()) {
+        throw new Error('لا يمكن حفظ فاتورة شراء بتاريخ مستقبلي. اختر تاريخ اليوم أو تاريخاً سابقاً.');
+      }
       if (!Array.isArray(items) || items.length === 0) {
         throw new Error('يجب إضافة صنف واحد على الأقل إلى الفاتورة.');
       }
@@ -3628,8 +4079,23 @@ class SQLiteService {
         if (!Number.isFinite(qty) || qty <= 0) {
           throw new Error(`كمية الصنف [${item.trade_name_ar || item.trade_name || ''}] يجب إدخالها يدوياً وتكون أكبر من صفر.`);
         }
+        const bonus = Number(item.bonus ?? 0);
+        if (!Number.isFinite(bonus) || bonus < 0) {
+          throw new Error(`بونص الصنف [${item.trade_name_ar || item.trade_name || ''}] لا يمكن أن يكون سالباً أو غير رقمي.`);
+        }
+        const discount = Number(item.discount_pct ?? 0);
+        if (!Number.isFinite(discount) || discount < 0 || discount > 100) {
+          throw new Error(`خصم الصنف [${item.trade_name_ar || item.trade_name || ''}] يجب أن يكون بين 0 و 100.`);
+        }
         if (!String(item.expiry || '').trim()) {
           throw new Error(`تاريخ صلاحية الصنف [${item.trade_name_ar || item.trade_name || ''}] إجباري.`);
+        }
+        const parsedExpiry = parseExpiryDate(item.expiry);
+        if (!parsedExpiry) {
+          throw new Error(`صيغة تاريخ صلاحية الصنف [${item.trade_name_ar || item.trade_name || ''}] غير صحيحة. استخدم شهر/سنة أو يوم/شهر/سنة.`);
+        }
+        if (parsedExpiry.effectiveDate < todayISODate()) {
+          throw new Error(`تاريخ صلاحية الصنف [${item.trade_name_ar || item.trade_name || ''}] منتهٍ بالفعل (${String(item.expiry).trim()}). لا يمكن تسجيل بضاعة منتهية الصلاحية.`);
         }
       }
 
@@ -3639,10 +4105,11 @@ class SQLiteService {
         if (curShift) activeShiftId = curShift.id;
       }
 
-      // Ensure supplier exists in DB
+      // Ensure supplier exists in DB. skipSave keeps the active transaction
+      // open — saveToDisk() is illegal until the COMMIT below.
       let currentSupplierId = supplier_id;
       if (supplier_name) {
-        const sup = await this.ensureSupplier(supplier_name);
+        const sup = await this.ensureSupplier(supplier_name, '', { skipSave: true });
         if (sup) currentSupplierId = sup.id;
       }
 
@@ -3666,16 +4133,27 @@ class SQLiteService {
         INSERT INTO purchase_items (
           purchase_id, medicine_id, trade_name, trade_name_ar,
           quantity, bonus, price_box, discount_pct, net_box_price,
-          total_net, batch_no, expiry
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          total_net, batch_no, expiry, unit_net_cost
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
 
       for (const item of items) {
+        // Freeze the real cost per box after discount + bonus at insert time.
+        const paidBoxes = Math.max(0, Number(item.quantity) || 0);
+        const bonusBoxes = Math.max(0, Number(item.bonus) || 0);
+        const totalBoxes = paidBoxes + bonusBoxes;
+        const lineNet = Number(item.total_net) || 0;
+        const netBox = Number(item.net_box_price) || Number(item.price_box) || 0;
+        const unitNetCost = totalBoxes > 0
+          ? Math.round(((lineNet > 0 ? lineNet / totalBoxes : (netBox * paidBoxes) / totalBoxes)) * 10000) / 10000
+          : 0;
+
         itemStmt.run([
           id, item.medicine_id, item.trade_name, item.trade_name_ar,
           item.quantity, item.bonus || 0, item.price_box,
           item.discount_pct || 0, item.net_box_price,
-          item.total_net, item.batch_no || null, String(item.expiry).trim()
+          item.total_net, item.batch_no || null, String(item.expiry).trim(),
+          unitNetCost
         ]);
 
         // Augment stock in medicines
@@ -3762,6 +4240,7 @@ class SQLiteService {
 
   async updatePurchaseItemBatch(itemId, patch = {}) {
     await this.init();
+    this._requirePermission('canManageStock');
     const id = Number(itemId);
     if (!id) return null;
     const expiry = patch.expiry_date
@@ -3792,12 +4271,30 @@ class SQLiteService {
       patch.price_box != null ? Number(patch.price_box) : null,
       patch.cost_box != null ? Number(patch.cost_box) : null
     ]);
+
+    // Keep the frozen real cost in sync when the batch cost is edited.
+    if (patch.cost_box != null) {
+      try {
+        const row = this._formatRows(this.db.exec(`SELECT quantity, bonus, net_box_price FROM purchase_items WHERE id = ${id} LIMIT 1`))[0];
+        if (row) {
+          const qty = Math.max(0, Number(row.quantity) || 0);
+          const bonus = Math.max(0, Number(row.bonus) || 0);
+          const net = Number(row.net_box_price) || 0;
+          const boxes = qty + bonus;
+          if (boxes > 0 && net > 0) {
+            this.db.run(`UPDATE purchase_items SET unit_net_cost = ? WHERE id = ${id}`, [Math.round((net * qty / boxes) * 10000) / 10000]);
+          }
+        }
+      } catch (e) {}
+    }
+
     this.saveToDisk();
     return id;
   }
 
   async deletePurchaseItem(itemId) {
     await this.init();
+    this._requirePermission('canManageStock');
     const id = Number(itemId);
     if (!id) return false;
     this.db.run(`DELETE FROM purchase_items WHERE id = ${id}`);
@@ -3905,6 +4402,7 @@ class SQLiteService {
   // Record a supplier return / disposal so it appears in the shift audit & QR
   async recordSupplierReturn({ supplierName, amount, itemsCount = 0, kind = 'SUPPLIER_RETURN', details = '', shiftId = null, cashierName = '' }) {
     await this.init();
+    this._requirePermission('canManageStock');
     let activeShiftId = shiftId;
     if (!activeShiftId) {
       const cur = await this.getCurrentShift();
@@ -3952,9 +4450,14 @@ class SQLiteService {
   async exportAllData() {
     await this.init();
     const tables = [
-      'medicines', 'suppliers', 'customers', 'customer_ledger', 'invoices',
-      'invoice_items', 'shifts', 'purchases', 'purchase_items', 'expenses',
-      'supplier_returns', 'system_license', 'app_users', 'sync_queue'
+      // Inventory & commercial data
+      'medicines', 'suppliers', 'customers', 'customer_ledger',
+      'invoices', 'invoice_items', 'sale_refunds',
+      'shifts', 'purchases', 'purchase_items', 'expenses',
+      'supplier_returns', 'stock_takes', 'expiry_batches',
+      // Security & licensing
+      'app_users', 'audit_logs', 'system_license', 'license_revocations',
+      'sync_queue'
     ];
     const data = {};
     for (const table of tables) {
@@ -3977,11 +4480,26 @@ class SQLiteService {
 
   async importAllData(data) {
     await this.init();
+    const actor = this._requireAuth();
+    if (actor.role !== 'admin') {
+      throw new Error('عذراً، استعادة النسخة الاحتياطية مخصصة لمدير النظام فقط.');
+    }
     if (!data || typeof data !== 'object') throw new Error('ملف النسخة الاحتياطية غير صالح');
+
+    const medPayload = data.medicines;
+    const hasMedicines = !!(
+      medPayload && Array.isArray(medPayload.columns) &&
+      Array.isArray(medPayload.rows) && medPayload.columns.length > 0
+    );
+    let baked = null;
+    if (hasMedicines) {
+      try { baked = await this._loadBakedCatalog(); } catch (e) { baked = null; }
+    }
 
     this.db.run('BEGIN TRANSACTION;');
     try {
       for (const [table, payload] of Object.entries(data)) {
+        if (table === 'medicines' && hasMedicines) continue; // merged below
         if (!payload || !Array.isArray(payload.columns) || !Array.isArray(payload.rows)) continue;
         if (payload.columns.length === 0) continue;
         if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(table)) continue;
@@ -3995,6 +4513,70 @@ class SQLiteService {
         }
         stmt.free();
       }
+
+      if (hasMedicines) {
+        // 1) The backup is authoritative: every item it contains is written back
+        //    with its price, barcode, packing and stock exactly as in the backup.
+        this.db.run('DELETE FROM medicines');
+        const medCols = medPayload.columns.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(', ');
+        const medPlaceholders = medPayload.columns.map(() => '?').join(', ');
+        const medBarcodeIdx = medPayload.columns.findIndex((c) => String(c).toLowerCase() === 'barcode');
+        const medStmt = this.db.prepare(`INSERT INTO medicines (${medCols}) VALUES (${medPlaceholders})`);
+        for (const row of medPayload.rows) {
+          const values = row.map((v) => (v === undefined ? null : v));
+          if (medBarcodeIdx >= 0 && typeof values[medBarcodeIdx] === 'string' && values[medBarcodeIdx].trim() === '') {
+            values[medBarcodeIdx] = null; // empty barcode must be NULL, not '' (UNIQUE index)
+          }
+          try {
+            medStmt.run(values);
+          } catch (rowErr) {
+            console.warn('Skipped backup medicine row:', rowErr && rowErr.message);
+          }
+        }
+        medStmt.free();
+
+        // 2) Keep the fixed catalogue complete: append any baked item that the
+        //    backup does not mention (matched by barcode, then by name). These
+        //    arrive with zero stock and never overwrite backup rows.
+        if (baked) {
+          const norm = (v) => String(v == null ? '' : v).trim().toLowerCase();
+          const colIndex = (name) => medPayload.columns.findIndex((c) => String(c).toLowerCase() === name);
+          const iId = colIndex('id');
+          const iBarcode = colIndex('barcode');
+          const iName = colIndex('trade_name');
+          const iNameAr = colIndex('trade_name_ar');
+          const bcSet = new Set();
+          const nameSet = new Set();
+          let maxId = 0;
+          for (const row of medPayload.rows) {
+            if (iId >= 0) { const id = Number(row[iId]); if (Number.isFinite(id) && id > maxId) maxId = id; }
+            if (iBarcode >= 0 && row[iBarcode]) bcSet.add(String(row[iBarcode]).trim());
+            if (iName >= 0) { const n = norm(row[iName]); if (n) nameSet.add(n); }
+            if (iNameAr >= 0) { const n = norm(row[iNameAr]); if (n) nameSet.add(n); }
+          }
+          const columns = this._medicineColumns();
+          const placeholders = columns.map(() => '?').join(', ');
+          const ins = this.db.prepare(`INSERT INTO medicines (${columns.join(', ')}) VALUES (${placeholders})`);
+          let nextId = maxId + 1;
+          let appended = 0;
+          for (const item of baked.catalog) {
+            const bc = item.barcode ? String(item.barcode).trim() : '';
+            if (bc && bcSet.has(bc)) continue;
+            const n1 = norm(item.tradeName);
+            const n2 = norm(item.tradeNameAr || item.tradeName);
+            if ((n1 && nameSet.has(n1)) || (n2 && nameSet.has(n2))) continue;
+            if (bc) bcSet.add(bc);
+            const row = this._catalogItemToRow(item);
+            row[0] = nextId++;
+            try { ins.run(row); appended++; } catch (e) {
+              console.warn('Skipped baked catalogue row during restore:', e && e.message);
+            }
+          }
+          ins.free();
+          console.log(`✅ Restore finished: backup catalogue + ${appended} fixed items kept.`);
+        }
+      }
+
       this.db.run('COMMIT;');
       this.saveToDisk();
       return true;
@@ -4004,8 +4586,209 @@ class SQLiteService {
     }
   }
 
+  /**
+   * Merge an external pharmacy catalogue (produced by the eStock converter).
+   * The fixed catalogue shipped with the app stays intact; this import:
+   *   - adds items that do not exist yet (zero stock), and
+   *   - updates price / packing / names / category of matching items.
+   * It never changes stock levels and never creates purchase batches/invoices.
+   *
+   * payload = {
+   *   source: 'eStock',
+   *   products: [{ id, ar, en, sci, bc, cat, spb, ups, pb, ps, pu, bx, st, un, exp, sup, ut }],
+   *   vendors:  [{ id, name, phone, addr, bal }]
+   * }
+   */
+  async importExternalCatalog(payload, { dryRun = false } = {}) {
+    await this.init();
+    const actor = this._requireAuth();
+    if (actor.role !== 'admin') {
+      throw new Error('عذراً، استيراد كتالوج خارجي مخصص لمدير النظام فقط.');
+    }
+    if (!payload || !Array.isArray(payload.products)) {
+      throw new Error('ملف الاستيراد غير صالح: لا يحتوي على قائمة أصناف.');
+    }
+
+    const norm = (v) => String(v == null ? '' : v).trim().toLowerCase();
+    const existingRows = this._formatRows(this.db.exec(
+      `SELECT id, barcode, trade_name, trade_name_ar, generic_name, price_box, price_strip,
+              strips_per_box, category, preferred_supplier, unit_type, units_per_strip, price_unit
+       FROM medicines`
+    ));
+    const byBarcode = new Map();
+    const byName = new Map();
+    const rowsById = new Map();
+    for (const m of existingRows) {
+      const id = Number(m.id);
+      rowsById.set(id, m);
+      if (m.barcode) byBarcode.set(String(m.barcode).trim(), id);
+      const n1 = norm(m.trade_name);
+      const n2 = norm(m.trade_name_ar);
+      if (n1) byName.set(n1, id);
+      if (n2) byName.set(n2, id);
+    }
+
+    let nextId = (Number(this._formatRows(this.db.exec('SELECT MAX(id) AS m FROM medicines'))[0]?.m) || 0) + 1;
+
+    const toInsert = [];
+    const toUpdate = [];
+    for (const p of payload.products) {
+      if (!p) continue;
+      const bc = String(p.bc || '').trim();
+      const n1 = norm(p.ar);
+      const n2 = norm(p.en);
+      let matchId = bc ? byBarcode.get(bc) : null;
+      if (!matchId) matchId = (n1 && byName.get(n1)) || (n2 && byName.get(n2)) || null;
+
+      if (matchId) {
+        const cur = rowsById.get(matchId) || {};
+        // Keep an existing barcode; only fill it when the item has none and the code is free.
+        let newBc = cur.barcode ? String(cur.barcode).trim() : '';
+        if (!newBc && bc && !byBarcode.has(bc)) {
+          newBc = bc;
+          byBarcode.set(bc, matchId);
+        }
+        const merged = {
+          id: matchId,
+          trade_name: String(p.en || '').trim() || String(cur.trade_name || ''),
+          trade_name_ar: String(p.ar || '').trim() || String(cur.trade_name_ar || ''),
+          generic_name: String(p.sci || '').trim() || String(cur.generic_name || ''),
+          barcode: newBc || null,
+          price_box: Number(p.pb) > 0 ? Number(p.pb) : (Number(cur.price_box) || 0),
+          price_strip: Number(p.ps) > 0 ? Number(p.ps) : (Number(cur.price_strip) || 0),
+          price_unit: Number(p.pu) > 0 ? Number(p.pu) : (Number(cur.price_unit) || 0),
+          strips_per_box: Math.max(1, Number(p.spb) > 0 ? Number(p.spb) : (Number(cur.strips_per_box) || 1)),
+          units_per_strip: Math.max(1, Number(p.ups) > 0 ? Number(p.ups) : (Number(cur.units_per_strip) || 1)),
+          category: String(p.cat || '').trim() || String(cur.category || ''),
+          preferred_supplier: String(p.sup || '').trim() || String(cur.preferred_supplier || ''),
+          unit_type: String(p.ut || '').trim() || String(cur.unit_type || 'tablets')
+        };
+        toUpdate.push(merged);
+        // refresh lookup so later duplicates map to the same row
+        if (merged.barcode) byBarcode.set(String(merged.barcode).trim(), matchId);
+        const mn1 = norm(merged.trade_name), mn2 = norm(merged.trade_name_ar);
+        if (mn1) byName.set(mn1, matchId);
+        if (mn2) byName.set(mn2, matchId);
+      } else {
+        if (bc) byBarcode.set(bc, nextId);
+        if (n1) byName.set(n1, nextId);
+        if (n2) byName.set(n2, nextId);
+        toInsert.push({ newId: nextId, p });
+        nextId++;
+      }
+    }
+
+    const vendors = Array.isArray(payload.vendors) ? payload.vendors : [];
+    const supRows = this._formatRows(this.db.exec('SELECT name FROM suppliers'));
+    const supNames = new Set(supRows.map((s) => norm(s.name)));
+    const newVendors = [];
+    for (const v of vendors) {
+      const nm = String(v?.name || '').trim();
+      if (!nm || supNames.has(norm(nm))) continue;
+      supNames.add(norm(nm));
+      newVendors.push(v);
+    }
+
+    const stats = {
+      addedProducts: toInsert.length,
+      updatedProducts: toUpdate.length,
+      addedSuppliers: newVendors.length,
+      skippedExisting: 0,
+      addedBatches: 0,
+      totalInFile: payload.products.length
+    };
+    if (dryRun) return stats;
+
+    this.db.run('BEGIN TRANSACTION;');
+    try {
+      const medStmt = this.db.prepare(`
+        INSERT INTO medicines (
+          id, trade_name, trade_name_ar, generic_name, barcode, price_box, price_strip,
+          strips_per_box, stock_boxes, stock_strips, shelf, category, reorder_level,
+          preferred_supplier, unit_type, units_per_strip, price_unit, stock_units, expiry,
+          source_code
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      `);
+      for (const { newId, p } of toInsert) {
+        medStmt.run([
+          newId,
+          String(p.en || p.ar || '').trim(),
+          String(p.ar || p.en || '').trim(),
+          p.sci ? String(p.sci).trim() : null,
+          p.bc ? String(p.bc).trim() : null,
+          Number(p.pb) || 0,
+          Number(p.ps) || 0,
+          Math.max(1, Number(p.spb) || 1),
+          0, 0, null,
+          p.cat ? String(p.cat).trim() : null,
+          3,
+          p.sup ? String(p.sup).trim() : null,
+          p.ut || 'tablets',
+          Math.max(1, Math.floor(Number(p.ups) || 1)),
+          Number(p.pu) || 0,
+          0, null,
+          'ESTOCK'
+        ]);
+      }
+      medStmt.free();
+
+      if (toUpdate.length > 0) {
+        const upStmt = this.db.prepare(`
+          UPDATE medicines SET
+            trade_name = ?, trade_name_ar = ?, generic_name = ?, barcode = ?,
+            price_box = ?, price_strip = ?, price_unit = ?, strips_per_box = ?,
+            units_per_strip = ?, category = ?, preferred_supplier = ?, unit_type = ?
+          WHERE id = ?
+        `);
+        for (const u of toUpdate) {
+          try {
+            upStmt.run([
+              u.trade_name, u.trade_name_ar, u.generic_name, u.barcode,
+              u.price_box, u.price_strip, u.price_unit, u.strips_per_box,
+              u.units_per_strip, u.category, u.preferred_supplier, u.unit_type,
+              u.id
+            ]);
+          } catch (rowErr) {
+            console.warn('Skipped medicine update:', u.id, rowErr && rowErr.message);
+          }
+        }
+        upStmt.free();
+      }
+
+      if (newVendors.length > 0) {
+        const supMax = Number(this._formatRows(this.db.exec('SELECT MAX(id) AS m FROM suppliers'))[0]?.m) || 0;
+        let supId = supMax + 1;
+        const sStmt = this.db.prepare(
+          'INSERT INTO suppliers (id, name, contact_person, phone, hotline, balance, notes) VALUES (?,?,?,?,?,?,?)'
+        );
+        for (const v of newVendors) {
+          sStmt.run([
+            supId++, String(v.name).trim(), null,
+            v.phone ? String(v.phone).trim() : null, null,
+            Number(v.bal) || 0, 'مستورد من كتالوج خارجي'
+          ]);
+        }
+        sStmt.free();
+      }
+
+      this.db.run('COMMIT;');
+    } catch (e) {
+      this.db.run('ROLLBACK;');
+      throw e;
+    }
+
+    this.saveToDisk();
+    this._recordAuditLogInternal(
+      actor.username, 'IMPORT_EXTERNAL_CATALOG', 'medicines', null,
+      `استيراد خارجي: ${stats.addedProducts} صنف جديد، ${stats.updatedProducts} صنف محّدث، ${stats.addedSuppliers} مورد`
+    );
+    this._enqueueSync('catalog', null, 'IMPORT', stats);
+    return stats;
+  }
+
   async saveSupplier(sup) {
     await this.init();
+    this._requireAuth();
     const id = sup.id || Date.now();
     const name = (sup.name || '').trim();
     if (!name) return null;
@@ -4024,10 +4807,15 @@ class SQLiteService {
     return { id, name, contact_person: contact, phone, hotline, balance, notes };
   }
 
-  async ensureSupplier(supplierName, phone = '') {
+  async ensureSupplier(supplierName, phone = '', options = {}) {
     await this.init();
     const cleanName = (supplierName || '').trim();
     if (!cleanName) return null;
+    // Callers that are already inside a BEGIN TRANSACTION (e.g. savePurchase)
+    // must pass { skipSave: true }: sql.js refuses to export the database while
+    // a write transaction is open ("SQLite is busy or locked"). The surrounding
+    // transaction persists everything once it commits.
+    const skipSave = options && options.skipSave === true;
     const res = this.db.exec(`SELECT * FROM suppliers WHERE name = '${cleanName.replace(/'/g, "''")}' LIMIT 1;`);
     const rows = this._formatRows(res);
     if (rows && rows.length > 0) return rows[0];
@@ -4037,7 +4825,7 @@ class SQLiteService {
       INSERT INTO suppliers (id, name, contact_person, phone, hotline, balance, notes)
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `, [id, cleanName, 'مسؤول التوريد', phone || '', '', 0, 'مورد مضاف حديثاً']);
-    this.saveToDisk();
+    if (!skipSave) this.saveToDisk();
     return { id, name: cleanName, contact_person: 'مسؤول التوريد', phone, hotline: '', balance: 0, notes: '' };
   }
 
@@ -4094,6 +4882,10 @@ class SQLiteService {
 
   async revokeLicense(machineId) {
     await this.init();
+    const actor = this._requireAuth();
+    if (actor.role !== 'admin') {
+      throw new Error('عذراً، إلغاء الترخيص مخصص لمدير النظام فقط.');
+    }
     try {
       this.createSchema();
       return await this.saveLicenseInfo({

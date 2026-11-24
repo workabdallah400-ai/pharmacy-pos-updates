@@ -34,7 +34,9 @@ import {
   BarChart3,
   Globe,
   Radio,
-  Link2
+  Link2,
+  PackagePlus,
+  FileWarning
 } from 'lucide-react';
 import { DEFAULT_SETTINGS } from '../data/mockSettings';
 import { playBarcodeBeep, playCashDrawerSound } from '../utils/sound';
@@ -59,6 +61,8 @@ import {
   isTunnelSupported
 } from '../utils/tunnel';
 import { setTunnelUrl, getReportBaseUrl } from '../utils/reportServer';
+import { isValidPhone } from '../utils/validation';
+import { notifyPharmacyIdentityUpdated } from '../utils/pharmacyIdentity';
 
 export function SettingsView({ onUpdatePharmacyName, onRevokeDevice, currentUser, initialTab = 'receipt' }) {
   const [settings, setSettings] = useState(() => {
@@ -79,7 +83,10 @@ export function SettingsView({ onUpdatePharmacyName, onRevokeDevice, currentUser
   const [syncStatus, setSyncStatus] = useState(null);
   const [syncRunning, setSyncRunning] = useState(false);
   const [reportServerInfo, setReportServerInfo] = useState(null);
-  const [appInfo, setAppInfo] = useState({ version: '1.0.0', packaged: false });
+  const [appInfo, setAppInfo] = useState({
+    version: typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '1.5.0',
+    packaged: false
+  });
   const [updateState, setUpdateState] = useState({ status: 'idle', message: '', progress: 0, version: null });
   const [updateBusy, setUpdateBusy] = useState(false);
   const [tunnelState, setTunnelState] = useState({ url: '', running: false, available: false, supported: false });
@@ -165,25 +172,53 @@ export function SettingsView({ onUpdatePharmacyName, onRevokeDevice, currentUser
   }, []);
 
   const handleFieldChange = (field, value) => {
-    setSettings((prev) => {
-      const next = { ...prev, [field]: value };
-      if (field === 'pharmacyName' && onUpdatePharmacyName) {
-        onUpdatePharmacyName(value);
-      }
-      return next;
-    });
+    setSettings((prev) => ({ ...prev, [field]: value }));
+    // Notify the shell OUTSIDE the state updater. Calling the parent setState
+    // from inside setSettings' updater triggered React's
+    // "Cannot update a component while rendering a different component" warning.
+    if (field === 'pharmacyName' && onUpdatePharmacyName) {
+      onUpdatePharmacyName(value);
+    }
   };
 
   const handleSaveAll = async () => {
+    const pharmacyName = String(settings.pharmacyName || '').trim();
+    if (!pharmacyName) {
+      showToast('اسم الصيدلية إجباري لأنه يُطبع على كل فاتورة وإيصال.');
+      return;
+    }
+
+    const phone = String(settings.phone || '').trim();
+    const hotline = String(settings.hotline || '').trim();
+    if (phone && !isValidPhone(phone)) {
+      showToast('رقم هاتف الصيدلية غير صحيح. أدخل 7 إلى 15 رقماً.');
+      return;
+    }
+    if (hotline && !isValidPhone(hotline)) {
+      showToast('رقم الخط الساخن غير صحيح. أدخل 7 إلى 15 رقماً.');
+      return;
+    }
+
+    const cleanSettings = {
+      ...settings,
+      pharmacyName,
+      phone,
+      hotline
+    };
+
     try {
-      localStorage.setItem('PHARMACY_SETTINGS', JSON.stringify(settings));
-      await sqliteService.saveSettings(settings);
+      localStorage.setItem('PHARMACY_SETTINGS', JSON.stringify(cleanSettings));
+      await sqliteService.saveSettings(cleanSettings);
+      setSettings(cleanSettings);
       if (onUpdatePharmacyName) {
-        onUpdatePharmacyName(settings.pharmacyName);
+        onUpdatePharmacyName(pharmacyName);
       }
+      // Refresh the header branding (name + branch + phone/tax) without a reload.
+      notifyPharmacyIdentityUpdated();
       showToast('تم حفظ كافة الإعدادات والخيارات وهوية الصيدلية بنجاح ✓');
       playBarcodeBeep();
     } catch (e) {
+      notifyPharmacyIdentityUpdated();
       showToast('تم الحفظ محلياً');
     }
   };
@@ -330,13 +365,44 @@ export function SettingsView({ onUpdatePharmacyName, onRevokeDevice, currentUser
       const safeName = String(settings.pharmacyName || 'Pharmacy').replace(/\s+/g, '_');
       const filename = `PharmacyBackup_${safeName}_${dateStr}.json`;
 
-      const blob = new Blob([JSON.stringify(backupPayload, null, 2)], { type: 'application/json' });
+      const content = JSON.stringify(backupPayload, null, 2);
+
+      // In the packaged Electron app use the native "Save As" dialog: writing
+      // the file directly avoids the browser download path that silently
+      // produced a 0-byte file for multi-megabyte Blobs on some Windows PCs.
+      if (typeof window !== 'undefined' && window.require) {
+        try {
+          const { ipcRenderer } = window.require('electron');
+          const res = await ipcRenderer.invoke('backup:save-json', { filename, content });
+          if (res?.success) {
+            showToast(`تم حفظ نسخة احتياطية كاملة في: [${res.fileName}] 💾`);
+            playCashDrawerSound();
+            return;
+          }
+          if (res?.canceled) {
+            showToast('تم إلغاء حفظ النسخة الاحتياطية.');
+            return;
+          }
+        } catch (ipcErr) {
+          console.warn('Native backup save failed, falling back to download:', ipcErr);
+        }
+      }
+
+      const blob = new Blob([content], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
       a.download = filename;
+      a.style.display = 'none';
+      // The anchor must be in the document for large blobs, and the object URL
+      // must stay alive until the browser has finished reading it. Revoking it
+      // immediately after click() produced a 0-byte download for the 8MB DB.
+      document.body.appendChild(a);
       a.click();
-      URL.revokeObjectURL(url);
+      setTimeout(() => {
+        try { URL.revokeObjectURL(url); } catch (e) {}
+        try { a.remove(); } catch (e) {}
+      }, 60_000);
 
       showToast(`تم أخذ نسخة احتياطية كاملة لقاعدة البيانات وتنزيلها: [${filename}] 💾`);
       playCashDrawerSound();
@@ -379,6 +445,59 @@ export function SettingsView({ onUpdatePharmacyName, onRevokeDevice, currentUser
       }
     };
     reader.readAsText(file);
+  };
+
+  // 5. Import an external catalogue (eStock converter output) — merge only missing items
+  const [catalogImport, setCatalogImport] = useState({
+    fileName: '',
+    payload: null,
+    preview: null,
+    working: false,
+    done: null,
+    error: ''
+  });
+
+  const handleCatalogFileChosen = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setCatalogImport({ fileName: file.name, payload: null, preview: null, working: true, done: null, error: '' });
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const data = JSON.parse(event.target.result);
+        const payload = data?.catalog || data;
+        if (!payload || !Array.isArray(payload.products)) {
+          throw new Error('الملف لا يحتوي على بيانات أصناف صالحة');
+        }
+        const preview = await sqliteService.importExternalCatalog(payload, { dryRun: true });
+        setCatalogImport({ fileName: file.name, payload, preview, working: false, done: null, error: '' });
+      } catch (err) {
+        console.error('Catalog preview failed:', err);
+        setCatalogImport({
+          fileName: file.name, payload: null, preview: null, working: false, done: null,
+          error: err?.message || 'تعذّر قراءة ملف الاستيراد'
+        });
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
+  const handleCatalogImportConfirm = async () => {
+    const { payload, fileName } = catalogImport;
+    if (!payload) return;
+    setCatalogImport((prev) => ({ ...prev, working: true, error: '' }));
+    try {
+      const stats = await sqliteService.importExternalCatalog(payload);
+      setCatalogImport({ fileName, payload: null, preview: null, working: false, done: stats, error: '' });
+      showToast(`تم الاستيراد: ${stats.addedProducts} صنف جديد، ${stats.updatedProducts || 0} محدَّث، ${stats.addedSuppliers} مورد ✓`);
+      playCashDrawerSound();
+    } catch (err) {
+      console.error('Catalog import failed:', err);
+      setCatalogImport((prev) => ({
+        ...prev, working: false, error: err?.message || 'فشل الاستيراد'
+      }));
+    }
   };
 
   const [auditLogsList, setAuditLogsList] = useState([]);
@@ -429,7 +548,7 @@ export function SettingsView({ onUpdatePharmacyName, onRevokeDevice, currentUser
             <h3 className="text-base font-bold text-white flex items-center gap-2">
               الإعدادات العامة وهوية الصيدلية والترخيص
               <span className="text-[10px] px-2 py-0.5 rounded-full bg-teal-500/20 text-teal-300 font-bold border border-teal-500/30">
-                الإصدار 2.5
+                v{typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : (appInfo?.version || '1.0.0')}
               </span>
             </h3>
             <p className="text-xs text-slate-400">
@@ -452,7 +571,7 @@ export function SettingsView({ onUpdatePharmacyName, onRevokeDevice, currentUser
       <div className="flex-1 flex flex-col bg-[#111A2B] border border-[#23324D] rounded-2xl overflow-hidden shadow-xl">
         
         {/* Navigation Tabs Bar */}
-        <div className="flex border-b border-[#23324D] bg-[#17233A]/60 px-4 py-2 gap-2 overflow-x-auto shrink-0">
+        <div className="flex flex-wrap border-b border-[#23324D] bg-[#17233A]/60 px-4 py-2 gap-2 shrink-0">
           {navTabs.map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
@@ -495,6 +614,8 @@ export function SettingsView({ onUpdatePharmacyName, onRevokeDevice, currentUser
                     </label>
                     <input
                       type="text"
+                      required
+                      maxLength={80}
                       value={settings.pharmacyName}
                       onChange={(e) => handleFieldChange('pharmacyName', e.target.value)}
                       className="w-full bg-[#0B1220] border border-[#23324D] focus:border-teal-400 rounded-xl px-3.5 py-2 text-xs text-white font-bold focus:outline-none"
@@ -863,10 +984,99 @@ export function SettingsView({ onUpdatePharmacyName, onRevokeDevice, currentUser
                 </label>
               </div>
 
+              {/* External Catalogue Import (eStock converter output) */}
+              <div className="bg-[#0B1220] p-4 rounded-2xl border border-[#23324D] space-y-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-xs font-bold text-white flex items-center gap-2">
+                      <PackagePlus className="w-4 h-4 text-teal-400" />
+                      استيراد كتالوج من برنامج آخر (eStock)
+                    </div>
+                    <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
+                      يضيف الأصناف والباركود والموردين غير الموجودين عندك، ويحدّث أسعار وتعبئة الأصناف المتشابهة.
+                      لا يضيف أرصدة ولا دفعات مخزون — الكتالوج فقط.
+                    </p>
+                  </div>
+                  <label className="shrink-0 px-3.5 py-2 rounded-xl bg-teal-500/15 border border-teal-500/40 hover:border-teal-400 text-teal-300 text-xs font-bold cursor-pointer flex items-center gap-1.5">
+                    <Upload className="w-3.5 h-3.5" />
+                    اختيار ملف
+                    <input
+                      type="file"
+                      accept=".json"
+                      onChange={handleCatalogFileChosen}
+                      className="hidden"
+                      disabled={catalogImport.working}
+                    />
+                  </label>
+                </div>
+
+                {catalogImport.fileName && (
+                  <div className="text-[11px] text-slate-300 font-mono bg-[#111A2B] border border-[#23324D] rounded-lg px-3 py-2 truncate">
+                    {catalogImport.fileName}
+                  </div>
+                )}
+
+                {catalogImport.working && (
+                  <div className="flex items-center gap-2 text-xs text-teal-300">
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    جارٍ التحليل...
+                  </div>
+                )}
+
+                {catalogImport.error && (
+                  <div className="flex items-start gap-2 text-[11px] text-rose-300 bg-rose-500/10 border border-rose-500/30 rounded-lg px-3 py-2">
+                    <FileWarning className="w-4 h-4 shrink-0 mt-0.5" />
+                    <span>{catalogImport.error}</span>
+                  </div>
+                )}
+
+                {catalogImport.preview && (
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
+                      {[
+                        { label: 'أصناف جديدة', value: catalogImport.preview.addedProducts, tone: 'text-emerald-300' },
+                        { label: 'أصناف ستُحدَّث', value: catalogImport.preview.updatedProducts, tone: 'text-amber-300' },
+                        { label: 'موردون جدد', value: catalogImport.preview.addedSuppliers, tone: 'text-cyan-300' },
+                        { label: 'إجمالي الملف', value: catalogImport.preview.totalInFile, tone: 'text-slate-300' }
+                      ].map((s) => (
+                        <div key={s.label} className="bg-[#111A2B] border border-[#23324D] rounded-xl py-2">
+                          <div className={`text-base font-black font-mono ${s.tone}`}>
+                            {Number(s.value || 0).toLocaleString('en-US')}
+                          </div>
+                          <div className="text-[10px] text-slate-400">{s.label}</div>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={handleCatalogImportConfirm}
+                        className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-teal-500 to-emerald-500 text-slate-950 text-xs font-black hover:brightness-110 transition-all"
+                      >
+                        تأكيد الاستيراد ({Number(catalogImport.preview.addedProducts || 0).toLocaleString('en-US')} جديد · {Number(catalogImport.preview.updatedProducts || 0).toLocaleString('en-US')} تحديث)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setCatalogImport({ fileName: '', payload: null, preview: null, working: false, done: null, error: '' })}
+                        className="px-4 py-2.5 rounded-xl bg-[#111A2B] border border-[#23324D] text-slate-300 text-xs font-bold hover:border-slate-500"
+                      >
+                        إلغاء
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {catalogImport.done && (
+                  <div className="text-[11px] text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 rounded-lg px-3 py-2 leading-relaxed">
+                    تم الاستيراد بنجاح: أُضيف {Number(catalogImport.done.addedProducts || 0).toLocaleString('en-US')} صنفاً،
+                    وحُدِّث {Number(catalogImport.done.updatedProducts || 0).toLocaleString('en-US')} صنفاً،
+                    و{Number(catalogImport.done.addedSuppliers || 0).toLocaleString('en-US')} مورداً.
+                  </div>
+                )}
+              </div>
+
             </div>
           )}
-
-          {/* TAB 4.b: Users Management */}
           {activeTab === 'users' && (
             <div className="max-w-4xl space-y-6">
               <UsersManagementView currentUser={currentUser} />
@@ -1027,7 +1237,7 @@ export function SettingsView({ onUpdatePharmacyName, onRevokeDevice, currentUser
                     </div>
                   </div>
                   <span className="text-xs font-mono font-bold text-teal-300 px-3 py-1 rounded-full border border-teal-500/30 bg-teal-500/10">
-                    الإصدار الحالي: v{appInfo?.version || '1.0.0'}
+                    الإصدار الحالي: v{typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : (appInfo?.version || '1.5.0')}
                   </span>
                 </div>
 

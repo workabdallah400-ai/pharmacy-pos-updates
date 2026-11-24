@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, Pill, Sparkles, CheckCircle2, AlertCircle } from 'lucide-react';
 import { PHARMACY_DOSAGE_UNITS, getUnitDisplayInfo } from '../utils/pharmacyUnits';
+import { isExpiryInPast, parseExpiryDate, validateExpiryInput } from '../utils/validation';
 
 const CATEGORIES = [
   'مسكنات وخافض حرارة',
@@ -41,6 +42,7 @@ export function ProductModal({ isOpen = true, onClose, medicine, medicineToEdit,
   });
 
   const [error, setError] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
     if (targetMedicine) {
@@ -147,8 +149,10 @@ export function ProductModal({ isOpen = true, onClose, medicine, medicineToEdit,
     }));
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
+    if (isSaving) return;
+    setError('');
     if (!formData.trade_name_ar.trim()) {
       setError('يرجى إدخال اسم الدواء باللغة العربية');
       return;
@@ -157,28 +161,108 @@ export function ProductModal({ isOpen = true, onClose, medicine, medicineToEdit,
       setError('يرجى إدخال سعر بيع العلبة بشكل صحيح');
       return;
     }
-    if (!String(formData.barcode || '').trim()) {
+    if (!targetMedicine && !String(formData.barcode || '').trim()) {
       setError('الباركود إجباري للصنف الجديد ولا يتم توليده تلقائياً.');
       return;
+    }
+    if (!targetMedicine && !String(formData.generic_name || '').trim()) {
+      setError('المادة الفعالة (Generic Name) إجبارية لربط البدائل الذكية.');
+      return;
+    }
+
+    const stripsPerBox = parseInt(formData.strips_per_box, 10);
+    const unitsPerStrip = parseInt(formData.units_per_strip, 10);
+    if (!Number.isFinite(stripsPerBox) || stripsPerBox < 1) {
+      setError('عدد الشرائط بالعلبة يجب أن يكون رقماً صحيحاً أكبر من صفر.');
+      return;
+    }
+    if (!Number.isFinite(unitsPerStrip) || unitsPerStrip < 1) {
+      setError('عدد الوحدات داخل الشريط يجب أن يكون رقماً صحيحاً أكبر من صفر.');
+      return;
+    }
+
+    const stockBoxes = parseInt(formData.stock_boxes, 10) || 0;
+    const stockStrips = parseInt(formData.stock_strips, 10) || 0;
+    const stockUnits = parseInt(formData.stock_units, 10) || 0;
+    const reorderLevel = parseInt(formData.reorder_level, 10) || 0;
+    if (stockBoxes < 0 || stockStrips < 0 || stockUnits < 0) {
+      setError('أرصدة المخزون لا يمكن أن تكون سالبة.');
+      return;
+    }
+    if (reorderLevel < 1) {
+      setError('حد الطلب (نواقص) يجب أن يكون 1 على الأقل.');
+      return;
+    }
+
+    const priceStrip = formData.price_strip === '' ? 0 : parseFloat(formData.price_strip);
+    const priceUnit = formData.price_unit === '' ? 0 : parseFloat(formData.price_unit);
+    if (!Number.isFinite(priceStrip) || priceStrip < 0 || !Number.isFinite(priceUnit) || priceUnit < 0) {
+      setError('أسعار الشريط والوحدة لا يمكن أن تكون سالبة أو غير صالحة.');
+      return;
+    }
+
+    const expiryRaw = String(formData.expiry || '').trim();
+    const expiryCheck = validateExpiryInput(expiryRaw, {
+      // Imported catalog items may legitimately have no recorded expiry; do
+      // not block editing their name/price until a real batch is received.
+      required: !targetMedicine,
+      allowPast: true
+    });
+    if (!expiryCheck.valid) {
+      setError(expiryCheck.error);
+      return;
+    }
+    if (!expiryCheck.empty && isExpiryInPast(expiryRaw)) {
+      // Keep an already-expired legacy value untouched, but refuse a new or
+      // changed past date. Compare year/month because MM/YYYY means the whole
+      // month and legacy rows may only record the month.
+      const original = parseExpiryDate(targetMedicine?.expiry);
+      const monthKey = (parsed) =>
+        parsed ? `${parsed.year}-${String(parsed.month).padStart(2, '0')}` : '';
+      const unchanged = Boolean(
+        original && expiryCheck.parsed && monthKey(original) === monthKey(expiryCheck.parsed)
+      );
+      if (!unchanged) {
+        setError(`تاريخ الصلاحية (${expiryRaw}) منتهي بالفعل. أدخل تاريخاً سارياً لهذا الشهر أو لاحقاً.`);
+        return;
+      }
     }
 
     const payload = {
       ...formData,
       id: targetMedicine ? targetMedicine.id : Date.now(),
       unit_type: formData.unit_type || 'tablets',
+      trade_name_ar: formData.trade_name_ar.trim(),
+      generic_name: formData.generic_name.trim(),
+      barcode: String(formData.barcode || '').trim(),
+      expiry: expiryRaw,
       price_box: parseFloat(formData.price_box) || 0,
-      price_strip: parseFloat(formData.price_strip) || 0,
-      price_unit: parseFloat(formData.price_unit) || 0,
-      strips_per_box: parseInt(formData.strips_per_box, 10) || 1,
-      units_per_strip: parseInt(formData.units_per_strip, 10) || 1,
-      stock_boxes: parseInt(formData.stock_boxes, 10) || 0,
-      stock_strips: parseInt(formData.stock_strips, 10) || 0,
-      stock_units: parseInt(formData.stock_units, 10) || 0,
-      reorder_level: parseInt(formData.reorder_level, 10) || 3
+      price_strip: priceStrip,
+      price_unit: priceUnit,
+      strips_per_box: stripsPerBox,
+      units_per_strip: unitsPerStrip,
+      stock_boxes: stockBoxes,
+      stock_strips: stockStrips,
+      stock_units: stockUnits,
+      reorder_level: reorderLevel
     };
 
-    onSave(payload);
-    onClose();
+    setIsSaving(true);
+    try {
+      await onSave(payload);
+      onClose();
+    } catch (err) {
+      const message = String(err?.message || '');
+      if (/UNIQUE|barcode/i.test(message)) {
+        setError('الباركود مستخدم بالفعل لصنف آخر. أدخل باركوداً مختلفاً أو عدّل الصنف الموجود.');
+      } else if (/صلاحية|PERMISSION/i.test(message)) {
+        setError(message);
+      } else {
+        setError(`تعذر حفظ الصنف: ${message || 'خطأ غير معروف في قاعدة البيانات.'}`);
+      }
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -253,12 +337,12 @@ export function ProductModal({ isOpen = true, onClose, medicine, medicineToEdit,
           {/* Generic Name (Active Ingredient) */}
           <div>
             <label className="block text-xs font-semibold text-slate-300 mb-1 flex items-center justify-between">
-              <span>المادة الفعالة والاسم العلمي (Generic Name) *</span>
+              <span>المادة الفعالة والاسم العلمي (Generic Name){!targetMedicine ? ' *' : ''}</span>
               <span className="text-[10px] text-teal-400 font-normal">ضروري لربط البدائل الذكية (F6)</span>
             </label>
             <input
               type="text"
-              required
+              required={!targetMedicine}
               placeholder="مثال: Paracetamol 500mg"
               value={formData.generic_name}
               onChange={(e) => setFormData({ ...formData, generic_name: e.target.value })}
@@ -271,13 +355,13 @@ export function ProductModal({ isOpen = true, onClose, medicine, medicineToEdit,
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-semibold text-slate-300 mb-1">
-                الباركود الدولي أو المحلي <span className="text-rose-400">*</span>
+                الباركود الدولي أو المحلي {!targetMedicine && <span className="text-rose-400">*</span>}
               </label>
               <div className="flex gap-1.5">
                 <input
                   type="text"
                   placeholder="أدخل الباركود الحقيقي..."
-                  required
+                  required={!targetMedicine}
                   value={formData.barcode}
                   onChange={(e) => setFormData({ ...formData, barcode: e.target.value })}
                   className="flex-1 h-10 bg-[#17233A] border border-[#23324D] focus:border-teal-400 rounded-xl px-3 text-teal-300 font-mono text-xs outline-none"
@@ -348,7 +432,8 @@ export function ProductModal({ isOpen = true, onClose, medicine, medicineToEdit,
                           </label>
                           <input
                             type="number"
-                            step="0.5"
+                            step="0.01"
+                            min="0.01"
                             required
                             placeholder="30.00"
                             value={formData.price_box}
@@ -379,7 +464,8 @@ export function ProductModal({ isOpen = true, onClose, medicine, medicineToEdit,
                           </label>
                           <input
                             type="number"
-                            step="0.25"
+                            step="0.01"
+                            min="0"
                             value={formData.price_strip}
                             onChange={(e) => setFormData({ ...formData, price_strip: e.target.value })}
                             className="w-full h-10 bg-[#111A2B] border border-[#23324D] focus:border-teal-400 rounded-xl px-3 text-teal-300 font-mono text-xs outline-none"
@@ -393,7 +479,8 @@ export function ProductModal({ isOpen = true, onClose, medicine, medicineToEdit,
                           </label>
                           <input
                             type="number"
-                            step="0.1"
+                            step="0.01"
+                            min="0"
                             value={formData.price_unit}
                             onChange={(e) => setFormData({ ...formData, price_unit: e.target.value })}
                             className="w-full h-10 bg-[#111A2B] border border-[#23324D] focus:border-teal-400 rounded-xl px-3 text-cyan-300 font-mono text-xs outline-none"
@@ -427,7 +514,8 @@ export function ProductModal({ isOpen = true, onClose, medicine, medicineToEdit,
                         </label>
                         <input
                           type="number"
-                          step="0.5"
+                          step="0.01"
+                          min="0.01"
                           required
                           placeholder="50.00"
                           value={formData.price_box}
@@ -458,7 +546,8 @@ export function ProductModal({ isOpen = true, onClose, medicine, medicineToEdit,
                         </label>
                         <input
                           type="number"
-                          step="0.25"
+                          step="0.01"
+                          min="0"
                           value={formData.price_unit}
                           onChange={(e) => setFormData({ ...formData, price_unit: e.target.value })}
                           className="w-full h-10 bg-[#111A2B] border border-[#23324D] focus:border-teal-400 rounded-xl px-3 text-cyan-300 font-mono text-xs outline-none"
@@ -533,33 +622,23 @@ export function ProductModal({ isOpen = true, onClose, medicine, medicineToEdit,
             );
           })()}
 
-          {/* Expiry Date & Reorder Level */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1">
-                تاريخ الصلاحية (شهر / سنة أو يوم-شهر-سنة)
-              </label>
-              <input
-                type="text"
-                placeholder="مثال: 12/2026 أو 2026-12-01"
-                value={formData.expiry || ''}
-                onChange={(e) => setFormData({ ...formData, expiry: e.target.value })}
-                className="w-full h-10 bg-[#17233A] border border-[#23324D] focus:border-teal-400 rounded-xl px-3 text-amber-300 font-mono text-xs outline-none"
-                dir="ltr"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1">
-                مكان الرف / الدرج
-              </label>
-              <input
-                type="text"
-                placeholder="مثال: A-01"
-                value={formData.shelf || ''}
-                onChange={(e) => setFormData({ ...formData, shelf: e.target.value })}
-                className="w-full h-10 bg-[#17233A] border border-[#23324D] focus:border-teal-400 rounded-xl px-3 text-white text-xs outline-none"
-              />
-            </div>
+          {/* Expiry Date */}
+          <div>
+            <label className="block text-xs font-semibold text-slate-300 mb-1">
+              تاريخ الصلاحية (شهر / سنة أو يوم-شهر-سنة)
+              {!targetMedicine && <span className="text-rose-400"> *</span>}
+            </label>
+            <input
+              type="text"
+              required={!targetMedicine}
+              placeholder="مثال: 12/2027 أو 2027-12-01"
+              value={formData.expiry || ''}
+              onChange={(e) => setFormData({ ...formData, expiry: e.target.value })}
+              className="w-full h-10 bg-[#17233A] border border-[#23324D] focus:border-teal-400 rounded-xl px-3 text-amber-300 font-mono text-xs outline-none"
+              title="شهر/سنة تنتهي في آخر يوم من الشهر، أو تاريخ كامل. لا يُقبل تاريخ منتهٍ للإدخال الجديد."
+              dir="ltr"
+            />
+            <span className="text-[10px] text-slate-500">يمكن تركها فارغة فقط للأصناف القديمة المستوردة بدون صلاحية مسجلة.</span>
           </div>
 
           {/* Category & Manufacturer Row */}
@@ -606,10 +685,11 @@ export function ProductModal({ isOpen = true, onClose, medicine, medicineToEdit,
             </button>
             <button
               type="submit"
-              className="flex-1 py-2.5 rounded-xl bg-teal-500 hover:bg-teal-400 text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 shadow-glow-teal transition-all active:scale-95"
+              disabled={isSaving}
+              className="flex-1 py-2.5 rounded-xl bg-teal-500 hover:bg-teal-400 disabled:opacity-60 disabled:cursor-not-allowed text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 shadow-glow-teal transition-all active:scale-95"
             >
               <CheckCircle2 className="w-4 h-4" />
-              <span>{medicineToEdit ? 'حفظ التعديلات' : 'إضافة الدواء للدليل'}</span>
+              <span>{isSaving ? 'جارٍ الحفظ...' : (medicineToEdit ? 'حفظ التعديلات' : 'إضافة الدواء للدليل')}</span>
             </button>
           </div>
 

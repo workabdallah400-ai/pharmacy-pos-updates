@@ -143,8 +143,8 @@ export function PaymentReceiptModal({
               <div className="relative">
                 <input
                   type="number"
-                  step="0.5"
-                  min="0.5"
+                  step="0.01"
+                  min="0.01"
                   max={currentDebt > 0 ? currentDebt : 0}
                   required
                   autoFocus

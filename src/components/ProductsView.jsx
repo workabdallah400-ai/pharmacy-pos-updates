@@ -409,8 +409,8 @@ export function ProductsView({ currentUser, medicines = [], onSaveMedicine, onDe
     const newPrice = parseFloat(quickPrice);
     const newStock = parseInt(quickStock, 10);
 
-    if (isNaN(newPrice) || isNaN(newStock) || newPrice < 0 || newStock < 0) {
-      setQuickEditingId(null);
+    if (isNaN(newPrice) || isNaN(newStock) || newPrice <= 0 || newStock < 0) {
+      showToast('تعديل سريع غير صالح: سعر العلبة يجب أن يكون أكبر من صفر، والرصيد صفر أو أكثر.');
       return;
     }
 
@@ -531,10 +531,10 @@ export function ProductsView({ currentUser, medicines = [], onSaveMedicine, onDe
         <section className="bg-[#111A2B] border border-[#23324D] p-3.5 rounded-2xl shadow-sm space-y-3">
           
           {/* Top Row: Search Input + Add Medicine Button + Export */}
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+          <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center justify-between gap-3">
             
             {/* Search Input */}
-            <div className="relative flex-1 w-full">
+            <div className="relative flex-1 w-full sm:min-w-[220px]">
               <Search className="w-4 h-4 absolute right-3.5 top-1/2 -translate-y-1/2 text-teal-400" />
               <input
                 type="text"
@@ -555,7 +555,7 @@ export function ProductsView({ currentUser, medicines = [], onSaveMedicine, onDe
                 setSelectedCategory(e.target.value);
                 setCurrentPage(1);
               }}
-              className="h-11 bg-[#17233A] border border-[#23324D] text-slate-200 text-xs font-medium rounded-xl px-3 outline-none shrink-0"
+              className="h-11 w-full sm:w-auto max-w-full sm:max-w-[240px] bg-[#17233A] border border-[#23324D] text-slate-200 text-xs font-medium rounded-xl px-3 outline-none shrink-0"
             >
               <option value="ALL">جميع الأقسام الطبية ({categoriesList.length})</option>
               {categoriesList.map((cat, idx) => (
@@ -566,7 +566,7 @@ export function ProductsView({ currentUser, medicines = [], onSaveMedicine, onDe
             </select>
 
             {/* Actions: Add New Medicine + Import/Export Excel */}
-            <div className="flex items-center gap-2 w-full sm:w-auto shrink-0 flex-wrap sm:flex-nowrap">
+            <div className="flex items-center gap-2 w-full sm:w-auto shrink-0 flex-wrap justify-end">
               {/* Hidden File Input for CSV Import */}
               <input
                 type="file"
@@ -681,13 +681,23 @@ export function ProductsView({ currentUser, medicines = [], onSaveMedicine, onDe
         <section className="flex-1 bg-[#111A2B] border border-[#23324D] rounded-2xl shadow-sm overflow-hidden flex flex-col">
           
           <div className="flex-1 overflow-x-auto">
-            <table className="w-full text-right text-xs">
+            <table className="w-full table-fixed text-right text-xs">
+              <colgroup>
+                <col style={{ width: '25%' }} />
+                <col style={{ width: '12%' }} />
+                <col style={{ width: '9%' }} />
+                <col style={{ width: '12%' }} />
+                <col style={{ width: '12%' }} />
+                <col style={{ width: '8%' }} />
+                <col style={{ width: '6%' }} />
+                <col style={{ width: '16%' }} />
+              </colgroup>
               <thead className="bg-[#141E30] text-slate-300 border-b border-[#23324D] font-bold">
                 <tr>
                   <th className="p-3.5">الدواء والاسم العلمي</th>
                   <th className="p-3.5">الباركود</th>
                   <th className="p-3.5">سعر العلبة</th>
-                  <th className="p-3.5">سعر الشريط</th>
+                  <th className="p-3.5">سعر الشريط / الحبة</th>
                   <th className="p-3.5">الرصيد الحالي</th>
                   <th className="p-3.5">تاريخ الصلاحية</th>
                   <th className="p-3.5">مكان الرف</th>
@@ -719,6 +729,10 @@ export function ProductsView({ currentUser, medicines = [], onSaveMedicine, onDe
                     const priceBox = med.price_box != null ? Number(med.price_box) : 0;
                     const priceStrip = med.price_strip != null ? Number(med.price_strip) : 0;
                     const stripsCount = med.strips_per_box || 1;
+                    const unitsPerStrip = Number(med.units_per_strip) || 1;
+                    const showStripPrice = stripsCount > 1 && priceStrip > 0;
+                    const showUnitPrice = (unitsPerStrip > 1 || stripsCount > 1) && Number(med.price_unit) > 0;
+                    const isUnpriced = priceBox <= 0;
 
                     return (
                       <tr
@@ -729,16 +743,16 @@ export function ProductsView({ currentUser, medicines = [], onSaveMedicine, onDe
                       >
                         {/* 1. Medicine Info */}
                         <td className="p-3.5">
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 min-w-0">
                             <div className="w-2 h-2 rounded-full bg-teal-400 shrink-0"></div>
-                            <div>
+                            <div className="min-w-0">
                               <div className="font-bold text-white text-sm flex items-center gap-2">
-                                <span>{med.trade_name_ar || med.trade_name || 'بدون اسم'}</span>
-                                <span className="text-[10px] font-mono text-teal-300 font-bold bg-[#17233A] border border-[#23324D] px-2 py-0.5 rounded">
+                                <span className="truncate flex-1 min-w-0">{med.trade_name_ar || med.trade_name || 'بدون اسم'}</span>
+                                <span className="shrink-0 whitespace-nowrap text-[10px] font-mono text-teal-300 font-bold bg-[#17233A] border border-[#23324D] px-2 py-0.5 rounded">
                                   {med.category || 'عام'}
                                 </span>
                               </div>
-                              <div className="text-[11px] text-slate-400 font-normal">
+                              <div className="text-[11px] text-slate-400 font-normal truncate" dir="ltr" style={{ textAlign: 'right' }}>
                                 {med.trade_name || ''} {med.generic_name ? `• ${med.generic_name}` : ''}
                               </div>
                             </div>
@@ -747,7 +761,7 @@ export function ProductsView({ currentUser, medicines = [], onSaveMedicine, onDe
 
                         {/* 2. Barcode */}
                         <td className="p-3.5 font-mono text-slate-300" dir="ltr">
-                          <div className="flex items-center gap-1.5 justify-end">
+                          <div className="flex items-center gap-1.5 justify-end whitespace-nowrap">
                             <span className="text-[11px]">{med.barcode || '-'}</span>
                             <Barcode className="w-3.5 h-3.5 text-slate-500" />
                           </div>
@@ -758,32 +772,51 @@ export function ProductsView({ currentUser, medicines = [], onSaveMedicine, onDe
                           {isQuickEditing ? (
                             <input
                               type="number"
-                              step="0.5"
+                              step="0.01"
+                              min="0.01"
                               value={quickPrice}
                               onChange={(e) => setQuickPrice(e.target.value)}
                               className="w-20 h-8 bg-[#0B1220] border border-teal-400 rounded-lg text-emerald-400 font-mono font-bold text-xs px-2 outline-none"
+                              aria-label="سعر بيع العلبة"
                               dir="ltr"
                             />
+                          ) : isUnpriced ? (
+                            <span
+                              className="inline-flex items-center px-2 py-0.5 rounded-lg text-[10px] font-bold bg-rose-500/10 text-rose-400 border border-rose-500/30 whitespace-nowrap"
+                              title="لا يوجد سعر لهذا الصنف — اضغط على أيقونة القلم لتحديد السعر"
+                            >
+                              غير مسعّر
+                            </span>
                           ) : (
-                            <div className="font-extrabold text-emerald-400 font-mono text-sm" dir="ltr">
+                            <div className="font-extrabold text-emerald-400 font-mono text-sm whitespace-nowrap overflow-hidden text-ellipsis" dir="ltr">
                               {priceBox.toFixed(2)} <span className="text-[10px] text-slate-400 font-normal font-sans">ج.م</span>
                             </div>
                           )}
                         </td>
 
                         {/* 4. Strip & Sub-unit Price */}
-                        <td className="p-3.5">
-                          <div className="font-mono text-teal-300 text-xs" dir="ltr">
-                            {priceStrip.toFixed(2)} ج.م <span className="text-[10px] text-slate-400">/ شريط</span>
-                          </div>
-                          {med.price_unit > 0 && (
-                            <div className="font-mono text-cyan-300 text-[11px]" dir="ltr">
-                              {Number(med.price_unit).toFixed(2)} ج.م <span className="text-[10px] text-slate-400">/ حبة</span>
+                        <td
+                          className="p-3.5"
+                          title={`العلبة = ${stripsCount} شريط × ${unitsPerStrip} حبة`}
+                        >
+                          {showStripPrice || showUnitPrice ? (
+                            <div className="flex flex-col gap-0.5">
+                              {showStripPrice && (
+                                <div className="flex items-center gap-1 whitespace-nowrap">
+                                  <span className="text-[9px] text-slate-400 font-normal">ش</span>
+                                  <span className="font-mono text-teal-300 text-xs whitespace-nowrap" dir="ltr">{priceStrip.toFixed(2)} ج.م</span>
+                                </div>
+                              )}
+                              {showUnitPrice && (
+                                <div className="flex items-center gap-1 whitespace-nowrap">
+                                  <span className="text-[9px] text-slate-400 font-normal">ح</span>
+                                  <span className="font-mono text-cyan-300 text-[11px] whitespace-nowrap" dir="ltr">{Number(med.price_unit).toFixed(2)} ج.م</span>
+                                </div>
+                              )}
                             </div>
+                          ) : (
+                            <span className="text-slate-600 text-[11px]" title="يُباع بالعلبة فقط">—</span>
                           )}
-                          <div className="text-[10px] text-slate-400 font-normal">
-                            ({stripsCount} ش • {med.units_per_strip || 10} حبة/ش)
-                          </div>
                         </td>
 
                         {/* 5. Current Stock Badge */}
@@ -802,7 +835,7 @@ export function ProductsView({ currentUser, medicines = [], onSaveMedicine, onDe
                             </div>
                           ) : (
                             <span
-                              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-bold border ${
+                              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-bold border whitespace-nowrap ${
                                 isZero && !(med.stock_units > 0)
                                   ? 'bg-rose-500/15 border-rose-500/30 text-rose-400'
                                   : isNearEmpty
@@ -823,7 +856,7 @@ export function ProductsView({ currentUser, medicines = [], onSaveMedicine, onDe
                         </td>
 
                         {/* 6. Expiry Date */}
-                        <td className="p-3.5 font-mono text-xs">
+                        <td className="p-3.5 font-mono text-xs whitespace-nowrap">
                           {med.expiry ? (
                             <span className="px-2 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/30 font-bold">
                               {med.expiry}
@@ -834,7 +867,7 @@ export function ProductsView({ currentUser, medicines = [], onSaveMedicine, onDe
                         </td>
 
                         {/* 7. Shelf Location */}
-                        <td className="p-3.5 font-mono text-slate-300">
+                        <td className="p-3.5 font-mono text-slate-300 whitespace-nowrap">
                           <span className="px-2 py-0.5 rounded bg-[#17233A] border border-[#23324D] text-[11px]">
                             {med.shelf || 'A-01'}
                           </span>
@@ -1002,8 +1035,13 @@ export function ProductsView({ currentUser, medicines = [], onSaveMedicine, onDe
                 setSqliteItems(refreshed.items);
                 setSqliteTotal(refreshed.total);
               }
+              const freshStats = await sqliteService.getInventoryStats();
+              if (freshStats) setSqliteStats(freshStats);
             } catch (err) {
               console.warn('Error saving medicine or refreshing list:', err);
+              // Let the modal stay open and show the real failure instead of
+              // closing with a success toast for a save that never happened.
+              throw err;
             }
             if (onSaveMedicine) onSaveMedicine(savedMed);
             setShowProductModal(false);
@@ -1016,6 +1054,7 @@ export function ProductsView({ currentUser, medicines = [], onSaveMedicine, onDe
       {/* Barcode Sticker Modal */}
       {barcodeMedicine && (
         <BarcodeStickerModal
+          isOpen={!!barcodeMedicine}
           medicine={barcodeMedicine}
           onClose={() => setBarcodeMedicine(null)}
         />

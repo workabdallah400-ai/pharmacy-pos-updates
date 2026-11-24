@@ -2,7 +2,8 @@ import React, { useState, useMemo, useEffect } from 'react';
 import {
   BookUser,
   Users,
-  DollarSign,
+  UserX,
+  Banknote,
   AlertTriangle,
   Search,
   Plus,
@@ -293,7 +294,7 @@ export function CustomersView() {
             </div>
           </div>
           <div className="w-12 h-12 rounded-xl bg-amber-500/15 border border-amber-500/30 text-amber-400 flex items-center justify-center shrink-0">
-            <DollarSign className="w-6 h-6" />
+            <Banknote className="w-6 h-6" />
           </div>
         </div>
 
@@ -470,13 +471,13 @@ export function CustomersView() {
         <div className="flex-1 overflow-y-auto">
           {filteredCustomers.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center p-8 text-center text-slate-400">
-              <div className="w-16 h-16 rounded-2xl bg-teal-500/10 text-teal-400 border border-teal-500/20 flex items-center justify-center mb-3">
-                <CheckCircle2 className="w-8 h-8" />
+              <div className="w-16 h-16 rounded-2xl bg-slate-500/10 text-slate-400 border border-slate-500/20 flex items-center justify-center mb-3">
+                <UserX className="w-8 h-8" />
               </div>
               <h4 className="text-base font-bold text-white mb-1">
                 لا توجد سجلات عملاء تطابق الفلتر المحدد
               </h4>
-              <p className="text-xs text-slate-500 max-w-sm">
+              <p className="text-xs text-slate-400 max-w-sm">
                 يمكنك تسجيل عميل جديد، أو تبديل فلترة البحث لاستعراض كافة السجلات.
               </p>
             </div>
@@ -630,7 +631,7 @@ export function CustomersView() {
                             title="سداد دفعة نقدية وإصدار سند قبض"
                             className="px-2.5 py-1.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/35 border border-emerald-500/40 text-emerald-300 text-xs font-bold transition-all flex items-center gap-1 shadow-sm"
                           >
-                            <DollarSign className="w-3.5 h-3.5 text-emerald-400" />
+                            <Banknote className="w-3.5 h-3.5 text-emerald-400" />
                             <span>سداد</span>
                           </button>
 

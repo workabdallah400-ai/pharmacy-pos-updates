@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, Calendar, Edit3, Package, Building2, AlertCircle, Sparkles } from 'lucide-react';
+import { isExpiryInPast, isValidISODate, parseExpiryDate } from '../utils/validation';
 
 export function EditBatchModal({ isOpen, onClose, batch, onSaveBatch, suppliers }) {
   const [batchNo, setBatchNo] = useState('');
@@ -32,20 +33,41 @@ export function EditBatchModal({ isOpen, onClose, batch, onSaveBatch, suppliers 
       setError('يرجى تحديد تاريخ انتهاء الصلاحية');
       return;
     }
+    if (!isValidISODate(expiryDate)) {
+      setError('صيغة تاريخ انتهاء الصلاحية غير صحيحة.');
+      return;
+    }
 
     const qBoxes = parseInt(quantityBoxes, 10);
     const qStrips = parseInt(quantityStrips, 10) || 0;
 
     if (isNaN(qBoxes) || qBoxes < 0) {
-      setError('يرجى إدخال كمية صحيحة بالعلب');
+      setError('يرجى إدخال كمية صحيحة بالعلب (صفر أو أكثر)');
+      return;
+    }
+    if (isNaN(qStrips) || qStrips < 0) {
+      setError('يرجى إدخال كمية صحيحة بالشرائط (صفر أو أكثر)');
       return;
     }
 
-    // Format month/year
-    const d = new Date(expiryDate);
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const year = d.getFullYear();
-    const expiryMonthYear = `${month}/${year}`;
+    // Editing an already-expired batch must keep working, but you cannot move
+    // a batch to a new past date. Compare against the stored expiry instead.
+    // purchase_items stores expiry as MM/YYYY, so the comparison uses the
+    // year/month the database will actually keep (day is not persisted).
+    const originalExpiry = parseExpiryDate(batch.expiry_date);
+    const nextExpiry = parseExpiryDate(expiryDate);
+    const monthKey = (parsed) =>
+      parsed ? `${parsed.year}-${String(parsed.month).padStart(2, '0')}` : '';
+    const unchanged = Boolean(
+      originalExpiry && nextExpiry && monthKey(originalExpiry) === monthKey(nextExpiry)
+    );
+    if (isExpiryInPast(expiryDate) && !unchanged) {
+      setError('لا يمكن تغيير تاريخ الصلاحية إلى تاريخ ماضٍ. اختر تاريخ اليوم أو تاريخاً لاحقاً.');
+      return;
+    }
+
+    // Format month/year directly from the validated date (avoids timezone shifts)
+    const expiryMonthYear = `${String(nextExpiry.month).padStart(2, '0')}/${nextExpiry.year}`;
 
     const updatedBatch = {
       ...batch,

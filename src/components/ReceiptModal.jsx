@@ -1,9 +1,24 @@
 import React from 'react';
 import { X, Printer, CheckCircle2, Receipt } from 'lucide-react';
-import { getPharmacyName } from '../utils/pharmacyIdentity';
+import { getPharmacyName, readPharmacySettings } from '../utils/pharmacyIdentity';
 
 export function ReceiptModal({ isOpen, onClose, invoice, pharmacyName = getPharmacyName(), cashierName = 'د. أحمد' }) {
   if (!isOpen || !invoice) return null;
+
+  const settings = readPharmacySettings();
+  const branch = String(settings.pharmacyBranch || '').trim();
+  const phone = String(settings.phone || '').trim();
+  const hotline = String(settings.hotline || '').trim();
+  const taxNumber = String(settings.taxNumber || '').trim();
+  const greeting = String(settings.receiptGreeting || '').trim()
+    || 'نتمنى لكم الشفاء العاجل دائمًا 💚';
+  const footerNote = String(settings.receiptFooter || '').trim()
+    || 'البضاعة المباعة ترد وتستبدل بالفاتورة خلال 14 يومًا';
+
+  const paymentMethod = invoice.paymentMethod || invoice.payment_method || '';
+  const paidCash = Number(invoice.paid_cash ?? invoice.paidAmount ?? 0) || 0;
+  const paidCredit = Number(invoice.paid_credit ?? 0) || 0;
+  const paidCard = Number(invoice.paid_card ?? 0) || 0;
 
   const handlePrint = () => {
     window.print();
@@ -39,7 +54,19 @@ export function ReceiptModal({ isOpen, onClose, invoice, pharmacyName = getPharm
             {/* Pharmacy Branding Header */}
             <div className="text-center pb-3 border-b border-dashed border-slate-300">
               <div className="text-base font-black text-slate-900">{pharmacyName}</div>
-              <div className="text-[11px] text-slate-600 mt-0.5">فرع وسط البلد • دليفري: 01012345678</div>
+              {branch && (
+                <div className="text-[11px] text-slate-600 mt-0.5">{branch}</div>
+              )}
+              {(phone || hotline) && (
+                <div className="text-[10px] text-slate-600 mt-0.5">
+                  {phone ? `هاتف: ${phone}` : ''}
+                  {phone && hotline ? ' • ' : ''}
+                  {hotline ? `دليفري: ${hotline}` : ''}
+                </div>
+              )}
+              {taxNumber && (
+                <div className="text-[9px] text-slate-500 mt-0.5">الرقم الضريبي: {taxNumber}</div>
+              )}
               <div className="text-[10px] text-slate-500 mt-1">فاتورة بيع ضريبية مبسطة</div>
             </div>
 
@@ -110,22 +137,58 @@ export function ReceiptModal({ isOpen, onClose, invoice, pharmacyName = getPharm
                 <span>الصافي المطلوب:</span>
                 <span dir="ltr" className="text-emerald-700">{invoice.total.toFixed(2)} EGP</span>
               </div>
-              <div className="flex justify-between text-slate-600 pt-1">
-                <span>المدفوع:</span>
-                <span dir="ltr">{(invoice.paidAmount || invoice.total).toFixed(2)} EGP</span>
-              </div>
-              {invoice.changeAmount > 0 && (
-                <div className="flex justify-between font-bold text-slate-800">
-                  <span>الباقي للعميل:</span>
-                  <span dir="ltr">{invoice.changeAmount.toFixed(2)} EGP</span>
-                </div>
+              {paymentMethod === 'آجل' ? (
+                <>
+                  <div className="flex justify-between text-slate-600 pt-1">
+                    <span>المدفوع الآن:</span>
+                    <span dir="ltr">0.00 EGP</span>
+                  </div>
+                  <div className="flex justify-between font-bold text-rose-700">
+                    <span>المتبقي على الحساب:</span>
+                    <span dir="ltr">{invoice.total.toFixed(2)} EGP</span>
+                  </div>
+                </>
+              ) : paymentMethod === 'مختلط' ? (
+                <>
+                  <div className="flex justify-between text-slate-600 pt-1">
+                    <span>مدفوع كاش:</span>
+                    <span dir="ltr">{paidCash.toFixed(2)} EGP</span>
+                  </div>
+                  <div className="flex justify-between text-slate-600">
+                    <span>مضاف على الحساب (آجل):</span>
+                    <span dir="ltr">{paidCredit.toFixed(2)} EGP</span>
+                  </div>
+                  {paidCard > 0 && (
+                    <div className="flex justify-between text-slate-600">
+                      <span>مدفوع بطاقة:</span>
+                      <span dir="ltr">{paidCard.toFixed(2)} EGP</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between font-bold text-slate-800">
+                    <span>إجمالي المدفوع الآن:</span>
+                    <span dir="ltr">{(paidCash + paidCard).toFixed(2)} EGP</span>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="flex justify-between text-slate-600 pt-1">
+                    <span>المدفوع:</span>
+                    <span dir="ltr">{(invoice.paidAmount || invoice.total).toFixed(2)} EGP</span>
+                  </div>
+                  {invoice.changeAmount > 0 && (
+                    <div className="flex justify-between font-bold text-slate-800">
+                      <span>الباقي للعميل:</span>
+                      <span dir="ltr">{invoice.changeAmount.toFixed(2)} EGP</span>
+                    </div>
+                  )}
+                </>
               )}
             </div>
 
             {/* Footer Greeting */}
             <div className="text-center pt-3 text-[10px] text-slate-600 space-y-1">
-              <div>نتمنى لكم الشفاء العاجل دائمًا 💚</div>
-              <div className="text-[9px] text-slate-500">البضاعة المباعة ترد وتستبدل بالفاتورة خلال 14 يومًا</div>
+              <div>{greeting}</div>
+              <div className="text-[9px] text-slate-500">{footerNote}</div>
               <div className="font-bold text-[9px] text-slate-500 pt-1">{pharmacyName} — نسعد بخدمتكم</div>
             </div>
 

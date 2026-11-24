@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, ipcMain } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
@@ -574,6 +574,12 @@ ipcMain.handle('db:read', async () => {
 
 ipcMain.handle('catalog:read', async () => {
   const candidates = [
+    path.join(process.resourcesPath || '', 'catalog-v1500.json'),
+    path.join(process.resourcesPath || '', 'app.asar', 'dist', 'catalog-v1500.json'),
+    path.join(__dirname, '../dist/catalog-v1500.json'),
+    path.join(__dirname, '../public/catalog-v1500.json'),
+    path.join(process.cwd(), 'catalog-v1500.json'),
+    path.join(process.cwd(), 'public/catalog-v1500.json'),
     path.join(process.resourcesPath || '', 'catalog-v1423.json'),
     path.join(process.resourcesPath || '', 'app.asar', 'dist', 'catalog-v1423.json'),
     path.join(__dirname, '../dist/catalog-v1423.json'),
@@ -644,6 +650,32 @@ ipcMain.handle('db:backup', async (event, label = 'shift-close') => {
     return { success: true, path: backupFilePath, fileName: backupFileName };
   } catch (e) {
     console.error('db:backup error:', e);
+    return { success: false, error: e.message };
+  }
+});
+
+// Save a large text payload (the JSON backup) through the native "Save As"
+// dialog. Browser-style <a download> of a 17 MB Blob can silently produce a
+// 0-byte file on some Windows machines, so the packaged app must not rely on it.
+ipcMain.handle('backup:save-json', async (event, options = {}) => {
+  try {
+    const filename = String(options.filename || 'PharmacyBackup.json').replace(/[\\/:*?"<>|]/g, '_');
+    const content = String(options.content || '');
+    if (!content) return { success: false, error: 'empty-content' };
+
+    const win = BrowserWindow.getFocusedWindow() || mainWindow;
+    const defaultDir = app.getPath('documents');
+    const result = await dialog.showSaveDialog(win, {
+      title: 'حفظ النسخة الاحتياطية',
+      defaultPath: path.join(defaultDir, filename),
+      filters: [{ name: 'JSON Backup', extensions: ['json'] }]
+    });
+    if (result.canceled || !result.filePath) return { success: false, canceled: true };
+
+    fs.writeFileSync(result.filePath, content, 'utf8');
+    return { success: true, path: result.filePath, fileName: path.basename(result.filePath) };
+  } catch (e) {
+    console.error('backup:save-json error:', e);
     return { success: false, error: e.message };
   }
 });

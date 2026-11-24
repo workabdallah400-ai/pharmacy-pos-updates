@@ -52,9 +52,20 @@ export function OpenShiftModal({ isOpen, onClose, onOpenShift, currentUser = nul
 
   const handleSubmit = (e) => {
     e.preventDefault();
+    if (!String(cashierName || '').trim()) {
+      setError('يرجى اختيار صيدلي أو كاشير الوردية. لا يمكن فتح وردية بدون مسؤول.');
+      return;
+    }
+
     const floatVal = parseFloat(openingCash);
-    if (!openingCash.trim() || !Number.isFinite(floatVal) || floatVal < 0) {
+    if (!String(openingCash).trim() || !Number.isFinite(floatVal) || floatVal < 0) {
       setError('يرجى إدخال عهدة صحيحة (0 أو أي مبلغ موجب، بدون قيم سالبة أو فارغة).');
+      return;
+    }
+
+    const shiftNo = parseInt(shiftNumber, 10);
+    if (!Number.isInteger(shiftNo) || shiftNo < 1 || shiftNo > 99) {
+      setError('رقم الوردية يجب أن يكون رقماً صحيحاً من 1 إلى 99.');
       return;
     }
 
@@ -65,7 +76,7 @@ export function OpenShiftModal({ isOpen, onClose, onOpenShift, currentUser = nul
 
     const newShift = {
       id: shiftId,
-      shift_number: parseInt(shiftNumber, 10) || 1,
+      shift_number: shiftNo,
       cashier_name: cashierName,
       opened_at: now.toISOString(),
       opening_cash: floatVal,
@@ -126,6 +137,7 @@ export function OpenShiftModal({ isOpen, onClose, onOpenShift, currentUser = nul
               صيدلي أو كاشير الوردية <span className="text-rose-400">*</span>
             </label>
             <select
+              required
               value={cashierName}
               onChange={(e) => setCashierName(e.target.value)}
               className="w-full bg-[#0B1220] border border-[#23324D] focus:border-teal-400 rounded-xl px-3.5 py-2.5 text-sm font-bold text-white focus:outline-none"

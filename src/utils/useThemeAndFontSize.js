@@ -33,7 +33,10 @@ export function useThemeAndFontSize() {
     } catch (e) {}
   }, [theme]);
 
-  // Apply font size / zoom factor cleanly without breaking layouts
+  // Apply font size / zoom factor cleanly without breaking layouts.
+  // IMPORTANT: this is the ONLY zoom mechanism. The old CSS `zoom` rules
+  // in index.css were removed because they multiplied with Electron's
+  // native zoom (0.78x–1.39x instead of the intended 0.9x–1.2x).
   useEffect(() => {
     try {
       const root = document.documentElement;
@@ -48,7 +51,7 @@ export function useThemeAndFontSize() {
       };
       const factor = zoomFactorMap[fontSize] || 1.0;
 
-      // In Electron desktop environment, use native webContents zoomFactor
+      // Electron: native webContents zoom (crisp, scales the whole UI).
       if (typeof window !== 'undefined' && window.require) {
         try {
           const { ipcRenderer, webFrame } = window.require('electron');
@@ -57,9 +60,15 @@ export function useThemeAndFontSize() {
           } else if (ipcRenderer) {
             ipcRenderer.send('window:set-zoom-factor', factor);
           }
+          return;
         } catch (e) {
           console.warn('Native zoom apply error:', e);
         }
+      }
+
+      // Browser dev fallback: one CSS zoom only, never combined with native.
+      if (typeof document !== 'undefined') {
+        document.documentElement.style.zoom = factor === 1 ? '' : String(factor);
       }
     } catch (e) {}
   }, [fontSize]);

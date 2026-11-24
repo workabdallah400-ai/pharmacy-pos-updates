@@ -16,6 +16,7 @@ import {
   PackageCheck
 } from 'lucide-react';
 import { sqliteService } from '../db/sqliteService';
+import { isValidISODate, isValidTime, todayISODate } from '../utils/validation';
 import { confirmDialog } from './ConfirmDialog';
 
 export function ReturnInvoiceModal({
@@ -26,7 +27,7 @@ export function ReturnInvoiceModal({
   onRefundCompleted
 }) {
   // Date and Time Range State (defaults to current day from 00:00 to 23:59)
-  const todayStr = new Date().toISOString().slice(0, 10);
+  const todayStr = todayISODate();
   const [fromDate, setFromDate] = useState(todayStr);
   const [fromTime, setFromTime] = useState('00:00');
   const [toDate, setToDate] = useState(todayStr);
@@ -50,12 +51,26 @@ export function ReturnInvoiceModal({
 
   // Search Invoices according to Date/Time and Query
   const fetchInvoices = async () => {
-    setIsLoading(true);
     setError('');
-    try {
-      const fromDateTime = `${fromDate}T${fromTime}:00`;
-      const toDateTime = `${toDate}T${toTime}:59`;
 
+    if (!fromDate || !toDate || !isValidISODate(fromDate) || !isValidISODate(toDate)) {
+      setError('يرجى تحديد تاريخ بداية ونهاية صحيحين للبحث.');
+      return;
+    }
+    if (!isValidTime(fromTime) || !isValidTime(toTime)) {
+      setError('يرجى تحديد وقت بداية ونهاية صحيحين (ساعة:دقيقة).');
+      return;
+    }
+
+    const fromDateTime = `${fromDate}T${fromTime}:00`;
+    const toDateTime = `${toDate}T${toTime}:59`;
+    if (fromDateTime > toDateTime) {
+      setError('فترة البحث غير صحيحة: تاريخ/وقت البداية يجب أن يكون قبل تاريخ/وقت النهاية.');
+      return;
+    }
+
+    setIsLoading(true);
+    try {
       const results = await sqliteService.searchInvoicesByDateRange({
         fromDateTime,
         toDateTime,
@@ -271,12 +286,19 @@ export function ReturnInvoiceModal({
             <span className="text-slate-400 font-bold">من:</span>
             <input
               type="date"
+              required
               value={fromDate}
-              onChange={(e) => setFromDate(e.target.value)}
+              onChange={(e) => {
+                const value = e.target.value;
+                setFromDate(value);
+                if (value && toDate && value > toDate) setToDate(value);
+              }}
               className="bg-transparent text-white font-mono outline-none cursor-pointer"
+              aria-label="تاريخ بداية البحث"
             />
             <input
               type="time"
+              required
               value={fromTime}
               onChange={(e) => setFromTime(e.target.value)}
               className="bg-transparent text-teal-300 font-mono outline-none cursor-pointer border-r border-[#23324D] pr-2 mr-1"
@@ -288,12 +310,19 @@ export function ReturnInvoiceModal({
             <span className="text-slate-400 font-bold">إلى:</span>
             <input
               type="date"
+              required
               value={toDate}
-              onChange={(e) => setToDate(e.target.value)}
+              onChange={(e) => {
+                const value = e.target.value;
+                setToDate(value);
+                if (value && fromDate && value < fromDate) setFromDate(value);
+              }}
               className="bg-transparent text-white font-mono outline-none cursor-pointer"
+              aria-label="تاريخ نهاية البحث"
             />
             <input
               type="time"
+              required
               value={toTime}
               onChange={(e) => setToTime(e.target.value)}
               className="bg-transparent text-teal-300 font-mono outline-none cursor-pointer border-r border-[#23324D] pr-2 mr-1"

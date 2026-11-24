@@ -1,6 +1,10 @@
 // Thin wrapper around the Electron auto-updater IPC bridge.
 // Safe to import in a normal browser: every call becomes a no-op there.
 
+// Injected by Vite from package.json. The browser build is not "v1.0.0";
+// it must report the same version as the header badge and the installer.
+const FALLBACK_VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '1.5.0';
+
 function getIpc() {
   try {
     if (typeof window !== 'undefined' && window.require) {
@@ -17,11 +21,11 @@ export function isUpdateSupported() {
 
 export async function getAppInfo() {
   const ipc = getIpc();
-  if (!ipc) return { version: '1.0.0', packaged: false };
+  if (!ipc) return { version: FALLBACK_VERSION, packaged: false };
   try {
     return await ipc.invoke('app:version');
   } catch (e) {
-    return { version: '1.0.0', packaged: false, error: e.message };
+    return { version: FALLBACK_VERSION, packaged: false, error: e.message };
   }
 }
 

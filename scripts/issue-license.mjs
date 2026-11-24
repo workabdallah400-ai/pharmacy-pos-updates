@@ -1,21 +1,27 @@
 /**
- * Issues lifetime activation keys for one or more pharmacy computers.
+ * Batch licence issuer (backwards-compatible entry point).
  *
- *   node scripts/issue-license.mjs EGYP-B009-4237-53D2
- *   node scripts/issue-license.mjs EGYP-B009-4237-53D2 EGYP-A111-2222-3333
+ *   node scripts/issue-license.mjs EGYP-9B4C-D478-B27C
+ *   node scripts/issue-license.mjs EGYP-AAAA-BBBB-CCCC EGYP-DDDD-EEEE-FFFF
  *   node scripts/issue-license.mjs --file C:\pharmacies\machine-ids.txt
  *
- * Every computer has its own Machine ID (shown on the activation screen of
- * that machine), so every computer needs its own key. The key never expires.
+ * Each machine needs its own signed LIC2 token. This wrapper simply runs the
+ * official tool (scripts/license-tool.mjs) once per machine ID so existing
+ * workflows keep working.
  */
 import fs from 'node:fs';
-import { generateActivationKey } from '../src/utils/licenseKeys.js';
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const args = process.argv.slice(2);
 const fileIndex = args.indexOf('--file');
 const filePath = fileIndex >= 0 ? String(args[fileIndex + 1] || '').trim() : '';
 
-let machineIds = args.filter((a) => !a.startsWith('--') && a !== filePath);
+let machineIds = args.filter((a) => !a.startsWith('--') && a !== filePath && !a.startsWith('-'));
 if (filePath) {
   try {
     const raw = fs.readFileSync(filePath, 'utf8');
@@ -25,33 +31,27 @@ if (filePath) {
       .filter((s) => /^EGYP-/i.test(s));
     machineIds = machineIds.concat(fromFile);
   } catch (e) {
-    console.error(`❌ مش قادر أقرأ الملف: ${filePath} (${e.message})`);
+    console.error(`❌ مش قادر أقرأ الملف: ${filePath}`);
     process.exit(1);
   }
 }
 
-// de-duplicate, keep the order
-machineIds = Array.from(new Set(machineIds.map((s) => s.trim().toUpperCase())));
+machineIds = [...new Set(machineIds.map((s) => s.trim().toUpperCase()).filter(Boolean))];
 
-if (!machineIds.length) {
-  console.error('');
-  console.error('❌ اكتب Machine ID واحد أو أكثر:');
-  console.error('   node scripts/issue-license.mjs EGYP-B009-4237-53D2');
-  console.error('   node scripts/issue-license.mjs --file machine-ids.txt');
-  console.error('');
-  console.error('   الـ Machine ID بيظهر على شاشة التفعيل في الجهاز نفسه.');
-  console.error('');
+if (machineIds.length === 0) {
+  console.error('❌ اكتب كود الجهاز، مثال:');
+  console.error('   node scripts/issue-license.mjs EGYP-9B4C-D478-B27C');
   process.exit(1);
 }
 
-console.log('');
+const toolPath = path.join(__dirname, 'license-tool.mjs');
+let failed = 0;
 for (const mid of machineIds) {
-  const key = await generateActivationKey(mid, 'LIFETIME');
-  console.log('  ┌──────────────────────────────────────────────');
-  console.log(`  │ Machine ID : ${mid}`);
-  console.log(`  │ المفتاح    : ${key}`);
-  console.log('  └──────────────────────────────────────────────');
+  const res = spawnSync(process.execPath, [toolPath, 'issue', mid], { stdio: 'inherit' });
+  if (res.status !== 0) failed += 1;
 }
-console.log('');
-console.log('  انسخ المفتاح والصقه في شاشة التفعيل على الجهاز (التفعيل مدى الحياة).');
-console.log('');
+
+if (failed > 0) {
+  console.error(`\n⚠️ فشل إصدار ${failed} من ${machineIds.length} ترخيص.`);
+  process.exit(1);
+}

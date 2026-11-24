@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   BarChart3,
-  DollarSign,
+  Banknote,
   TrendingUp,
   CreditCard,
   ShoppingBag,
@@ -297,7 +297,7 @@ export function ReportsView({ currentUser }) {
               <span className="text-[10px] text-teal-400 font-medium">عدد الفواتير الصادرة: {invoicesCount}</span>
             </div>
             <div className="w-12 h-12 rounded-2xl bg-teal-500/15 border border-teal-500/30 flex items-center justify-center text-teal-300">
-              <DollarSign className="w-6 h-6" />
+              <Banknote className="w-6 h-6" />
             </div>
           </div>
 
@@ -401,8 +401,14 @@ export function ReportsView({ currentUser }) {
                 <input
                   type="date"
                   value={fromDate}
-                  onChange={(e) => setFromDate(e.target.value)}
+                  max={toDate || undefined}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setFromDate(value);
+                    if (value && toDate && value > toDate) setToDate(value);
+                  }}
                   className="bg-transparent text-white font-mono text-xs outline-none cursor-pointer"
+                  aria-label="تاريخ بداية التقرير"
                 />
               </div>
 
@@ -411,8 +417,14 @@ export function ReportsView({ currentUser }) {
                 <input
                   type="date"
                   value={toDate}
-                  onChange={(e) => setToDate(e.target.value)}
+                  min={fromDate || undefined}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setToDate(value);
+                    if (value && fromDate && value < fromDate) setFromDate(value);
+                  }}
                   className="bg-transparent text-white font-mono text-xs outline-none cursor-pointer"
+                  aria-label="تاريخ نهاية التقرير"
                 />
               </div>
 
@@ -714,9 +726,15 @@ export function ReportsView({ currentUser }) {
 
               {/* Total Summary */}
               <div className="p-3 bg-[#0B1220] rounded-2xl border border-[#23324D] flex justify-between items-center font-mono">
-                <span className="text-slate-400 font-bold text-xs">صافي قيمة الفاتورة:</span>
+                <span className="text-slate-400 font-bold text-xs">
+                  {modalInvoiceRefunds.length > 0 ? 'صافي قيمة الفاتورة (بعد المرتجع):' : 'صافي قيمة الفاتورة:'}
+                </span>
                 <span className="text-emerald-400 font-black text-base" dir="ltr">
-                  {getInvoiceTotal(selectedInvoiceForModal).toFixed(2)} ج.م
+                  {Math.max(
+                    0,
+                    getInvoiceTotal(selectedInvoiceForModal)
+                      - modalInvoiceRefunds.reduce((s, r) => s + (Number(r.refund_amount) || 0), 0)
+                  ).toFixed(2)} ج.م
                 </span>
               </div>
 
@@ -743,7 +761,7 @@ export function ReportsView({ currentUser }) {
                     const alreadyRefunded = modalInvoiceRefunds.reduce((s, r) => s + (Number(r.refund_amount) || 0), 0);
                     const remainingToRefund = Math.max(0, getInvoiceTotal(selectedInvoiceForModal) - alreadyRefunded);
                     if (remainingToRefund <= 0) {
-                      alert('تم استرجاع هذه الفاتورة بالكامل مسبقاً.');
+                      showToast('تم استرجاع هذه الفاتورة بالكامل مسبقاً.');
                       return;
                     }
                     if (!(await confirmDialog({
@@ -770,7 +788,7 @@ export function ReportsView({ currentUser }) {
                       setInvoices(freshInvoices || []);
                       setRefunds(freshRefunds || []);
                     } catch (e) {
-                      alert('خطأ في إتمام المرتجع: ' + (e.message || e));
+                      showToast('خطأ في إتمام المرتجع: ' + (e.message || e));
                     }
                   }}
                   className="py-2.5 px-3 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 text-xs font-bold flex items-center justify-center gap-1 cursor-pointer"

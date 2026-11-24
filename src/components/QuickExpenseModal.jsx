@@ -1,18 +1,29 @@
 import React, { useState } from 'react';
-import { X, DollarSign, Wallet, CheckCircle2 } from 'lucide-react';
+import { X, DollarSign, Wallet, CheckCircle2, AlertCircle } from 'lucide-react';
 
 export function QuickExpenseModal({ isOpen, onClose, onAddExpense }) {
   const [amount, setAmount] = useState('');
   const [title, setTitle] = useState('');
   const [category, setCategory] = useState('نثريات');
   const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
 
   if (!isOpen) return null;
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (submitting) return;
+
+    setError('');
     const numAmount = parseFloat(amount);
-    if (!numAmount || numAmount <= 0 || submitting) return;
+    if (!Number.isFinite(numAmount) || numAmount <= 0) {
+      setError('يرجى إدخال مبلغ مصروف صحيح أكبر من صفر.');
+      return;
+    }
+    if (!title.trim()) {
+      setError('يرجى كتابة بيان المصروف (السبب) حتى يظهر في تقرير الوردية.');
+      return;
+    }
 
     setSubmitting(true);
     try {
@@ -20,7 +31,7 @@ export function QuickExpenseModal({ isOpen, onClose, onAddExpense }) {
       // failed expense never looks like it was deducted from the drawer.
       await onAddExpense({
         id: Date.now(),
-        title: title.trim() || 'مصروف نثريات سريع',
+        title: title.trim(),
         amount: numAmount,
         category,
         time: new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })
@@ -65,31 +76,40 @@ export function QuickExpenseModal({ isOpen, onClose, onAddExpense }) {
 
         {/* Form */}
         <form onSubmit={handleSubmit} className="p-5 space-y-4">
+          {error && (
+            <div className="p-3 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs font-bold flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>{error}</span>
+            </div>
+          )}
           <div>
             <label className="block text-xs font-semibold text-slate-300 mb-1.5">
               المبلغ المنصرف (ج.م) *
             </label>
             <input
               type="number"
-              step="0.5"
+              step="0.01"
+              min="0.01"
               required
               autoFocus
               placeholder="مثال: 50"
               value={amount}
-              onChange={(e) => setAmount(e.target.value)}
+              onChange={(e) => { setAmount(e.target.value); setError(''); }}
               className="w-full h-12 bg-[#17233A] border border-[#23324D] focus:border-rose-400 rounded-xl px-4 text-white text-lg font-bold font-mono outline-none"
             />
           </div>
 
           <div>
             <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-              بيان المنصرف (السبب)
+              بيان المنصرف (السبب) <span className="text-rose-400">*</span>
             </label>
             <input
               type="text"
+              required
+              maxLength={120}
               placeholder="مثال: شاي وسكر / أكياس صيدلية / أدوات نظافة"
               value={title}
-              onChange={(e) => setTitle(e.target.value)}
+              onChange={(e) => { setTitle(e.target.value); setError(''); }}
               className="w-full h-11 bg-[#17233A] border border-[#23324D] focus:border-rose-400 rounded-xl px-4 text-white text-xs outline-none"
             />
           </div>

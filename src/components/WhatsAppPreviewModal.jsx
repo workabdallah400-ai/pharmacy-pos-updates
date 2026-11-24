@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
-import { X, Copy, Check, ExternalLink, MessageSquare, Send, Phone, Sparkles } from 'lucide-react';
+import { X, Copy, Check, ExternalLink, MessageSquare, Send, Phone, Sparkles, AlertCircle } from 'lucide-react';
+import { isValidPhone } from '../utils/validation';
 
 export function WhatsAppPreviewModal({ isOpen, onClose, messageText, supplierName, repPhone = '' }) {
   const [copied, setCopied] = useState(false);
   const [targetPhone, setTargetPhone] = useState(repPhone);
+  const [error, setError] = useState('');
 
   if (!isOpen) return null;
 
@@ -14,11 +16,18 @@ export function WhatsAppPreviewModal({ isOpen, onClose, messageText, supplierNam
   };
 
   const handleSendWhatsApp = () => {
+    setError('');
+    const rawPhone = targetPhone.trim();
+    if (rawPhone && !isValidPhone(rawPhone)) {
+      setError('رقم واتساب غير صحيح. أدخل 7 إلى 15 رقماً، أو اتركه فارغاً لاختيار المحادثة يدوياً.');
+      return;
+    }
+
     // Format phone number: remove non-digits
-    const cleanPhone = targetPhone.replace(/\D/g, '');
+    const cleanPhone = rawPhone.replace(/\D/g, '');
     let url = '';
     const encodedText = encodeURIComponent(messageText);
-    
+
     if (cleanPhone) {
       // Add Egyptian 20 prefix if starting with 01
       const formatted = cleanPhone.startsWith('01') ? `2${cleanPhone}` : cleanPhone;
@@ -26,7 +35,7 @@ export function WhatsAppPreviewModal({ isOpen, onClose, messageText, supplierNam
     } else {
       url = `https://wa.me/?text=${encodedText}`;
     }
-    
+
     window.open(url, '_blank');
   };
 
@@ -73,14 +82,22 @@ export function WhatsAppPreviewModal({ isOpen, onClose, messageText, supplierNam
                 رقم واتساب المندوب (اختياري - لفتح شاته مباشرة)
               </label>
               <input
-                type="text"
+                type="tel"
+                maxLength={20}
                 value={targetPhone}
-                onChange={(e) => setTargetPhone(e.target.value)}
+                onChange={(e) => { setTargetPhone(e.target.value); setError(''); }}
                 placeholder="مثال: 01012345678 أو اتركه فارغاً لاختيار المحادثة"
                 className="w-full bg-transparent text-xs text-white placeholder-slate-600 focus:outline-none"
+                aria-label="رقم واتساب المندوب"
               />
             </div>
           </div>
+          {error && (
+            <div className="p-2.5 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs font-bold flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>{error}</span>
+            </div>
+          )}
 
           {/* WhatsApp Chat Preview Bubble */}
           <div>

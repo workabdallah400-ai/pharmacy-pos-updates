@@ -197,6 +197,11 @@ export function StockTakeModal({ isOpen, onClose, currentUser, onComplete }) {
   const totalDiscrepancyValue = discrepancies.reduce((sum, d) => sum + d.diffValue, 0);
 
   const handleSaveStockTake = async () => {
+    if (!String(title || '').trim()) {
+      showToast('يرجى إدخال عنوان لجلسة الجرد قبل الحفظ.');
+      return;
+    }
+
     if (discrepancies.length === 0) {
       if (!(await confirmDialog({
         title: 'حفظ جلسة الجرد',
@@ -240,7 +245,7 @@ export function StockTakeModal({ isOpen, onClose, currentUser, onComplete }) {
         onClose();
       }, 1000);
     } catch (e) {
-      alert('خطأ أثناء حفظ جلسة الجرد: ' + (e.message || e));
+      showToast('خطأ أثناء حفظ جلسة الجرد: ' + (e.message || e));
     } finally {
       setIsSubmitting(false);
     }
@@ -322,6 +327,8 @@ export function StockTakeModal({ isOpen, onClose, currentUser, onComplete }) {
                 <label className="block text-[11px] font-bold text-slate-400 mb-1">عنوان جلسة الجرد:</label>
                 <input
                   type="text"
+                  required
+                  maxLength={120}
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
                   className="w-full h-9 bg-[#0B1220] border border-[#23324D] focus:border-purple-400 rounded-xl px-3 text-xs text-white outline-none font-bold"

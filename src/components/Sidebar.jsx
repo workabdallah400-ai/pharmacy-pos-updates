@@ -54,6 +54,7 @@ export function Sidebar({ activeTab, onSelectTab, currentUser, onLogout, hasUnre
               key={item.id}
               type="button"
               onClick={() => onSelectTab(item.id)}
+              aria-current={isActive ? 'page' : undefined}
               className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-right font-medium transition-all duration-200 group relative ${
                 isActive
                   ? 'bg-gradient-to-l from-teal-500/15 via-[#17233A] to-[#17233A] text-white font-bold border border-teal-500/30 shadow-glow-teal'

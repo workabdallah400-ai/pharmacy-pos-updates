@@ -197,9 +197,29 @@ export function ShiftsView({ currentShift: propCurrentShift, onUpdateCurrentShif
     }
   };
 
+  const handleOpenCloseModal = () => {
+    const raw = String(actualCashInput).trim();
+    const counted = parseFloat(raw);
+    if (!raw || !Number.isFinite(counted) || counted < 0) {
+      showToast('يرجى إدخال النقدية الفعلية بالجرد (صفر أو مبلغ موجب) قبل تقفيل الوردية.');
+      return;
+    }
+    setActualCashInput(String(counted));
+    setShowCloseModal(true);
+  };
+
   // Direct Drawer Kick
   const handleKickDrawer = () => {
     playCashDrawerSound();
+    sqliteService
+      .recordAudit(
+        'DRAWER_OPEN',
+        'shift',
+        String(currentShift?.id || ''),
+        'فتح درج النقدية يدوياً من شاشة الورديات',
+        currentUser?.username || currentUser?.full_name || 'المستخدم'
+      )
+      .catch(() => {});
     showToast('تم إرسال إشارة فتح درج النقدية للكاشير 💵');
   };
 
@@ -253,7 +273,7 @@ export function ShiftsView({ currentShift: propCurrentShift, onUpdateCurrentShif
           {currentShift ? (
             <button
               type="button"
-              onClick={() => setShowCloseModal(true)}
+              onClick={handleOpenCloseModal}
               className="px-5 py-2 rounded-xl bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white text-xs font-black shadow-lg shadow-rose-600/20 flex items-center gap-2 transition-all cursor-pointer"
             >
               <Lock className="w-4 h-4" />
@@ -332,10 +352,13 @@ export function ShiftsView({ currentShift: propCurrentShift, onUpdateCurrentShif
                 </label>
                 <input
                   type="number"
-                  step="1"
+                  step="0.01"
+                  min="0"
+                  required
                   value={actualCashInput}
                   onChange={(e) => setActualCashInput(e.target.value)}
                   className="w-full bg-[#111A2B] border border-[#23324D] focus:border-teal-400 rounded-lg px-2.5 py-1 text-sm font-bold text-teal-300 font-mono focus:outline-none"
+                  aria-label="النقدية الفعلية بالجرد"
                 />
                 <div className="mt-1 text-center">
                   {cashDiscrepancy === 0 ? (

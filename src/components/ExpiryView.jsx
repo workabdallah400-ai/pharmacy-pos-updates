@@ -70,6 +70,14 @@ export function ExpiryView({
     return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
   };
 
+  // Purchase batches with zero remaining quantity are historical rows, not
+  // stock on the shelf. They used to appear in the expiry screen (and inflated
+  // its alert counts) even though the medicine had 0 boxes of that batch.
+  const activeBatches = useMemo(
+    () => batches.filter((b) => (Number(b.quantity_boxes) || 0) + (Number(b.quantity_strips) || 0) > 0),
+    [batches]
+  );
+
   // 1. Calculate Expiry Statistics
   const stats = useMemo(() => {
     let expiredCount = 0;
@@ -80,7 +88,7 @@ export function ExpiryView({
     let totalAtRiskCost = 0;
     let totalAtRiskRetail = 0;
 
-    batches.forEach((b) => {
+    activeBatches.forEach((b) => {
       const days = getDaysRemaining(b.expiry_date);
       const boxes = b.quantity_boxes || 0;
       const unitCost = b.cost_box || (b.price_box * 0.75);
@@ -113,11 +121,11 @@ export function ExpiryView({
       totalAtRiskCost,
       totalAtRiskRetail
     };
-  }, [batches]);
+  }, [activeBatches]);
 
   // 2. Filter & Search Logic
   const filteredBatches = useMemo(() => {
-    return batches.filter((b) => {
+    return activeBatches.filter((b) => {
       // Search
       const q = searchQuery.trim().toLowerCase();
       if (q) {
@@ -155,7 +163,7 @@ export function ExpiryView({
 
       return true;
     });
-  }, [batches, searchQuery, supplierFilter, periodFilter]);
+  }, [activeBatches, searchQuery, supplierFilter, periodFilter]);
 
   // Selection toggle
   const toggleSelect = (id) => {
@@ -461,7 +469,7 @@ export function ExpiryView({
                 : 'text-slate-400 hover:text-white'
             }`}
           >
-            كل التنبيهات ({batches.length})
+            كل التنبيهات ({activeBatches.length})
           </button>
           <button
             onClick={() => setPeriodFilter('EXPIRED')}
@@ -782,7 +790,7 @@ export function ExpiryView({
           <div className="flex items-center gap-6">
             <div>
               إجمالي العلب: <span className="font-bold text-white">
-                {filteredBatches.reduce((sum, b) => sum + (b.quantity_boxes || 0), 0)}
+                {(filteredBatches.reduce((sum, b) => sum + (Number(b.quantity_boxes) || 0), 0)).toLocaleString('en-US', { maximumFractionDigits: 2 })}
               </span> علبة
             </div>
             <div>

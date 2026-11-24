@@ -29,6 +29,7 @@ import { WhatsAppPreviewModal } from './WhatsAppPreviewModal';
 import { PrintShortagesModal } from './PrintShortagesModal';
 import { playBarcodeSuccessSound } from '../utils/sound';
 import { getPharmacyName } from '../utils/pharmacyIdentity';
+import { sqliteService } from '../db/sqliteService';
 
 export function ShortagesView({
   medicines,
@@ -38,6 +39,23 @@ export function ShortagesView({
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedSupplierFilter, setSelectedSupplierFilter] = useState('ALL');
   const [activeTabFilter, setActiveTabFilter] = useState('ALL'); // 'ALL', 'OUT_OF_STOCK', 'NEAR_EMPTY', 'CUSTOM'
+
+  // The seeded catalogue contains ~27k medicines that were NEVER purchased or
+  // sold by this pharmacy. Treating them all as shortages produced a fake
+  // 395M EGP order. Show only tracked items by default, with an explicit opt-in
+  // to browse the whole catalogue (e.g. to order a new product for the first time).
+  const [trackedMedicineIds, setTrackedMedicineIds] = useState(() => new Set());
+  const [showFullCatalog, setShowFullCatalog] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    sqliteService.getTrackedMedicineIds()
+      .then((ids) => {
+        if (!cancelled) setTrackedMedicineIds(new Set((ids || []).map(Number)));
+      })
+      .catch((e) => console.warn('Failed to load tracked medicine ids:', e));
+    return () => { cancelled = true; };
+  }, []);
 
   // Selected item IDs for batch actions (Print, WhatsApp, Convert to Purchase)
   const [selectedIds, setSelectedIds] = useState(new Set());
@@ -88,9 +106,12 @@ export function ShortagesView({
     return medicines
       .filter((m) => {
         if (dismissedIds.has(m.id)) return false;
-        const reorder = m.reorder_level || 5;
+        const stock = Number(m.stock_boxes) || 0;
+        const isTracked = stock > 0 || trackedMedicineIds.has(Number(m.id));
+        if (!isTracked && !showFullCatalog) return false;
+        const reorder = Number(m.reorder_level) || 5;
         // Item is short if stock_boxes <= reorder
-        return m.stock_boxes <= reorder;
+        return stock <= reorder;
       })
       .map((m) => {
         const reorder = m.reorder_level || 5;
@@ -122,11 +143,11 @@ export function ShortagesView({
           shelf: m.shelf || 'A-01',
           preferred_supplier: preferredSupplier,
           price_box: m.price_box,
-          type: m.stock_boxes === 0 ? 'OUT_OF_STOCK' : 'NEAR_EMPTY',
-          isUrgent: m.stock_boxes === 0
+          type: (Number(m.stock_boxes) || 0) === 0 ? 'OUT_OF_STOCK' : 'NEAR_EMPTY',
+          isUrgent: (Number(m.stock_boxes) || 0) === 0
         };
       });
-  }, [medicines, dismissedIds, orderQuantities]);
+  }, [medicines, dismissedIds, orderQuantities, trackedMedicineIds, showFullCatalog]);
 
   // Combine custom shortages with catalog shortages
   const allShortages = useMemo(() => {
@@ -559,6 +580,17 @@ export function ShortagesView({
           >
             <User className="w-3 h-3" />
             طلبات خاصة ({customShortages.length})
+          </button>
+          <button
+            onClick={() => setShowFullCatalog((prev) => !prev)}
+            title="الأصناف التي لم تُشترَ أو تُبَع لهذه الصيدلية بعد لا تُعد نواقص. اضغط لعرض دليل الأدوية الكامل عند الحاجة لطلب صنف جديد."
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+              showFullCatalog
+                ? 'bg-slate-600 text-white shadow-md'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            {showFullCatalog ? 'إخفاء دليل الأدوية الكامل' : 'دليل الأدوية الكامل'}
           </button>
         </div>
 

@@ -14,6 +14,25 @@ export const FALLBACK_PHARMACY_NAME = 'صيدليتي';
 const SETTINGS_KEY = 'PHARMACY_SETTINGS';
 
 /**
+ * Fired on `window` whenever the saved pharmacy identity (name / branch /
+ * phone / tax number) changes, so already-mounted components such as the top
+ * header can re-read localStorage instead of showing stale values until a
+ * full page reload.
+ */
+export const PHARMACY_IDENTITY_EVENT = 'pharmacy-identity-updated';
+
+/**
+ * Notifies mounted listeners that the pharmacy identity changed.
+ */
+export function notifyPharmacyIdentityUpdated() {
+  try {
+    if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+      window.dispatchEvent(new Event(PHARMACY_IDENTITY_EVENT));
+    }
+  } catch (e) {}
+}
+
+/**
  * Reads the saved settings object. Safe in any environment (no throw).
  */
 export function readPharmacySettings() {
