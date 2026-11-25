@@ -6,4 +6,4 @@ license-studio/release/
 *.exe
 private/
 *.enc.json
-
+exports/
