@@ -26,7 +26,8 @@
     "license:inspect": "node scripts/license-tool.mjs inspect",
     "license:revocations": "node scripts/build-revocations.mjs",
     "license:admin": "node scripts/license-admin.mjs",
-    "license:test": "node scripts/test-license-token.mjs && node scripts/test-license-parity.mjs && node scripts/test-license-revocation.mjs"
+    "license:test": "node scripts/test-license-token.mjs && node scripts/test-license-parity.mjs && node scripts/test-license-revocation.mjs",
+    "test:restore": "node scripts/test-packaged-restore.cjs"
   },
   "dependencies": {
     "electron-updater": "^6.8.11",
@@ -77,6 +78,14 @@
       {
         "from": "pharmacy_pos.db",
         "to": "pharmacy_pos.db"
+      },
+      {
+        "from": "node_modules/sql.js/dist/sql-wasm.js",
+        "to": "sql.js/sql-wasm.cjs"
+      },
+      {
+        "from": "node_modules/sql.js/dist/sql-wasm.wasm",
+        "to": "sql.js/sql-wasm.wasm"
       }
     ],
     "win": {

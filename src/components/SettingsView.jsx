@@ -93,6 +93,15 @@ export function SettingsView({ onUpdatePharmacyName, onRevokeDevice, currentUser
   const [tunnelBusy, setTunnelBusy] = useState(false);
   const [tunnelDownload, setTunnelDownload] = useState({ percent: 0, active: false });
   const [cloudTestBusy, setCloudTestBusy] = useState(false);
+  const [sqliteRestore, setSqliteRestore] = useState({
+    busy: false,
+    progress: 0,
+    copied: 0,
+    total: 0,
+    info: null,
+    backups: [],
+    error: ''
+  });
 
   const refreshSyncStatus = async () => {
     try {
@@ -413,8 +422,7 @@ export function SettingsView({ onUpdatePharmacyName, onRevokeDevice, currentUser
   };
 
   // 4. Restore Database from JSON
-  const handleRestoreBackup = (e) => {
-    const file = e.target.files?.[0];
+  const handleRestoreBackup = (e) => {    const file = e.target.files?.[0];
     if (!file) return;
 
     const reader = new FileReader();
@@ -445,6 +453,129 @@ export function SettingsView({ onUpdatePharmacyName, onRevokeDevice, currentUser
       }
     };
     reader.readAsText(file);
+  };
+
+  /* ----------------------------------------------------------------------- *
+   * 4b. Restore from an SQLite backup (.bak / .db) — any size.
+   * The file never travels through the renderer: the main process validates
+   * it, stores a safety snapshot and copies it in chunks with progress.
+   * ----------------------------------------------------------------------- */
+
+  const sqliteIpc = () => {
+    try {
+      if (typeof window !== 'undefined' && window.require) {
+        return window.require('electron').ipcRenderer;
+      }
+    } catch (e) {}
+    return null;
+  };
+
+  const refreshLocalBackups = async () => {
+    const ipc = sqliteIpc();
+    if (!ipc) return;
+    try {
+      const res = await ipc.invoke('backup:list-local');
+      if (res?.ok) {
+        setSqliteRestore((prev) => ({ ...prev, backups: res.files || [] }));
+      }
+    } catch (e) {
+      // listing older snapshots is best-effort only
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'backup') refreshLocalBackups();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
+
+  const handlePickSqliteBackup = async () => {
+    const ipc = sqliteIpc();
+    if (!ipc) {
+      showToast('الاستعادة من ملف .bak متاحة في نسخة الديسكتوب فقط');
+      return;
+    }
+    setSqliteRestore((prev) => ({ ...prev, error: '', progress: 0 }));
+    try {
+      const res = await ipc.invoke('backup:pick-sqlite');
+      if (!res || res.canceled) return;
+      if (!res.ok) {
+        setSqliteRestore((prev) => ({ ...prev, info: null, error: res.error || 'تعذر قراءة الملف' }));
+        showToast(res.error || 'تعذر قراءة الملف');
+        return;
+      }
+      setSqliteRestore((prev) => ({ ...prev, info: res.info, error: '' }));
+    } catch (e) {
+      setSqliteRestore((prev) => ({ ...prev, error: e.message }));
+    }
+  };
+
+  const handleInspectLocalBackup = async (backupPath) => {
+    const ipc = sqliteIpc();
+    if (!ipc) return;
+    setSqliteRestore((prev) => ({ ...prev, error: '', progress: 0 }));
+    try {
+      const res = await ipc.invoke('backup:inspect-sqlite', backupPath);
+      if (!res?.ok) {
+        setSqliteRestore((prev) => ({ ...prev, info: null, error: res?.error || 'تعذر قراءة النسخة' }));
+        showToast(res?.error || 'تعذر قراءة النسخة');
+        return;
+      }
+      setSqliteRestore((prev) => ({ ...prev, info: res.info, error: '' }));
+    } catch (e) {
+      setSqliteRestore((prev) => ({ ...prev, error: e.message }));
+    }
+  };
+
+  const handleCancelSqliteRestore = () => {
+    setSqliteRestore((prev) => ({ ...prev, info: null, error: '', progress: 0, copied: 0, total: 0 }));
+  };
+
+  const handleConfirmSqliteRestore = async () => {
+    const ipc = sqliteIpc();
+    const info = sqliteRestore.info;
+    if (!ipc || !info || sqliteRestore.busy) return;
+
+    const medicines = info.counts?.medicines;
+    const detail = medicines != null ? ` (${Number(medicines).toLocaleString('en-US')} صنف)` : '';
+    const ok = window.confirm(
+      `تأكيد استعادة قاعدة البيانات من:\n${info.name}${detail}\n\n` +
+        'سيتم أخذ نسخة أمان من القاعدة الحالية أولاً، ثم استبدالها.\n' +
+        'أي تغييرات غير محفوظة في هذه الجلسة ستُفقد.'
+    );
+    if (!ok) return;
+
+    setSqliteRestore((prev) => ({ ...prev, busy: true, progress: 0, copied: 0, total: info.size || 0, error: '' }));
+
+    const onProgress = (_event, payload) => {
+      if (!payload) return;
+      setSqliteRestore((prev) => {
+        const total = Number(payload.total || prev.total || 0);
+        const copied = Number(payload.copied || 0);
+        return {
+          ...prev,
+          copied,
+          total,
+          progress: total > 0 ? Math.min(100, Math.round((copied / total) * 100)) : 0
+        };
+      });
+    };
+
+    ipc.on('backup:restore-progress', onProgress);
+    try {
+      const res = await ipc.invoke('backup:restore-sqlite', info.path);
+      if (!res?.ok) {
+        setSqliteRestore((prev) => ({ ...prev, busy: false, error: res?.error || 'فشلت الاستعادة' }));
+        showToast(res?.error || 'فشلت الاستعادة');
+        return;
+      }
+      showToast(`تمت الاستعادة من ${res.sourceName} — جارٍ إعادة التشغيل...`);
+      playCashDrawerSound();
+      setTimeout(() => window.location.reload(), 1600);
+    } catch (e) {
+      setSqliteRestore((prev) => ({ ...prev, busy: false, error: e.message }));
+    } finally {
+      ipc.removeListener('backup:restore-progress', onProgress);
+    }
   };
 
   // 5. Import an external catalogue (eStock converter output) — merge only missing items
@@ -982,6 +1113,190 @@ export function SettingsView({ onUpdatePharmacyName, onRevokeDevice, currentUser
                     className="hidden"
                   />
                 </label>
+              </div>
+
+              {/* Restore from an SQLite backup (.bak / .db) */}
+              <div className="bg-[#0B1220] p-4 rounded-2xl border border-[#23324D] space-y-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-xs font-bold text-white flex items-center gap-2">
+                      <HardDrive className="w-4 h-4 text-teal-400" />
+                      استعادة من نسخة SQLite (‎.bak أو .db)
+                    </div>
+                    <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
+                      استعادة كاملة لقاعدة البيانات من ملف نسخة احتياطية — تدعم الملفات الكبيرة (مئات الميجابايت).
+                      يتم أخذ نسخة أمان من القاعدة الحالية تلقائياً قبل الاستبدال، ولن يُستبدل أي شيء لو كان الملف تالفاً.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handlePickSqliteBackup}
+                    disabled={sqliteRestore.busy}
+                    className="shrink-0 px-4 py-2.5 rounded-xl bg-teal-500/15 border border-teal-500/40 hover:border-teal-400 text-teal-300 text-[11px] font-bold transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
+                  >
+                    <Upload className="w-4 h-4" />
+                    اختيار ملف .bak
+                  </button>
+                </div>
+
+                {sqliteRestore.error && (
+                  <div className="rounded-xl border border-rose-500/40 bg-rose-500/10 text-rose-300 text-[11px] font-bold p-3 flex items-start gap-2">
+                    <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                    <span>{sqliteRestore.error}</span>
+                  </div>
+                )}
+
+                {sqliteRestore.info && !sqliteRestore.busy && (
+                  <div className="rounded-xl border border-teal-500/40 bg-teal-500/5 p-3 space-y-2.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-xs font-bold text-white truncate" title={sqliteRestore.info.path}>
+                        {sqliteRestore.info.name}
+                      </div>
+                      <span className="shrink-0 text-[10px] font-mono text-slate-400">
+                        {sqliteRestore.info.sizeText}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[11px] text-slate-300">
+                      <div>
+                        الأدوية:{' '}
+                        <b className="text-teal-300">
+                          {sqliteRestore.info.counts?.medicines != null
+                            ? Number(sqliteRestore.info.counts.medicines).toLocaleString('en-US')
+                            : '—'}
+                        </b>
+                      </div>
+                      <div>
+                        الفواتير:{' '}
+                        <b className="text-white">
+                          {sqliteRestore.info.counts?.invoices != null
+                            ? Number(sqliteRestore.info.counts.invoices).toLocaleString('en-US')
+                            : '—'}
+                        </b>
+                      </div>
+                      <div>
+                        العملاء:{' '}
+                        <b className="text-white">
+                          {sqliteRestore.info.counts?.customers != null
+                            ? Number(sqliteRestore.info.counts.customers).toLocaleString('en-US')
+                            : '—'}
+                        </b>
+                      </div>
+                      <div>
+                        المستخدمون:{' '}
+                        <b className="text-white">
+                          {sqliteRestore.info.counts?.app_users != null
+                            ? Number(sqliteRestore.info.counts.app_users).toLocaleString('en-US')
+                            : '—'}
+                        </b>
+                      </div>
+                      <div className="col-span-2 text-[10px] text-slate-400">
+                        آخر تعديل للملف:{' '}
+                        {sqliteRestore.info.modifiedAt
+                          ? new Date(sqliteRestore.info.modifiedAt).toLocaleString('ar-EG')
+                          : '—'}
+                        {sqliteRestore.info.integrity && sqliteRestore.info.integrity !== 'skipped'
+                          ? ` · فحص السلامة: ${sqliteRestore.info.integrity}`
+                          : ''}
+                      </div>
+                    </div>
+
+                    {(sqliteRestore.info.blocking || []).map((msg, i) => (
+                      <div key={`block-${i}`} className="text-[11px] font-bold text-rose-300 flex items-start gap-2">
+                        <AlertOctagon className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                        <span>{msg}</span>
+                      </div>
+                    ))}
+                    {(sqliteRestore.info.warnings || []).map((msg, i) => (
+                      <div key={`warn-${i}`} className="text-[11px] text-amber-300 flex items-start gap-2">
+                        <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                        <span>{msg}</span>
+                      </div>
+                    ))}
+
+                    <div className="flex items-center gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={handleConfirmSqliteRestore}
+                        disabled={(sqliteRestore.info.blocking || []).length > 0}
+                        className="px-4 py-2 rounded-xl bg-rose-500/15 border border-rose-500/40 hover:border-rose-400 text-rose-300 text-[11px] font-bold transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        تأكيد الاستعادة واستبدال القاعدة الحالية
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleCancelSqliteRestore}
+                        className="px-4 py-2 rounded-xl bg-[#111A2B] border border-[#23324D] hover:border-slate-400 text-slate-300 text-[11px] font-bold transition-all"
+                      >
+                        إلغاء
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {sqliteRestore.busy && (
+                  <div className="rounded-xl border border-teal-500/40 bg-teal-500/5 p-3 space-y-2">
+                    <div className="flex items-center justify-between text-[11px] font-bold text-teal-300">
+                      <span className="flex items-center gap-2">
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        جارٍ نسخ قاعدة البيانات...
+                      </span>
+                      <span className="font-mono">{sqliteRestore.progress}%</span>
+                    </div>
+                    <div className="h-2 rounded-full bg-[#111A2B] overflow-hidden">
+                      <div
+                        className="h-full bg-gradient-to-r from-teal-500 to-emerald-400 transition-all"
+                        style={{ width: `${sqliteRestore.progress}%` }}
+                      />
+                    </div>
+                    <div className="text-[10px] text-slate-400 font-mono">
+                      {(sqliteRestore.copied / (1024 * 1024)).toFixed(1)} MB /{' '}
+                      {(sqliteRestore.total / (1024 * 1024)).toFixed(1)} MB
+                    </div>
+                  </div>
+                )}
+
+                {sqliteRestore.backups.length > 0 && (
+                  <div className="space-y-2 pt-1 border-t border-[#1B2940]">
+                    <div className="flex items-center justify-between pt-2">
+                      <div className="text-[11px] font-bold text-slate-300">
+                        نسخ تلقائية موجودة على هذا الجهاز
+                      </div>
+                      <button
+                        type="button"
+                        onClick={refreshLocalBackups}
+                        className="text-[10px] font-bold text-slate-400 hover:text-teal-300 flex items-center gap-1"
+                      >
+                        <RefreshCw className="w-3 h-3" />
+                        تحديث
+                      </button>
+                    </div>
+                    <div className="max-h-44 overflow-auto space-y-1.5 pl-1">
+                      {sqliteRestore.backups.map((b) => (
+                        <div
+                          key={b.path}
+                          className="flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg bg-[#111A2B] border border-[#23324D]"
+                        >
+                          <div className="min-w-0">
+                            <div className="text-[10.5px] text-slate-200 font-mono truncate" title={b.name}>
+                              {b.name}
+                            </div>
+                            <div className="text-[10px] text-slate-500">
+                              {new Date(b.modifiedAt).toLocaleString('ar-EG')} · {b.sizeText}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleInspectLocalBackup(b.path)}
+                            className="shrink-0 px-2.5 py-1 rounded-md border border-[#2E4162] hover:border-teal-400 text-[10px] font-bold text-slate-300 hover:text-teal-300"
+                          >
+                            استعادة
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* External Catalogue Import (eStock converter output) */}

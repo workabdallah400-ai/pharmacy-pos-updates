@@ -1,8 +1,10 @@
 const { app, BrowserWindow, Menu, ipcMain, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const backupRestore = require('./backupRestore.cjs');
 
 let mainWindow;
+let restoreInProgress = false;
 let reportServer = null;
 let reportServerPromise = null;
 let reportServerModule = null;
@@ -564,7 +566,10 @@ ipcMain.handle('db:read', async () => {
     const targetPath = getDatabasePath();
     if (fs.existsSync(targetPath)) {
       console.log(`Loaded SQLite DB buffer from: ${targetPath}`);
-      return fs.readFileSync(targetPath);
+      const buffer = fs.readFileSync(targetPath);
+      // A fresh read means the renderer is booting again: writes are safe.
+      restoreInProgress = false;
+      return buffer;
     }
   } catch (e) {
     console.error('db:read error:', e);
@@ -599,6 +604,10 @@ ipcMain.handle('catalog:read', async () => {
 
 ipcMain.handle('db:write', async (event, buffer) => {
   try {
+    if (restoreInProgress) {
+      // Never let an in-flight save overwrite a database being restored.
+      return { success: false, error: 'restore-in-progress' };
+    }
     const targetPath = getDatabasePath();
     const dir = path.dirname(targetPath);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -651,6 +660,101 @@ ipcMain.handle('db:backup', async (event, label = 'shift-close') => {
   } catch (e) {
     console.error('db:backup error:', e);
     return { success: false, error: e.message };
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Restore from a SQLite backup (.bak / .db) — works for large files because
+// validation and copying happen here, natively, with progress events only.
+// ---------------------------------------------------------------------------
+
+ipcMain.handle('backup:list-local', async () => {
+  try {
+    const targetPath = getDatabasePath();
+    return { ok: true, path: targetPath, files: backupRestore.listLocalBackups(targetPath) };
+  } catch (e) {
+    return { ok: false, error: e.message, files: [] };
+  }
+});
+
+ipcMain.handle('backup:pick-sqlite', async () => {
+  const win = mainWindow || BrowserWindow.getFocusedWindow();
+  const result = await dialog.showOpenDialog(win, {
+    title: 'اختر نسخة احتياطية (‎.bak أو .db)',
+    properties: ['openFile'],
+    filters: [
+      { name: 'نسخ احتياطية SQLite', extensions: ['bak', 'db', 'sqlite'] },
+      { name: 'كل الملفات', extensions: ['*'] }
+    ]
+  });
+  if (result.canceled || !result.filePaths.length) return { ok: false, canceled: true };
+
+  try {
+    const info = await backupRestore.inspectSqlite(result.filePaths[0]);
+    return { ok: true, info };
+  } catch (e) {
+    return { ok: false, error: e.message || 'تعذر قراءة الملف.' };
+  }
+});
+
+ipcMain.handle('backup:inspect-sqlite', async (_event, filePath) => {
+  try {
+    const info = await backupRestore.inspectSqlite(String(filePath || ''));
+    return { ok: true, info };
+  } catch (e) {
+    return { ok: false, error: e.message || 'تعذر قراءة الملف.' };
+  }
+});
+
+ipcMain.handle('backup:restore-sqlite', async (event, sourcePath) => {
+  const sender = event.sender;
+  try {
+    const targetPath = getDatabasePath();
+    if (!path.isAbsolute(String(sourcePath || ''))) {
+      return { ok: false, error: 'مسار الملف غير صالح.' };
+    }
+    const backupDir = path.join(path.dirname(targetPath), 'backups');
+
+    restoreInProgress = true;
+    if (sender && !sender.isDestroyed()) {
+      sender.send('backup:restore-progress', { phase: 'start', copied: 0, total: 0 });
+    }
+
+    const res = await backupRestore.restoreSqlite({
+      sourcePath: String(sourcePath),
+      targetPath,
+      backupDir,
+      onProgress: (copied, total) => {
+        if (sender && !sender.isDestroyed()) {
+          sender.send('backup:restore-progress', { phase: 'copy', copied, total });
+        }
+      }
+    });
+
+    if (sender && !sender.isDestroyed()) {
+      sender.send('backup:restore-progress', { phase: 'done', copied: res.bytes, total: res.bytes });
+    }
+    // restoreInProgress stays true until the renderer reloads and reads the DB.
+    return { ok: true, ...res };
+  } catch (e) {
+    restoreInProgress = false;
+    if (sender && !sender.isDestroyed()) {
+      sender.send('backup:restore-progress', { phase: 'error', error: e.message });
+    }
+    console.error('backup:restore-sqlite error:', e);
+    return { ok: false, error: e.message || 'فشلت الاستعادة.' };
+  }
+});
+
+ipcMain.handle('backup:open-folder', async () => {
+  try {
+    const targetPath = getDatabasePath();
+    const dir = path.join(path.dirname(targetPath), 'backups');
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    const err = await require('electron').shell.openPath(dir);
+    return err ? { ok: false, error: err } : { ok: true, path: dir };
+  } catch (e) {
+    return { ok: false, error: e.message };
   }
 });
 
