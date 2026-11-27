@@ -321,6 +321,14 @@ async function performUpdateCheck() {
   if (!app.isPackaged) {
     return { available: false, reason: 'dev', version: app.getVersion() };
   }
+  if (updateState.status === 'downloading' || updateState.status === 'downloaded') {
+    return {
+      available: true,
+      version: updateState.version,
+      currentVersion: app.getVersion(),
+      reason: 'busy'
+    };
+  }
   if (updateCheckInFlight) {
     return {
       available: updateState.status === 'available',
