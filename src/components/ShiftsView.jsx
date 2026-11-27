@@ -29,6 +29,7 @@ import {
 import { CloseShiftModal } from './CloseShiftModal';
 import { OpenShiftModal } from './OpenShiftModal';
 import { playBarcodeBeep, playCashDrawerSound } from '../utils/sound';
+import { decimalInput } from '../utils/inputGuards';
 import { sqliteService } from '../db/sqliteService';
 
 export function ShiftsView({ currentShift: propCurrentShift, onUpdateCurrentShift, currentUser = null }) {
@@ -356,7 +357,7 @@ export function ShiftsView({ currentShift: propCurrentShift, onUpdateCurrentShif
                   min="0"
                   required
                   value={actualCashInput}
-                  onChange={(e) => setActualCashInput(e.target.value)}
+                  onChange={(e) => setActualCashInput(decimalInput(e.target.value, 2))}
                   className="w-full bg-[#111A2B] border border-[#23324D] focus:border-teal-400 rounded-lg px-2.5 py-1 text-sm font-bold text-teal-300 font-mono focus:outline-none"
                   aria-label="النقدية الفعلية بالجرد"
                 />

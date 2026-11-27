@@ -62,6 +62,7 @@ import {
 } from '../utils/tunnel';
 import { setTunnelUrl, getReportBaseUrl } from '../utils/reportServer';
 import { isValidPhone } from '../utils/validation';
+import { digitsOnly, nameInput, phoneInput } from '../utils/inputGuards';
 import { notifyPharmacyIdentityUpdated } from '../utils/pharmacyIdentity';
 
 export function SettingsView({ onUpdatePharmacyName, onRevokeDevice, currentUser, initialTab = 'receipt' }) {
@@ -84,7 +85,7 @@ export function SettingsView({ onUpdatePharmacyName, onRevokeDevice, currentUser
   const [syncRunning, setSyncRunning] = useState(false);
   const [reportServerInfo, setReportServerInfo] = useState(null);
   const [appInfo, setAppInfo] = useState({
-    version: typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '1.5.1',
+    version: typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '1.5.3',
     packaged: false
   });
   const [updateState, setUpdateState] = useState({ status: 'idle', message: '', progress: 0, version: null });
@@ -181,12 +182,16 @@ export function SettingsView({ onUpdatePharmacyName, onRevokeDevice, currentUser
   }, []);
 
   const handleFieldChange = (field, value) => {
-    setSettings((prev) => ({ ...prev, [field]: value }));
+    let clean = value;
+    if (field === 'phone' || field === 'hotline') clean = phoneInput(value);
+    else if (field === 'pharmacyName' || field === 'pharmacyBranch') clean = nameInput(value);
+    else if (field === 'taxNumber' || field === 'commercialRegister') clean = digitsOnly(value, 20);
+    setSettings((prev) => ({ ...prev, [field]: clean }));
     // Notify the shell OUTSIDE the state updater. Calling the parent setState
     // from inside setSettings' updater triggered React's
     // "Cannot update a component while rendering a different component" warning.
     if (field === 'pharmacyName' && onUpdatePharmacyName) {
-      onUpdatePharmacyName(value);
+      onUpdatePharmacyName(clean);
     }
   };
 
@@ -528,6 +533,72 @@ export function SettingsView({ onUpdatePharmacyName, onRevokeDevice, currentUser
 
   const handleCancelSqliteRestore = () => {
     setSqliteRestore((prev) => ({ ...prev, info: null, error: '', progress: 0, copied: 0, total: 0 }));
+  };
+
+  const handleConfirmEStockImport = async () => {
+    const ipc = sqliteIpc();
+    const info = sqliteRestore.info;
+    if (!ipc || !info || sqliteRestore.busy) return;
+
+    const ok = window.confirm(
+      `تأكيد استيراد بيانات eStock من:\n${info.name}\n\n` +
+        `الأصناف: ${Number(info.counts?.medicines || 0).toLocaleString('en-US')}\n` +
+        `أصناف بها رصيد: ${Number(info.counts?.productsInStock || 0).toLocaleString('en-US')}\n` +
+        `التشغيلات: ${Number(info.counts?.batches || 0).toLocaleString('en-US')}\n\n` +
+        'سيتم دمج البيانات مع الكتالوج الحالي (لن تُحذف بياناتك).'
+    );
+    if (!ok) return;
+
+    setSqliteRestore((prev) => ({ ...prev, busy: true, progress: 0, copied: 0, total: info.size || 0, error: '' }));
+
+    const onProgress = (_event, payload) => {
+      if (!payload) return;
+      setSqliteRestore((prev) => {
+        const total = Number(payload.total || prev.total || 0);
+        const copied = Number(payload.copied || 0);
+        return {
+          ...prev,
+          copied,
+          total,
+          progress: total > 0 ? Math.min(100, Math.round((copied / total) * 100)) : 0
+        };
+      });
+    };
+
+    ipc.on('backup:restore-progress', onProgress);
+    try {
+      const res = await ipc.invoke('backup:read-estock-catalog', info.catalogPath);
+      if (!res?.ok || !res.payload) {
+        setSqliteRestore((prev) => ({ ...prev, busy: false, error: res?.error || 'تعذر قراءة بيانات eStock' }));
+        showToast(res?.error || 'تعذر قراءة بيانات eStock');
+        return;
+      }
+
+      setSqliteRestore((prev) => ({ ...prev, progress: 45 }));
+      const stats = await sqliteService.importExternalCatalog(res.payload);
+      setSqliteRestore((prev) => ({ ...prev, busy: false, progress: 100 }));
+      setCatalogImport({
+        fileName: info.name,
+        payload: null,
+        preview: null,
+        working: false,
+        done: stats,
+        error: ''
+      });
+      showToast(
+        `تم استيراد eStock: ${Number(stats.addedProducts || 0).toLocaleString('en-US')} صنف جديد، ` +
+          `${Number(stats.restoredStock || 0).toLocaleString('en-US')} صنف بأرصدة، ` +
+          `${Number(stats.addedBatches || 0).toLocaleString('en-US')} تشغيلة ✓`
+      );
+      playCashDrawerSound();
+      setTimeout(() => window.location.reload(), 2000);
+    } catch (e) {
+      console.error('eStock import failed:', e);
+      setSqliteRestore((prev) => ({ ...prev, busy: false, error: e?.message || 'فشل استيراد بيانات eStock' }));
+      showToast(e?.message || 'فشل استيراد بيانات eStock');
+    } finally {
+      ipc.removeListener('backup:restore-progress', onProgress);
+    }
   };
 
   const handleConfirmSqliteRestore = async () => {
@@ -1121,11 +1192,12 @@ export function SettingsView({ onUpdatePharmacyName, onRevokeDevice, currentUser
                   <div>
                     <div className="text-xs font-bold text-white flex items-center gap-2">
                       <HardDrive className="w-4 h-4 text-teal-400" />
-                      استعادة من نسخة SQLite (‎.bak أو .db)
+                      استعادة من نسخة احتياطية (PharmacyPOS أو eStock)
                     </div>
                     <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
-                      استعادة كاملة لقاعدة البيانات من ملف نسخة احتياطية — تدعم الملفات الكبيرة (مئات الميجابايت).
-                      يتم أخذ نسخة أمان من القاعدة الحالية تلقائياً قبل الاستبدال، ولن يُستبدل أي شيء لو كان الملف تالفاً.
+                      نسخة PharmacyPOS (‎.db) تُستعاد كاملة مع أخذ نسخة أمان أولاً.
+                      أما نسخة eStock القديمة (SQL Server ‎.bak) فيتم قراءة الأصناف والأرصدة والصلاحيات والموردين والعملاء
+                      منها ودمجها مع بياناتك الحالية دون حذف أي شيء.
                     </p>
                   </div>
                   <button
@@ -1157,80 +1229,146 @@ export function SettingsView({ onUpdatePharmacyName, onRevokeDevice, currentUser
                       </span>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[11px] text-slate-300">
-                      <div>
-                        الأدوية:{' '}
-                        <b className="text-teal-300">
-                          {sqliteRestore.info.counts?.medicines != null
-                            ? Number(sqliteRestore.info.counts.medicines).toLocaleString('en-US')
-                            : '—'}
-                        </b>
-                      </div>
-                      <div>
-                        الفواتير:{' '}
-                        <b className="text-white">
-                          {sqliteRestore.info.counts?.invoices != null
-                            ? Number(sqliteRestore.info.counts.invoices).toLocaleString('en-US')
-                            : '—'}
-                        </b>
-                      </div>
-                      <div>
-                        العملاء:{' '}
-                        <b className="text-white">
-                          {sqliteRestore.info.counts?.customers != null
-                            ? Number(sqliteRestore.info.counts.customers).toLocaleString('en-US')
-                            : '—'}
-                        </b>
-                      </div>
-                      <div>
-                        المستخدمون:{' '}
-                        <b className="text-white">
-                          {sqliteRestore.info.counts?.app_users != null
-                            ? Number(sqliteRestore.info.counts.app_users).toLocaleString('en-US')
-                            : '—'}
-                        </b>
-                      </div>
-                      <div className="col-span-2 text-[10px] text-slate-400">
-                        آخر تعديل للملف:{' '}
-                        {sqliteRestore.info.modifiedAt
-                          ? new Date(sqliteRestore.info.modifiedAt).toLocaleString('ar-EG')
-                          : '—'}
-                        {sqliteRestore.info.integrity && sqliteRestore.info.integrity !== 'skipped'
-                          ? ` · فحص السلامة: ${sqliteRestore.info.integrity}`
-                          : ''}
-                      </div>
-                    </div>
+                    {sqliteRestore.info.kind === 'estock' ? (
+                      <>
+                        <div className="rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-200 text-[10.5px] leading-relaxed p-2.5">
+                          نسخة eStock قديمة (SQL Server). سيتم دمج الأصناف والأرصدة والصلاحيات والموردين والعملاء
+                          مع بياناتك الحالية — لن تُحذف أو تُستبدل أي بيانات موجودة.
+                        </div>
+                        <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[11px] text-slate-300">
+                          <div>
+                            الأصناف:{' '}
+                            <b className="text-teal-300">
+                              {Number(sqliteRestore.info.counts?.medicines || 0).toLocaleString('en-US')}
+                            </b>
+                          </div>
+                          <div>
+                            أصناف بها رصيد:{' '}
+                            <b className="text-teal-300">
+                              {Number(sqliteRestore.info.counts?.productsInStock || 0).toLocaleString('en-US')}
+                            </b>
+                          </div>
+                          <div>
+                            التشغيلات/الصلاحيات:{' '}
+                            <b className="text-white">
+                              {Number(sqliteRestore.info.counts?.batches || 0).toLocaleString('en-US')}
+                            </b>
+                          </div>
+                          <div>
+                            الموردون:{' '}
+                            <b className="text-white">
+                              {Number(sqliteRestore.info.counts?.suppliers || 0).toLocaleString('en-US')}
+                            </b>
+                          </div>
+                          <div>
+                            العملاء:{' '}
+                            <b className="text-white">
+                              {Number(sqliteRestore.info.counts?.customers || 0).toLocaleString('en-US')}
+                            </b>
+                          </div>
+                          <div className="text-[10px] text-slate-400">
+                            {sqliteRestore.info.modifiedAt
+                              ? new Date(sqliteRestore.info.modifiedAt).toLocaleString('ar-EG')
+                              : '—'}
+                          </div>
+                        </div>
 
-                    {(sqliteRestore.info.blocking || []).map((msg, i) => (
-                      <div key={`block-${i}`} className="text-[11px] font-bold text-rose-300 flex items-start gap-2">
-                        <AlertOctagon className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-                        <span>{msg}</span>
-                      </div>
-                    ))}
-                    {(sqliteRestore.info.warnings || []).map((msg, i) => (
-                      <div key={`warn-${i}`} className="text-[11px] text-amber-300 flex items-start gap-2">
-                        <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-                        <span>{msg}</span>
-                      </div>
-                    ))}
+                        <div className="flex items-center gap-2 pt-1">
+                          <button
+                            type="button"
+                            onClick={handleConfirmEStockImport}
+                            disabled={sqliteRestore.busy}
+                            className="px-4 py-2 rounded-xl bg-teal-500/15 border border-teal-500/40 hover:border-teal-400 text-teal-300 text-[11px] font-bold transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                          >
+                            تأكيد استيراد بيانات eStock
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleCancelSqliteRestore}
+                            className="px-4 py-2 rounded-xl bg-[#111A2B] border border-[#23324D] hover:border-slate-400 text-slate-300 text-[11px] font-bold transition-all"
+                          >
+                            إلغاء
+                          </button>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[11px] text-slate-300">
+                          <div>
+                            الأدوية:{' '}
+                            <b className="text-teal-300">
+                              {sqliteRestore.info.counts?.medicines != null
+                                ? Number(sqliteRestore.info.counts.medicines).toLocaleString('en-US')
+                                : '—'}
+                            </b>
+                          </div>
+                          <div>
+                            الفواتير:{' '}
+                            <b className="text-white">
+                              {sqliteRestore.info.counts?.invoices != null
+                                ? Number(sqliteRestore.info.counts.invoices).toLocaleString('en-US')
+                                : '—'}
+                            </b>
+                          </div>
+                          <div>
+                            العملاء:{' '}
+                            <b className="text-white">
+                              {sqliteRestore.info.counts?.customers != null
+                                ? Number(sqliteRestore.info.counts.customers).toLocaleString('en-US')
+                                : '—'}
+                            </b>
+                          </div>
+                          <div>
+                            المستخدمون:{' '}
+                            <b className="text-white">
+                              {sqliteRestore.info.counts?.app_users != null
+                                ? Number(sqliteRestore.info.counts.app_users).toLocaleString('en-US')
+                                : '—'}
+                            </b>
+                          </div>
+                          <div className="col-span-2 text-[10px] text-slate-400">
+                            آخر تعديل للملف:{' '}
+                            {sqliteRestore.info.modifiedAt
+                              ? new Date(sqliteRestore.info.modifiedAt).toLocaleString('ar-EG')
+                              : '—'}
+                            {sqliteRestore.info.integrity && sqliteRestore.info.integrity !== 'skipped'
+                              ? ` · فحص السلامة: ${sqliteRestore.info.integrity}`
+                              : ''}
+                          </div>
+                        </div>
 
-                    <div className="flex items-center gap-2 pt-1">
-                      <button
-                        type="button"
-                        onClick={handleConfirmSqliteRestore}
-                        disabled={(sqliteRestore.info.blocking || []).length > 0}
-                        className="px-4 py-2 rounded-xl bg-rose-500/15 border border-rose-500/40 hover:border-rose-400 text-rose-300 text-[11px] font-bold transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-                      >
-                        تأكيد الاستعادة واستبدال القاعدة الحالية
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleCancelSqliteRestore}
-                        className="px-4 py-2 rounded-xl bg-[#111A2B] border border-[#23324D] hover:border-slate-400 text-slate-300 text-[11px] font-bold transition-all"
-                      >
-                        إلغاء
-                      </button>
-                    </div>
+                        {(sqliteRestore.info.blocking || []).map((msg, i) => (
+                          <div key={`block-${i}`} className="text-[11px] font-bold text-rose-300 flex items-start gap-2">
+                            <AlertOctagon className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                            <span>{msg}</span>
+                          </div>
+                        ))}
+                        {(sqliteRestore.info.warnings || []).map((msg, i) => (
+                          <div key={`warn-${i}`} className="text-[11px] text-amber-300 flex items-start gap-2">
+                            <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                            <span>{msg}</span>
+                          </div>
+                        ))}
+
+                        <div className="flex items-center gap-2 pt-1">
+                          <button
+                            type="button"
+                            onClick={handleConfirmSqliteRestore}
+                            disabled={(sqliteRestore.info.blocking || []).length > 0}
+                            className="px-4 py-2 rounded-xl bg-rose-500/15 border border-rose-500/40 hover:border-rose-400 text-rose-300 text-[11px] font-bold transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                          >
+                            تأكيد الاستعادة واستبدال القاعدة الحالية
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleCancelSqliteRestore}
+                            className="px-4 py-2 rounded-xl bg-[#111A2B] border border-[#23324D] hover:border-slate-400 text-slate-300 text-[11px] font-bold transition-all"
+                          >
+                            إلغاء
+                          </button>
+                        </div>
+                      </>
+                    )}
                   </div>
                 )}
 
@@ -1239,7 +1377,7 @@ export function SettingsView({ onUpdatePharmacyName, onRevokeDevice, currentUser
                     <div className="flex items-center justify-between text-[11px] font-bold text-teal-300">
                       <span className="flex items-center gap-2">
                         <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                        جارٍ نسخ قاعدة البيانات...
+                        جارٍ معالجة النسخة الاحتياطية...
                       </span>
                       <span className="font-mono">{sqliteRestore.progress}%</span>
                     </div>

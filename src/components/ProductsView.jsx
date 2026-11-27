@@ -31,6 +31,7 @@ import { StockTakeModal } from './StockTakeModal';
 import { confirmDialog } from './ConfirmDialog';
 import { sqliteService } from '../db/sqliteService';
 import { hasPermission } from '../utils/permissions';
+import { decimalInput, digitsOnly } from '../utils/inputGuards';
 
 export function ProductsView({ currentUser, medicines = [], onSaveMedicine, onDeleteMedicine }) {
   // Search & Filter State
@@ -775,7 +776,7 @@ export function ProductsView({ currentUser, medicines = [], onSaveMedicine, onDe
                               step="0.01"
                               min="0.01"
                               value={quickPrice}
-                              onChange={(e) => setQuickPrice(e.target.value)}
+                              onChange={(e) => setQuickPrice(decimalInput(e.target.value, 2))}
                               className="w-20 h-8 bg-[#0B1220] border border-teal-400 rounded-lg text-emerald-400 font-mono font-bold text-xs px-2 outline-none"
                               aria-label="سعر بيع العلبة"
                               dir="ltr"
@@ -827,7 +828,7 @@ export function ProductsView({ currentUser, medicines = [], onSaveMedicine, onDe
                                 type="number"
                                 min="0"
                                 value={quickStock}
-                                onChange={(e) => setQuickStock(e.target.value)}
+                                onChange={(e) => setQuickStock(digitsOnly(e.target.value, 7))}
                                 className="w-16 h-8 bg-[#0B1220] border border-teal-400 rounded-lg text-white font-mono font-bold text-xs px-2 outline-none"
                                 dir="ltr"
                               />

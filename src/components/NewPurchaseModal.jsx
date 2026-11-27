@@ -28,6 +28,13 @@ import {
   validateExpiryInput
 } from '../utils/validation';
 import { ProductModal } from './ProductModal';
+import {
+  containsArabic,
+  decimalInput,
+  digitsOnly,
+  invoiceNumberInput,
+  nameInput
+} from '../utils/inputGuards';
 
 export function NewPurchaseModal({
   isOpen,
@@ -348,6 +355,10 @@ export function NewPurchaseModal({
       setError('رقم الفاتورة الورقية إجباري ولا يتم توليده تلقائياً.');
       return;
     }
+    if (containsArabic(enteredInvoiceNo)) {
+      setError('رقم الفاتورة الورقية لا يقبل الحروف العربية. استخدم أرقاماً وحروفاً إنجليزية فقط.');
+      return;
+    }
 
     if (!invoiceDate || !isValidISODate(invoiceDate)) {
       setError('تاريخ فاتورة الشراء إجباري ويجب أن يكون تاريخاً صحيحاً (يوم/شهر/سنة).');
@@ -496,7 +507,7 @@ export function NewPurchaseModal({
                   type="text"
                   placeholder="اكتب اسم شركة التوزيع أو المورد هنا..."
                   value={customSupplierName}
-                  onChange={(e) => setCustomSupplierName(e.target.value)}
+                  onChange={(e) => setCustomSupplierName(nameInput(e.target.value))}
                   className="flex-1 h-10 bg-[#17233A] border border-teal-500/50 focus:border-teal-400 rounded-xl px-3 text-white outline-none font-semibold text-xs placeholder-slate-400"
                 />
                 <button
@@ -531,7 +542,7 @@ export function NewPurchaseModal({
                   placeholder="أو اكتب اسماً..."
                   value={customSupplierName}
                   onChange={(e) => {
-                    setCustomSupplierName(e.target.value);
+                    setCustomSupplierName(nameInput(e.target.value));
                     setSelectedSupplierId('');
                   }}
                   className="w-1/3 h-10 bg-[#17233A] border border-[#23324D] focus:border-teal-400 rounded-xl px-2.5 text-teal-300 outline-none text-xs"
@@ -549,7 +560,7 @@ export function NewPurchaseModal({
               placeholder="مثال: INV-98421"
               required
               value={supplierInvoiceNo}
-              onChange={(e) => setSupplierInvoiceNo(e.target.value)}
+              onChange={(e) => setSupplierInvoiceNo(invoiceNumberInput(e.target.value))}
               className="w-full h-10 bg-[#17233A] border border-[#23324D] focus:border-teal-400 rounded-xl px-3 text-teal-300 font-mono outline-none font-bold"
             />
           </div>
@@ -652,7 +663,7 @@ export function NewPurchaseModal({
                 type="text"
                 placeholder="امسح أو اكتب الباركود..."
                 value={barcodeInput}
-                onChange={(e) => setBarcodeInput(e.target.value)}
+                onChange={(e) => setBarcodeInput(digitsOnly(e.target.value, 32))}
                 onKeyDown={handleBarcodeKeyDown}
                 className="w-full h-10 bg-[#17233A] border border-[#23324D] focus:border-teal-400 rounded-xl px-3 text-white font-mono outline-none font-bold"
               />
@@ -739,7 +750,7 @@ export function NewPurchaseModal({
                 min="0.01"
                 placeholder="0.00"
                 value={priceBox}
-                onChange={(e) => setPriceBox(e.target.value)}
+                onChange={(e) => setPriceBox(decimalInput(e.target.value, 2))}
                 className="w-full h-10 bg-[#17233A] border border-[#23324D] focus:border-teal-400 text-center font-mono font-bold text-white rounded-xl outline-none"
               />
             </div>
@@ -752,7 +763,7 @@ export function NewPurchaseModal({
                 type="number"
                 min="1"
                 value={quantity}
-                onChange={(e) => setQuantity(e.target.value)}
+                onChange={(e) => setQuantity(digitsOnly(e.target.value, 7))}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') handleAddItem(e);
                 }}
@@ -767,7 +778,7 @@ export function NewPurchaseModal({
                 type="number"
                 min="0"
                 value={bonus}
-                onChange={(e) => setBonus(e.target.value)}
+                onChange={(e) => setBonus(digitsOnly(e.target.value, 7))}
                 className="w-full h-10 bg-[#17233A] border border-[#23324D] focus:border-teal-400 text-center font-mono font-bold text-emerald-400 rounded-xl outline-none"
               />
             </div>
@@ -781,7 +792,7 @@ export function NewPurchaseModal({
                 min="0"
                 max="100"
                 value={discountPct}
-                onChange={(e) => setDiscountPct(e.target.value)}
+                onChange={(e) => setDiscountPct(decimalInput(e.target.value, 2))}
                 className="w-full h-10 bg-[#17233A] border border-[#23324D] focus:border-teal-400 text-center font-mono font-bold text-amber-300 rounded-xl outline-none"
               />
             </div>

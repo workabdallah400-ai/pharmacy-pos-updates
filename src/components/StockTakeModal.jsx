@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { sqliteService } from '../db/sqliteService';
 import { confirmDialog } from './ConfirmDialog';
+import { digitsOnly } from '../utils/inputGuards';
 
 export function StockTakeModal({ isOpen, onClose, currentUser, onComplete }) {
   const [activeTab, setActiveTab] = useState('new'); // 'new' | 'history'

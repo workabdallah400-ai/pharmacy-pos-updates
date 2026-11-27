@@ -30,6 +30,8 @@ import { PrintShortagesModal } from './PrintShortagesModal';
 import { playBarcodeSuccessSound } from '../utils/sound';
 import { getPharmacyName } from '../utils/pharmacyIdentity';
 import { sqliteService } from '../db/sqliteService';
+import { effectiveStockBoxes, reorderLevelOf } from '../utils/stockLevels';
+import { digitsOnly } from '../utils/inputGuards';
 
 export function ShortagesView({
   medicines,
@@ -106,17 +108,19 @@ export function ShortagesView({
     return medicines
       .filter((m) => {
         if (dismissedIds.has(m.id)) return false;
-        const stock = Number(m.stock_boxes) || 0;
+        const stock = effectiveStockBoxes(m);
         const isTracked = stock > 0 || trackedMedicineIds.has(Number(m.id));
         if (!isTracked && !showFullCatalog) return false;
-        const reorder = Number(m.reorder_level) || 5;
-        // Item is short if stock_boxes <= reorder
+        const reorder = reorderLevelOf(m);
+        // Item is short when the real shelf quantity (boxes + strips + units)
+        // is at or below the reorder level.
         return stock <= reorder;
       })
       .map((m) => {
-        const reorder = m.reorder_level || 5;
+        const reorder = reorderLevelOf(m);
+        const stock = effectiveStockBoxes(m);
         // Smart suggested order quantity: (reorder * 2) - current_stock, minimum 5 boxes
-        const suggestedQty = Math.max(5, reorder * 2 - m.stock_boxes);
+        const suggestedQty = Math.max(5, Math.ceil(reorder * 2 - stock));
         const preferredSupplier =
           m.preferred_supplier ||
           (m.category === 'أدوية الضغط والقلب'
@@ -135,16 +139,18 @@ export function ShortagesView({
           trade_name: m.trade_name,
           trade_name_ar: m.trade_name_ar,
           generic_name: m.generic_name,
-          stock_boxes: m.stock_boxes,
-          stock_strips: m.stock_strips,
+          stock_boxes: Number(m.stock_boxes) || 0,
+          stock_strips: Number(m.stock_strips) || 0,
+          stock_units: Number(m.stock_units) || 0,
+          effective_stock: Math.round(stock * 100) / 100,
           reorder_level: reorder,
           suggested_quantity: suggestedQty,
           order_quantity: orderQuantities[m.id] !== undefined ? orderQuantities[m.id] : suggestedQty,
           shelf: m.shelf || 'A-01',
           preferred_supplier: preferredSupplier,
           price_box: m.price_box,
-          type: (Number(m.stock_boxes) || 0) === 0 ? 'OUT_OF_STOCK' : 'NEAR_EMPTY',
-          isUrgent: (Number(m.stock_boxes) || 0) === 0
+          type: stock <= 0 ? 'OUT_OF_STOCK' : 'NEAR_EMPTY',
+          isUrgent: stock <= 0
         };
       });
   }, [medicines, dismissedIds, orderQuantities, trackedMedicineIds, showFullCatalog]);
@@ -170,7 +176,8 @@ export function ShortagesView({
     let estimatedOrderCost = 0;
 
     allShortages.forEach((item) => {
-      if (item.stock_boxes === 0) {
+      const qtyLeft = Number(item.effective_stock != null ? item.effective_stock : item.stock_boxes) || 0;
+      if (qtyLeft <= 0) {
         outOfStockCount++;
       } else {
         nearEmptyCount++;
@@ -214,10 +221,10 @@ export function ShortagesView({
 
       // Status Tab filter
       if (activeTabFilter === 'OUT_OF_STOCK') {
-        return item.stock_boxes === 0;
+        return Number(item.effective_stock != null ? item.effective_stock : item.stock_boxes) <= 0;
       }
       if (activeTabFilter === 'NEAR_EMPTY') {
-        return item.stock_boxes > 0 && !item.isCustom;
+        return Number(item.effective_stock != null ? item.effective_stock : item.stock_boxes) > 0 && !item.isCustom;
       }
       if (activeTabFilter === 'CUSTOM') {
         return item.isCustom;
@@ -784,8 +791,9 @@ export function ShortagesView({
                           </span>
                         ) : (
                           <span className="px-2.5 py-1 rounded-lg bg-amber-500/15 border border-amber-500/30 text-amber-300 font-bold text-xs inline-flex items-center gap-1">
-                            🟡 {item.stock_boxes} علبة
+                            🟡 {Number(item.effective_stock != null ? item.effective_stock : item.stock_boxes).toLocaleString('en-US', { maximumFractionDigits: 2 })} علبة
                             {item.stock_strips > 0 && ` (+${item.stock_strips} شريط)`}
+                            {item.stock_units > 0 && ` (+${item.stock_units} وحدة)`}
                           </span>
                         )}
                         <div className="text-[10px] text-slate-500 mt-1 font-mono">

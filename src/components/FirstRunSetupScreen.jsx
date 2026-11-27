@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { sqliteService } from '../db/sqliteService';
 import { validatePasswordPolicy } from '../utils/password';
+import { nameInput } from '../utils/inputGuards';
 
 export function FirstRunSetupScreen({ onSetupSuccess }) {
   const [fullName, setFullName] = useState('');
@@ -91,7 +92,7 @@ export function FirstRunSetupScreen({ onSetupSuccess }) {
               <input
                 type="text"
                 value={fullName}
-                onChange={(e) => setFullName(e.target.value)}
+                onChange={(e) => setFullName(nameInput(e.target.value))}
                 placeholder="د. أحمد محمود..."
                 className="w-full bg-[#0B1220] border border-[#23324D] focus:border-teal-400 rounded-xl pr-10 pl-3 py-2.5 text-sm text-white focus:outline-none"
                 autoFocus

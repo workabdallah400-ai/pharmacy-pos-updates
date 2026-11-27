@@ -1,8 +1,8 @@
 {
-  "version": "1.5.2",
-  "url": "PharmacyPOS-Setup-v1.5.2.exe",
-  "sha512": "iFWoT1n1oVJ978seV4qZEQSQ17XqA52KTMlcKM7hlgIokAfLK3ZJb7YzRKLB1myldByv17lbPi+HjxIsa3W72w==",
-  "size": 84873443,
-  "releaseDate": "2026-11-25T18:02:51.542Z",
-  "notes": "الإصدار 1.5.2"
+  "version": "1.5.3",
+  "url": "PharmacyPOS-Setup-v1.5.3.exe",
+  "sha512": "TyCeBeYkuEw1eyFdFphRupJXgEGQOThsQmPBitKWAebc602Q7zQW4BpIeI4X71VUCpwg1yOcI2KwXfwOVd8ATw==",
+  "size": 84881253,
+  "releaseDate": "2026-11-27T12:44:52.950Z",
+  "notes": "الإصدار 1.5.3"
 }

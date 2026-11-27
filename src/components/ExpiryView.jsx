@@ -189,6 +189,14 @@ export function ExpiryView({
   // Save edited batch
   const handleSaveBatch = async (updated) => {
     try {
+      if (updated.is_manual || String(updated.id).startsWith('MED-')) {
+        await sqliteService.setMedicineExpiry(updated.medicine_id, updated.expiry_date);
+        const refreshed = await sqliteService.getExpiryBatches();
+        setBatches(refreshed || []);
+        showToast('تم تحديث تاريخ صلاحية الصنف بنجاح');
+        playBarcodeBeep();
+        return;
+      }
       await sqliteService.updatePurchaseItemBatch(updated.id, updated);
     } catch (e) {
       console.warn('Failed to update batch:', e);
@@ -211,7 +219,11 @@ export function ExpiryView({
     if (!confirm) return;
 
     try {
-      await sqliteService.deletePurchaseItem(batch.id);
+      if (batch.is_manual || String(batch.id).startsWith('MED-')) {
+        await sqliteService.clearMedicineStockAndExpiry(batch.medicine_id);
+      } else {
+        await sqliteService.deletePurchaseItem(batch.id);
+      }
     } catch (e) {
       console.warn('Failed to dispose batch:', e);
       showToast('تعذر إتلاف التشغيلة من قاعدة البيانات');
@@ -266,8 +278,11 @@ export function ExpiryView({
 
     // Remove returned batches from active inventory (and from persisted purchase items)
     const returnedIds = new Set(targetBatches.map((b) => b.id));
+    const manualTargets = targetBatches.filter((b) => b.is_manual || String(b.id).startsWith('MED-'));
+    const purchaseTargets = targetBatches.filter((b) => !(b.is_manual || String(b.id).startsWith('MED-')));
     try {
-      await Promise.all(targetBatches.map((b) => sqliteService.deletePurchaseItem(b.id)));
+      await Promise.all(purchaseTargets.map((b) => sqliteService.deletePurchaseItem(b.id)));
+      await Promise.all(manualTargets.map((b) => sqliteService.clearMedicineStockAndExpiry(b.medicine_id)));
     } catch (e) {
       console.warn('Failed to delete returned batches:', e);
       showToast('تعذر حذف بعض التشغيلات المرتجعة من قاعدة البيانات');

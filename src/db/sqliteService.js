@@ -14,6 +14,7 @@ import { DEFAULT_SETTINGS } from '../data/mockSettings.js';
 import { validateInvoiceDiscount, validateDebtCollection, parseExpiryDate, todayISODate } from '../utils/validation.js';
 import { normalizePermissions, canManageUser } from '../utils/permissions.js';
 import { hashPassword, verifyPassword, validatePasswordPolicy } from '../utils/password.js';
+import { containsArabic, isValidPhoneValue } from '../utils/inputGuards.js';
 
 // IndexedDB helper for browser & mobile offline database persistence
 const IDB_NAME = 'PharmacyPOS_DB';
@@ -2442,6 +2443,9 @@ class SQLiteService {
     const name = (customer.name || '').trim();
     if (!name) throw new Error('اسم العميل مطلوب');
     const phone = (customer.phone || '').trim();
+    if (phone && !isValidPhoneValue(phone)) {
+      throw new Error('رقم هاتف العميل يجب أن يكون أرقاماً فقط من 7 إلى 15 رقماً.');
+    }
     const address = (customer.address || '').trim();
     const credit_limit = parseFloat(customer.credit_limit) || 0;
     let balance = parseFloat(customer.balance) || 0;
@@ -4064,6 +4068,9 @@ class SQLiteService {
       if (!String(supplier_invoice_no || '').trim()) {
         throw new Error('رقم الفاتورة الورقية إجباري ولا يتم توليده تلقائياً.');
       }
+      if (containsArabic(supplier_invoice_no)) {
+        throw new Error('رقم الفاتورة الورقية لا يقبل الحروف العربية. استخدم أرقاماً وحروفاً إنجليزية فقط.');
+      }
       const parsedInvoiceDate = new Date(date_time);
       if (Number.isNaN(parsedInvoiceDate.getTime())) {
         throw new Error('تاريخ فاتورة الشراء غير صحيح. أدخل تاريخاً صالحاً بصيغة يوم/شهر/سنة.');
@@ -4318,9 +4325,14 @@ class SQLiteService {
         pi.net_box_price,
         pi.batch_no,
         pi.expiry,
-        p.supplier_name
+        p.supplier_name,
+        m.generic_name,
+        m.shelf,
+        m.strips_per_box,
+        m.units_per_strip
       FROM purchase_items pi
       LEFT JOIN purchases p ON p.id = pi.purchase_id
+      LEFT JOIN medicines m ON m.id = pi.medicine_id
       ORDER BY pi.id DESC
     `);
     const rows = this._formatRows(res) || [];
@@ -4346,19 +4358,106 @@ class SQLiteService {
       return raw;
     };
 
-    return rows.map((r) => ({
+    const mapped = rows.map((r) => ({
       id: r.id,
       purchase_id: r.purchase_id,
       medicine_id: r.medicine_id,
       trade_name: r.trade_name,
       trade_name_ar: r.trade_name_ar,
+      generic_name: r.generic_name || '',
+      shelf: r.shelf || '',
       batch_no: r.batch_no,
       expiry_date: normalizeExpiry(r.expiry),
       quantity_boxes: (r.quantity || 0) + (r.bonus || 0),
+      quantity_strips: 0,
       cost_box: r.net_box_price || (r.price_box || 0) * 0.75,
       price_box: r.price_box || 0,
-      supplier_name: r.supplier_name || 'غير محدد'
+      supplier_name: r.supplier_name || 'غير محدد',
+      is_manual: false
     }));
+
+    // A product whose stock and expiry were edited by hand has no purchase
+    // batch behind it, so it never appeared in the expiry screen. Add one
+    // virtual row per such medicine (only when no active batch covers it).
+    const activeBatchMedicineIds = new Set(
+      mapped
+        .filter((b) => (Number(b.quantity_boxes) || 0) > 0)
+        .map((b) => Number(b.medicine_id))
+    );
+    let manualRows = [];
+    try {
+      const medRes = this.db.exec(`
+        SELECT id, trade_name, trade_name_ar, generic_name, shelf, expiry,
+               price_box, preferred_supplier, strips_per_box, units_per_strip,
+               stock_boxes, stock_strips, stock_units
+        FROM medicines
+        WHERE expiry IS NOT NULL AND TRIM(expiry) != ''
+          AND (stock_boxes > 0 OR stock_strips > 0 OR stock_units > 0)
+      `);
+      manualRows = this._formatRows(medRes) || [];
+    } catch (e) {
+      manualRows = [];
+    }
+
+    const manualMapped = manualRows
+      .filter((m) => !activeBatchMedicineIds.has(Number(m.id)))
+      .map((m) => {
+        const spb = Math.max(1, Number(m.strips_per_box) || 1);
+        const ups = Math.max(1, Number(m.units_per_strip) || 1);
+        const boxes = Number(m.stock_boxes) || 0;
+        const strips = Number(m.stock_strips) || 0;
+        const units = Number(m.stock_units) || 0;
+        const totalBoxes = boxes + strips / spb + units / (spb * ups);
+        return {
+          id: `MED-${m.id}`,
+          purchase_id: null,
+          medicine_id: m.id,
+          trade_name: m.trade_name,
+          trade_name_ar: m.trade_name_ar,
+          generic_name: m.generic_name || '',
+          shelf: m.shelf || '',
+          batch_no: 'رصيد يدوي',
+          expiry_date: normalizeExpiry(m.expiry),
+          quantity_boxes: Math.round(totalBoxes * 100) / 100,
+          quantity_strips: strips,
+          cost_box: (Number(m.price_box) || 0) * 0.75,
+          price_box: Number(m.price_box) || 0,
+          supplier_name: m.preferred_supplier || 'غير محدد',
+          is_manual: true
+        };
+      })
+      .filter((m) => m.expiry_date && m.quantity_boxes > 0);
+
+    return [...mapped, ...manualMapped];
+  }
+
+  /** Set the expiry recorded on the medicine itself (manual stock edits). */
+  async setMedicineExpiry(medicineId, expiryValue) {
+    await this.init();
+    this._requirePermission('canManageStock');
+    const id = Number(medicineId);
+    if (!id) return null;
+    const parsed = parseExpiryDate(expiryValue);
+    const normalized = parsed
+      ? `${String(parsed.month).padStart(2, '0')}/${parsed.year}`
+      : String(expiryValue || '').trim();
+    this.db.run('UPDATE medicines SET expiry = ? WHERE id = ?', [normalized || null, id]);
+    this.saveToDisk();
+    return normalized;
+  }
+
+  /** Remove manual (non-batch) stock and its expiry from a medicine. */
+  async clearMedicineStockAndExpiry(medicineId) {
+    await this.init();
+    this._requirePermission('canManageStock');
+    const id = Number(medicineId);
+    if (!id) return false;
+    this.db.run(
+      'UPDATE medicines SET stock_boxes = 0, stock_strips = 0, stock_units = 0, expiry = NULL WHERE id = ?',
+      [id]
+    );
+    this.saveToDisk();
+    return true;
   }
 
   async getSuppliers() {
@@ -4397,6 +4496,39 @@ class SQLiteService {
     `);
     this.saveToDisk();
     this._enqueueSync('stock_adjustment', id, 'UPDATE', { medicineId: id, boxDelta: delta });
+  }
+
+  /**
+   * Removes `boxDelta` boxes from a medicine, spilling into loose strips and
+   * units when boxes run out. Used when a batch is disposed/returned so the
+   * leftover strips on the shelf are not silently ignored.
+   */
+  async deductMedicineStockAcrossTiers(medicineId, boxDelta) {
+    await this.init();
+    const id = Number(medicineId);
+    const delta = Math.abs(Number(boxDelta) || 0);
+    if (!id || !delta) return null;
+    const row = (this._formatRows(this.db.exec(
+      `SELECT stock_boxes, stock_strips, stock_units, strips_per_box, units_per_strip FROM medicines WHERE id = ${id} LIMIT 1`
+    )) || [])[0];
+    if (!row) return null;
+    const spb = Math.max(1, Number(row.strips_per_box) || 1);
+    const ups = Math.max(1, Number(row.units_per_strip) || 1);
+    const current = (Number(row.stock_boxes) || 0)
+      + (Number(row.stock_strips) || 0) / spb
+      + (Number(row.stock_units) || 0) / (spb * ups);
+    const next = Math.max(0, current - delta);
+    const boxes = Math.floor(next + 1e-9);
+    const restUnits = Math.max(0, Math.round((next - boxes) * spb * ups + 1e-9));
+    const strips = Math.floor(restUnits / ups);
+    const units = Math.max(0, restUnits - strips * ups);
+    this.db.run(
+      'UPDATE medicines SET stock_boxes = ?, stock_strips = ?, stock_units = ? WHERE id = ?',
+      [boxes, strips, units, id]
+    );
+    this.saveToDisk();
+    this._enqueueSync('stock_adjustment', id, 'UPDATE', { medicineId: id, boxDelta: -delta });
+    return { stock_boxes: boxes, stock_strips: strips, stock_units: units };
   }
 
   // Record a supplier return / disposal so it appears in the shift audit & QR
@@ -4612,7 +4744,8 @@ class SQLiteService {
     const norm = (v) => String(v == null ? '' : v).trim().toLowerCase();
     const existingRows = this._formatRows(this.db.exec(
       `SELECT id, barcode, trade_name, trade_name_ar, generic_name, price_box, price_strip,
-              strips_per_box, category, preferred_supplier, unit_type, units_per_strip, price_unit
+              strips_per_box, category, preferred_supplier, unit_type, units_per_strip, price_unit,
+              stock_boxes, stock_strips, stock_units, expiry
        FROM medicines`
     ));
     const byBarcode = new Map();
@@ -4629,6 +4762,9 @@ class SQLiteService {
     }
 
     let nextId = (Number(this._formatRows(this.db.exec('SELECT MAX(id) AS m FROM medicines'))[0]?.m) || 0) + 1;
+    // eStock product ids are only used inside the file; remember which local
+    // medicine each one became so the stock batches below land on the right item.
+    const idMap = new Map();
 
     const toInsert = [];
     const toUpdate = [];
@@ -4641,6 +4777,7 @@ class SQLiteService {
       if (!matchId) matchId = (n1 && byName.get(n1)) || (n2 && byName.get(n2)) || null;
 
       if (matchId) {
+        if (p.id != null) idMap.set(Number(p.id), matchId);
         const cur = rowsById.get(matchId) || {};
         // Keep an existing barcode; only fill it when the item has none and the code is free.
         let newBc = cur.barcode ? String(cur.barcode).trim() : '';
@@ -4648,6 +4785,11 @@ class SQLiteService {
           newBc = bc;
           byBarcode.set(bc, matchId);
         }
+        // Never clobber live inventory: adopt the legacy balance only when the
+        // local item currently has no stock at all.
+        const curStock = (Number(cur.stock_boxes) || 0) + (Number(cur.stock_strips) || 0) + (Number(cur.stock_units) || 0);
+        const incomingStock = (Number(p.bx) || 0) + (Number(p.st) || 0) + (Number(p.un) || 0);
+        const adoptStock = curStock === 0 && incomingStock > 0;
         const merged = {
           id: matchId,
           trade_name: String(p.en || '').trim() || String(cur.trade_name || ''),
@@ -4661,8 +4803,14 @@ class SQLiteService {
           units_per_strip: Math.max(1, Number(p.ups) > 0 ? Number(p.ups) : (Number(cur.units_per_strip) || 1)),
           category: String(p.cat || '').trim() || String(cur.category || ''),
           preferred_supplier: String(p.sup || '').trim() || String(cur.preferred_supplier || ''),
-          unit_type: String(p.ut || '').trim() || String(cur.unit_type || 'tablets')
+          unit_type: String(p.ut || '').trim() || String(cur.unit_type || 'tablets'),
+          stock_boxes: adoptStock ? (Number(p.bx) || 0) : (Number(cur.stock_boxes) || 0),
+          stock_strips: adoptStock ? (Number(p.st) || 0) : (Number(cur.stock_strips) || 0),
+          stock_units: adoptStock ? (Number(p.un) || 0) : (Number(cur.stock_units) || 0),
+          expiry: (adoptStock && p.exp) ? String(p.exp).trim() : (cur.expiry || null),
+          restoredStock: adoptStock
         };
+        if (adoptStock) rowsById.set(matchId, { ...cur, stock_boxes: merged.stock_boxes, stock_strips: merged.stock_strips, stock_units: merged.stock_units });
         toUpdate.push(merged);
         // refresh lookup so later duplicates map to the same row
         if (merged.barcode) byBarcode.set(String(merged.barcode).trim(), matchId);
@@ -4670,6 +4818,7 @@ class SQLiteService {
         if (mn1) byName.set(mn1, matchId);
         if (mn2) byName.set(mn2, matchId);
       } else {
+        if (p.id != null) idMap.set(Number(p.id), nextId);
         if (bc) byBarcode.set(bc, nextId);
         if (n1) byName.set(n1, nextId);
         if (n2) byName.set(n2, nextId);
@@ -4689,12 +4838,44 @@ class SQLiteService {
       newVendors.push(v);
     }
 
+    const customers = Array.isArray(payload.customers) ? payload.customers : [];
+    const custRows = this._formatRows(this.db.exec('SELECT id, name FROM customers'));
+    const custNames = new Set(custRows.map((c) => norm(c.name)));
+    let custNextId = (custRows.reduce((max, c) => Math.max(max, Number(c.id) || 0), 0)) + 1;
+    const newCustomers = [];
+    for (const c of customers) {
+      const nm = String(c?.name || '').trim();
+      if (!nm || custNames.has(norm(nm))) continue;
+      custNames.add(norm(nm));
+      newCustomers.push(c);
+    }
+
+    const batchRows = Array.isArray(payload.batches) ? payload.batches : [];
+    const knownBatchNos = new Set(
+      (this._formatRows(this.db.exec('SELECT batch_no FROM purchase_items')) || [])
+        .map((r) => String(r.batch_no || ''))
+        .filter(Boolean)
+    );
+    const newBatches = [];
+    for (const b of batchRows) {
+      if (!b) continue;
+      const localId = idMap.get(Number(b.mid));
+      const qty = Math.round(Number(b.qty) || 0);
+      const batchNo = String(b.bn || '').trim();
+      if (!localId || qty <= 0 || !b.exp || !batchNo || knownBatchNos.has(batchNo)) continue;
+      knownBatchNos.add(batchNo);
+      newBatches.push({ ...b, mid: localId, qty, batch_no: batchNo });
+    }
+
     const stats = {
       addedProducts: toInsert.length,
       updatedProducts: toUpdate.length,
       addedSuppliers: newVendors.length,
+      addedCustomers: newCustomers.length,
+      addedBatches: newBatches.length,
+      restoredStock: toInsert.filter(({ p }) => (Number(p.bx) || 0) + (Number(p.st) || 0) + (Number(p.un) || 0) > 0).length
+        + toUpdate.filter((u) => u.restoredStock).length,
       skippedExisting: 0,
-      addedBatches: 0,
       totalInFile: payload.products.length
     };
     if (dryRun) return stats;
@@ -4719,14 +4900,17 @@ class SQLiteService {
           Number(p.pb) || 0,
           Number(p.ps) || 0,
           Math.max(1, Number(p.spb) || 1),
-          0, 0, null,
+          Number(p.bx) || 0,
+          Number(p.st) || 0,
+          null,
           p.cat ? String(p.cat).trim() : null,
           3,
           p.sup ? String(p.sup).trim() : null,
           p.ut || 'tablets',
           Math.max(1, Math.floor(Number(p.ups) || 1)),
           Number(p.pu) || 0,
-          0, null,
+          Number(p.un) || 0,
+          p.exp ? String(p.exp).trim() : null,
           'ESTOCK'
         ]);
       }
@@ -4737,7 +4921,8 @@ class SQLiteService {
           UPDATE medicines SET
             trade_name = ?, trade_name_ar = ?, generic_name = ?, barcode = ?,
             price_box = ?, price_strip = ?, price_unit = ?, strips_per_box = ?,
-            units_per_strip = ?, category = ?, preferred_supplier = ?, unit_type = ?
+            units_per_strip = ?, category = ?, preferred_supplier = ?, unit_type = ?,
+            stock_boxes = ?, stock_strips = ?, stock_units = ?, expiry = ?
           WHERE id = ?
         `);
         for (const u of toUpdate) {
@@ -4746,6 +4931,7 @@ class SQLiteService {
               u.trade_name, u.trade_name_ar, u.generic_name, u.barcode,
               u.price_box, u.price_strip, u.price_unit, u.strips_per_box,
               u.units_per_strip, u.category, u.preferred_supplier, u.unit_type,
+              u.stock_boxes, u.stock_strips, u.stock_units, u.expiry,
               u.id
             ]);
           } catch (rowErr) {
@@ -4753,6 +4939,55 @@ class SQLiteService {
           }
         }
         upStmt.free();
+      }
+
+      // Opening batches keep the expiry screen (FEFO) accurate for every
+      // imported item that came with a dated balance.
+      if (newBatches.length > 0) {
+        const insertedById = new Map(toInsert.map((t) => [t.newId, t.p]));
+        const itemStmt = this.db.prepare(`
+          INSERT INTO purchase_items (
+            purchase_id, medicine_id, trade_name, trade_name_ar, quantity, bonus,
+            price_box, discount_pct, net_box_price, total_net, batch_no, expiry
+          ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+        `);
+        for (const b of newBatches) {
+          const med = rowsById.get(b.mid) || {};
+          const ins = insertedById.get(b.mid);
+          const nameEn = med.trade_name || (ins ? (ins.en || ins.ar) : '') || '';
+          const nameAr = med.trade_name_ar || (ins ? (ins.ar || ins.en) : '') || '';
+          const priceBox = Math.max(0, Number(med.price_box) || (ins ? Number(ins.pb) : 0) || 0);
+          const expiry = String(b.exp).trim();
+          const expiryIso = /^\d{4}-\d{2}/.test(expiry)
+            ? `${expiry.slice(0, 4)}-${expiry.slice(5, 7)}-01`
+            : (() => {
+                const m = expiry.match(/^(\d{1,2})\/(\d{4})$/);
+                return m ? `${m[2]}-${m[1].padStart(2, '0')}-01` : expiry;
+              })();
+          itemStmt.run([
+            `ESTOCK-OPENING`, b.mid, nameEn, nameAr, b.qty, 0,
+            priceBox, 0, Number(b.cost) || 0, (Number(b.cost) || 0) * b.qty,
+            b.batch_no, expiryIso
+          ]);
+        }
+        itemStmt.free();
+      }
+
+      if (newCustomers.length > 0) {
+        const cStmt = this.db.prepare(
+          'INSERT INTO customers (id, name, phone, address, credit_limit, balance, notes) VALUES (?,?,?,?,?,?,?)'
+        );
+        for (const c of newCustomers) {
+          cStmt.run([
+            custNextId++, String(c.name).trim(),
+            c.phone ? String(c.phone).trim() : null,
+            c.addr ? String(c.addr).trim() : null,
+            Number(c.limit) > 0 ? Number(c.limit) : 2000,
+            Number(c.bal) || 0,
+            'مستورد من نسخة eStock'
+          ]);
+        }
+        cStmt.free();
       }
 
       if (newVendors.length > 0) {
@@ -4780,7 +5015,7 @@ class SQLiteService {
     this.saveToDisk();
     this._recordAuditLogInternal(
       actor.username, 'IMPORT_EXTERNAL_CATALOG', 'medicines', null,
-      `استيراد خارجي: ${stats.addedProducts} صنف جديد، ${stats.updatedProducts} صنف محّدث، ${stats.addedSuppliers} مورد`
+      `استيراد خارجي: ${stats.addedProducts} صنف جديد، ${stats.updatedProducts} صنف محّدث، ${stats.addedSuppliers} مورد، ${stats.addedCustomers || 0} عميل، ${stats.addedBatches || 0} تشغيلة`
     );
     this._enqueueSync('catalog', null, 'IMPORT', stats);
     return stats;
@@ -4794,6 +5029,9 @@ class SQLiteService {
     if (!name) return null;
     const contact = (sup.contact_person || 'مسؤول التوريد').trim();
     const phone = (sup.phone || '').trim();
+    if (phone && !isValidPhoneValue(phone)) {
+      throw new Error('رقم هاتف المورد يجب أن يكون أرقاماً فقط من 7 إلى 15 رقماً.');
+    }
     const hotline = (sup.hotline || '').trim();
     const balance = parseFloat(sup.balance) || 0;
     const notes = (sup.notes || '').trim();
@@ -4984,11 +5222,21 @@ class SQLiteService {
 
   async getShortages(limit = 100) {
     await this.init();
+    // Count loose strips and single units as fractions of a box so an item with
+    // only strips left is still measured against its real reorder level.
     const sql = `
-      SELECT * FROM medicines 
-      WHERE stock_boxes <= reorder_level 
-      ORDER BY stock_boxes ASC, id ASC 
-      LIMIT ${limit}
+      SELECT *,
+        (COALESCE(stock_boxes,0)
+          + COALESCE(stock_strips,0) / MAX(1, COALESCE(strips_per_box,1))
+          + COALESCE(stock_units,0) / (MAX(1, COALESCE(strips_per_box,1)) * MAX(1, COALESCE(units_per_strip,1)))
+        ) AS effective_stock
+      FROM medicines
+      WHERE (COALESCE(stock_boxes,0)
+          + COALESCE(stock_strips,0) / MAX(1, COALESCE(strips_per_box,1))
+          + COALESCE(stock_units,0) / (MAX(1, COALESCE(strips_per_box,1)) * MAX(1, COALESCE(units_per_strip,1)))
+        ) <= COALESCE(reorder_level, 5)
+      ORDER BY effective_stock ASC, id ASC
+      LIMIT ${Number(limit) || 100}
     `;
     const res = this.db.exec(sql);
     return this._formatRows(res);

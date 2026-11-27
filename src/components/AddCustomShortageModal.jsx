@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { X, Plus, User, Phone, Package, Building2, AlertCircle, FileText, Sparkles } from 'lucide-react';
 import { isValidPhone } from '../utils/validation';
+import { digitsOnly } from '../utils/inputGuards';
 
 export function AddCustomShortageModal({ isOpen, onClose, suppliers, onAddCustomItem }) {
   const [tradeName, setTradeName] = useState('');
@@ -178,7 +179,7 @@ export function AddCustomShortageModal({ isOpen, onClose, suppliers, onAddCustom
                   min="1"
                   required
                   value={quantity}
-                  onChange={(e) => setQuantity(e.target.value)}
+                  onChange={(e) => setQuantity(digitsOnly(e.target.value, 6))}
                   className="w-full bg-[#0B1220] border border-[#23324D] focus:border-teal-400 rounded-xl px-3.5 py-2.5 text-sm font-bold text-teal-300 focus:outline-none"
                 />
                 <span className="absolute left-3 top-2.5 text-xs text-slate-500">علبة</span>

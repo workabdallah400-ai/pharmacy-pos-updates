@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { sqliteService } from '../db/sqliteService';
 import { hasPermission } from '../utils/permissions';
+import { nameInput } from '../utils/inputGuards';
 
 const ROLE_OPTIONS = [
   { value: 'admin', label: 'المالك / المدير العام', icon: Crown, color: 'text-amber-400', bg: 'bg-amber-500/20 border-amber-500/30' },
@@ -268,7 +269,7 @@ function UserForm({ existingUser = null, currentUser, onSave, onCancel }) {
               <input
                 type="text"
                 value={formData.full_name}
-                onChange={(e) => setFormData(p => ({ ...p, full_name: e.target.value }))}
+                onChange={(e) => setFormData(p => ({ ...p, full_name: nameInput(e.target.value) }))}
                 placeholder="د. أحمد محمد"
                 className="w-full bg-[#0B1220] border border-[#23324D] focus:border-teal-400 rounded-xl px-3 py-2.5 text-sm text-white focus:outline-none"
               />

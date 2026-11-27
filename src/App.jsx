@@ -36,6 +36,7 @@ import {
 import { checkForUpdates, downloadUpdate, installUpdate, onUpdateStatus } from './utils/updater';
 import { sqliteService } from './db/sqliteService';
 import { hasPermission } from './utils/permissions';
+import { effectiveStockBoxes, reorderLevelOf } from './utils/stockLevels';
 import { INITIAL_MEDICINES } from './data/mockMedicines';
 import { INITIAL_SUPPLIERS, INITIAL_PURCHASES } from './data/mockPurchases';
 
@@ -531,6 +532,7 @@ export default function App() {
 
   // Save / Add / Update Medicine from ProductsView
   const handleSaveMedicine = (savedMedicine) => {
+    const previous = medicines.find((m) => m.id === savedMedicine.id);
     setMedicines((prev) => {
       const index = prev.findIndex((m) => m.id === savedMedicine.id);
       if (index > -1) {
@@ -541,6 +543,25 @@ export default function App() {
         return [savedMedicine, ...prev];
       }
     });
+
+    // A manual stock edit can push an item into the shortages notebook even
+    // though no sale happened (e.g. shelf count corrected from 0 to 2 while the
+    // reorder level is 3). Announce it exactly like a sale-triggered shortage.
+    if (previous) {
+      const reorder = reorderLevelOf(savedMedicine);
+      const before = effectiveStockBoxes(previous);
+      const after = effectiveStockBoxes(savedMedicine);
+      const crossedLow = before > reorder && after <= reorder;
+      const cameBackToLow = before <= 0 && after > 0 && after <= reorder;
+      if (crossedLow || cameBackToLow) {
+        const name = savedMedicine.trade_name_ar || savedMedicine.trade_name || 'صنف';
+        setShortageToast({
+          id: Date.now(),
+          message: `المنتج [${name}] أصبح عند حد الطلب (${after.toLocaleString('en-US', { maximumFractionDigits: 2 })} علبة) وتم إضافته إلى كشكول النواقص`
+        });
+        setHasUnreadShortages(true);
+      }
+    }
   };
 
   // Delete Medicine from ProductsView
@@ -649,15 +670,17 @@ export default function App() {
   // Deduct stock for expired / disposed medicines
   const handleDeductMedicineStock = (medicineId, boxes) => {
     if (!medicineId) return;
-    sqliteService.adjustMedicineStock(medicineId, -Math.abs(boxes)).catch(console.warn);
-    setMedicines((prevMeds) =>
-      prevMeds.map((m) => {
-        if (m.id === medicineId) {
-          return { ...m, stock_boxes: Math.max(0, m.stock_boxes - boxes) };
-        }
-        return m;
+    const amount = Math.abs(Number(boxes) || 0);
+    if (!amount) return;
+    sqliteService
+      .deductMedicineStockAcrossTiers(medicineId, amount)
+      .then((res) => {
+        if (!res) return;
+        setMedicines((prevMeds) =>
+          prevMeds.map((m) => (m.id === medicineId ? { ...m, ...res } : m))
+        );
       })
-    );
+      .catch(console.warn);
   };
 
   // --- STARTUP ACTIVATION GUARD CHECKS ---

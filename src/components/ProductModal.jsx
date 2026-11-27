@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { X, Pill, Sparkles, CheckCircle2, AlertCircle } from 'lucide-react';
 import { PHARMACY_DOSAGE_UNITS, getUnitDisplayInfo } from '../utils/pharmacyUnits';
 import { isExpiryInPast, parseExpiryDate, validateExpiryInput } from '../utils/validation';
+import { decimalInput, digitsOnly, latinDigits } from '../utils/inputGuards';
 
 const CATEGORIES = [
   'مسكنات وخافض حرارة',
@@ -95,7 +96,8 @@ export function ProductModal({ isOpen = true, onClose, medicine, medicineToEdit,
   if (!isOpen) return null;
 
   const handlePriceBoxChange = (val) => {
-    const num = parseFloat(val);
+    const clean = decimalInput(val, 2);
+    const num = parseFloat(clean);
     const unitInfo = getUnitDisplayInfo(formData.unit_type);
     const strips = parseInt(formData.strips_per_box, 10) || 1;
     const units = parseInt(formData.units_per_strip, 10) || 1;
@@ -117,14 +119,15 @@ export function ProductModal({ isOpen = true, onClose, medicine, medicineToEdit,
 
     setFormData((prev) => ({
       ...prev,
-      price_box: val,
+      price_box: clean,
       price_strip: stripP,
       price_unit: unitP
     }));
   };
 
   const handleStripsChange = (val) => {
-    const strips = parseInt(val, 10) || 1;
+    const clean = digitsOnly(val, 3);
+    const strips = parseInt(clean, 10) || 1;
     const units = parseInt(formData.units_per_strip, 10) || 1;
     const num = parseFloat(formData.price_box);
     const stripP = !isNaN(num) && strips > 0 ? (num / strips).toFixed(2) : formData.price_strip;
@@ -138,7 +141,8 @@ export function ProductModal({ isOpen = true, onClose, medicine, medicineToEdit,
   };
 
   const handleUnitsPerStripChange = (val) => {
-    const units = parseInt(val, 10) || 1;
+    const clean = digitsOnly(val, 3);
+    const units = parseInt(clean, 10) || 1;
     const strips = parseInt(formData.strips_per_box, 10) || 1;
     const num = parseFloat(formData.price_box);
     const unitP = !isNaN(num) && strips > 0 && units > 0 ? (num / (strips * units)).toFixed(2) : formData.price_unit;
@@ -363,7 +367,7 @@ export function ProductModal({ isOpen = true, onClose, medicine, medicineToEdit,
                   placeholder="أدخل الباركود الحقيقي..."
                   required={!targetMedicine}
                   value={formData.barcode}
-                  onChange={(e) => setFormData({ ...formData, barcode: e.target.value })}
+                  onChange={(e) => setFormData({ ...formData, barcode: digitsOnly(e.target.value, 32) })}
                   className="flex-1 h-10 bg-[#17233A] border border-[#23324D] focus:border-teal-400 rounded-xl px-3 text-teal-300 font-mono text-xs outline-none"
                   dir="ltr"
                 />
@@ -467,7 +471,7 @@ export function ProductModal({ isOpen = true, onClose, medicine, medicineToEdit,
                             step="0.01"
                             min="0"
                             value={formData.price_strip}
-                            onChange={(e) => setFormData({ ...formData, price_strip: e.target.value })}
+                            onChange={(e) => setFormData({ ...formData, price_strip: decimalInput(e.target.value, 2) })}
                             className="w-full h-10 bg-[#111A2B] border border-[#23324D] focus:border-teal-400 rounded-xl px-3 text-teal-300 font-mono text-xs outline-none"
                             dir="ltr"
                           />
@@ -482,7 +486,7 @@ export function ProductModal({ isOpen = true, onClose, medicine, medicineToEdit,
                             step="0.01"
                             min="0"
                             value={formData.price_unit}
-                            onChange={(e) => setFormData({ ...formData, price_unit: e.target.value })}
+                            onChange={(e) => setFormData({ ...formData, price_unit: decimalInput(e.target.value, 2) })}
                             className="w-full h-10 bg-[#111A2B] border border-[#23324D] focus:border-teal-400 rounded-xl px-3 text-cyan-300 font-mono text-xs outline-none"
                             dir="ltr"
                           />
@@ -549,7 +553,7 @@ export function ProductModal({ isOpen = true, onClose, medicine, medicineToEdit,
                           step="0.01"
                           min="0"
                           value={formData.price_unit}
-                          onChange={(e) => setFormData({ ...formData, price_unit: e.target.value })}
+                          onChange={(e) => setFormData({ ...formData, price_unit: decimalInput(e.target.value, 2) })}
                           className="w-full h-10 bg-[#111A2B] border border-[#23324D] focus:border-teal-400 rounded-xl px-3 text-cyan-300 font-mono text-xs outline-none"
                           dir="ltr"
                         />
@@ -568,7 +572,7 @@ export function ProductModal({ isOpen = true, onClose, medicine, medicineToEdit,
                       type="number"
                       min="0"
                       value={formData.stock_boxes}
-                      onChange={(e) => setFormData({ ...formData, stock_boxes: e.target.value })}
+                      onChange={(e) => setFormData({ ...formData, stock_boxes: digitsOnly(e.target.value, 7) })}
                       className="w-full h-10 bg-[#17233A] border border-[#23324D] focus:border-teal-400 rounded-xl px-3 text-white font-mono text-xs outline-none"
                       dir="ltr"
                     />
@@ -583,7 +587,7 @@ export function ProductModal({ isOpen = true, onClose, medicine, medicineToEdit,
                         type="number"
                         min="0"
                         value={formData.stock_strips}
-                        onChange={(e) => setFormData({ ...formData, stock_strips: e.target.value })}
+                        onChange={(e) => setFormData({ ...formData, stock_strips: digitsOnly(e.target.value, 7) })}
                         className="w-full h-10 bg-[#17233A] border border-[#23324D] focus:border-teal-400 rounded-xl px-3 text-teal-300 font-mono text-xs outline-none"
                         dir="ltr"
                       />
@@ -598,7 +602,7 @@ export function ProductModal({ isOpen = true, onClose, medicine, medicineToEdit,
                       type="number"
                       min="0"
                       value={formData.stock_units}
-                      onChange={(e) => setFormData({ ...formData, stock_units: e.target.value })}
+                      onChange={(e) => setFormData({ ...formData, stock_units: digitsOnly(e.target.value, 7) })}
                       className="w-full h-10 bg-[#17233A] border border-[#23324D] focus:border-teal-400 rounded-xl px-3 text-cyan-300 font-mono text-xs outline-none"
                       dir="ltr"
                     />
@@ -612,7 +616,7 @@ export function ProductModal({ isOpen = true, onClose, medicine, medicineToEdit,
                       type="number"
                       min="1"
                       value={formData.reorder_level}
-                      onChange={(e) => setFormData({ ...formData, reorder_level: e.target.value })}
+                      onChange={(e) => setFormData({ ...formData, reorder_level: digitsOnly(e.target.value, 5) })}
                       className="w-full h-10 bg-[#17233A] border border-[#23324D] focus:border-teal-400 rounded-xl px-3 text-amber-300 font-mono text-xs outline-none"
                       dir="ltr"
                     />
@@ -633,7 +637,7 @@ export function ProductModal({ isOpen = true, onClose, medicine, medicineToEdit,
               required={!targetMedicine}
               placeholder="مثال: 12/2027 أو 2027-12-01"
               value={formData.expiry || ''}
-              onChange={(e) => setFormData({ ...formData, expiry: e.target.value })}
+              onChange={(e) => setFormData({ ...formData, expiry: latinDigits(e.target.value).replace(/[^\d\/.\-]/g, '') })}
               className="w-full h-10 bg-[#17233A] border border-[#23324D] focus:border-teal-400 rounded-xl px-3 text-amber-300 font-mono text-xs outline-none"
               title="شهر/سنة تنتهي في آخر يوم من الشهر، أو تاريخ كامل. لا يُقبل تاريخ منتهٍ للإدخال الجديد."
               dir="ltr"

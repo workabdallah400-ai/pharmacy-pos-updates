@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, Calendar, Edit3, Package, Building2, AlertCircle, Sparkles } from 'lucide-react';
 import { isExpiryInPast, isValidISODate, parseExpiryDate } from '../utils/validation';
+import { digitsOnly, latinDigits } from '../utils/inputGuards';
 
 export function EditBatchModal({ isOpen, onClose, batch, onSaveBatch, suppliers }) {
   const [batchNo, setBatchNo] = useState('');
@@ -162,7 +163,7 @@ export function EditBatchModal({ isOpen, onClose, batch, onSaveBatch, suppliers 
                 min="0"
                 required
                 value={quantityBoxes}
-                onChange={(e) => setQuantityBoxes(e.target.value)}
+                onChange={(e) => setQuantityBoxes(digitsOnly(e.target.value, 7))}
                 className="w-full bg-[#0B1220] border border-[#23324D] focus:border-teal-400 rounded-xl px-3.5 py-2.5 text-sm font-bold text-teal-300 focus:outline-none"
               />
             </div>
@@ -174,7 +175,7 @@ export function EditBatchModal({ isOpen, onClose, batch, onSaveBatch, suppliers 
                 type="number"
                 min="0"
                 value={quantityStrips}
-                onChange={(e) => setQuantityStrips(e.target.value)}
+                onChange={(e) => setQuantityStrips(digitsOnly(e.target.value, 7))}
                 className="w-full bg-[#0B1220] border border-[#23324D] focus:border-teal-400 rounded-xl px-3.5 py-2.5 text-sm font-bold text-teal-300 focus:outline-none"
               />
             </div>

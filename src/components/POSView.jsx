@@ -32,6 +32,7 @@ import { ReturnInvoiceModal } from './ReturnInvoiceModal';
 import { sqliteService } from '../db/sqliteService';
 import { hasPermission } from '../utils/permissions';
 import { calculateCartTotal } from '../utils/pricing';
+import { decimalInput } from '../utils/inputGuards';
 
 export function POSView({
   currentUser,
@@ -1379,7 +1380,7 @@ export function POSView({
                     min="0"
                     step="0.01"
                     value={paidAmount}
-                    onChange={(e) => setPaidAmount(e.target.value)}
+                    onChange={(e) => setPaidAmount(decimalInput(e.target.value, 2))}
                     placeholder="0"
                     className="w-20 bg-[#0B1220] border border-[#23324D] text-emerald-400 px-2 py-0.5 rounded text-xs font-mono font-bold text-left"
                     aria-label="المبلغ المدفوع كاش"
@@ -1429,7 +1430,7 @@ export function POSView({
                     step="0.01"
                     placeholder={currentTotal.toFixed(0)}
                     value={paidAmount}
-                    onChange={(e) => setPaidAmount(e.target.value)}
+                    onChange={(e) => setPaidAmount(decimalInput(e.target.value, 2))}
                     className="w-20 text-left bg-transparent text-white font-mono font-bold outline-none text-xs"
                     aria-label="المبلغ المستلم من العميل"
                     dir="ltr"

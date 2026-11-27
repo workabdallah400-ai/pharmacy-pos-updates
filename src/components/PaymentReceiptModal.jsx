@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { X, DollarSign, Printer, CheckCircle2, AlertCircle, CreditCard, Wallet, Smartphone, Sparkles } from 'lucide-react';
 import { playCashDrawerSound } from '../utils/sound';
+import { decimalInput } from '../utils/inputGuards';
 import { getPharmacyName } from '../utils/pharmacyIdentity';
 
 export function PaymentReceiptModal({
@@ -150,7 +151,7 @@ export function PaymentReceiptModal({
                   autoFocus
                   value={amount}
                   onChange={(e) => {
-                    setAmount(e.target.value);
+                    setAmount(decimalInput(e.target.value, 2));
                     setError('');
                   }}
                   placeholder="0.00"

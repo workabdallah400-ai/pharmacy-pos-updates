@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, Unlock, User, DollarSign, Clock, Sparkles, AlertCircle } from 'lucide-react';
 import { playCashDrawerSound } from '../utils/sound';
+import { decimalInput } from '../utils/inputGuards';
 import { sqliteService } from '../db/sqliteService';
 
 export function OpenShiftModal({ isOpen, onClose, onOpenShift, currentUser = null }) {
@@ -177,7 +178,7 @@ export function OpenShiftModal({ isOpen, onClose, onOpenShift, currentUser = nul
                   step="0.01"
                   required
                   value={openingCash}
-                  onChange={(e) => setOpeningCash(e.target.value)}
+                  onChange={(e) => setOpeningCash(decimalInput(e.target.value, 2))}
                   className="w-full bg-[#0B1220] border border-[#23324D] focus:border-teal-400 rounded-xl pl-12 pr-3.5 py-2.5 text-sm font-bold text-emerald-400 focus:outline-none font-mono"
                 />
                 <span className="absolute left-3 top-2.5 text-xs text-slate-400">ج.م</span>

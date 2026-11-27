@@ -2,6 +2,7 @@ const { app, BrowserWindow, Menu, ipcMain, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const backupRestore = require('./backupRestore.cjs');
+const estockBackup = require('./estockBackup.cjs');
 
 let mainWindow;
 let restoreInProgress = false;
@@ -677,20 +678,29 @@ ipcMain.handle('backup:list-local', async () => {
   }
 });
 
-ipcMain.handle('backup:pick-sqlite', async () => {
+ipcMain.handle('backup:pick-sqlite', async (event) => {
   const win = mainWindow || BrowserWindow.getFocusedWindow();
   const result = await dialog.showOpenDialog(win, {
     title: 'اختر نسخة احتياطية (‎.bak أو .db)',
     properties: ['openFile'],
     filters: [
-      { name: 'نسخ احتياطية SQLite', extensions: ['bak', 'db', 'sqlite'] },
+      { name: 'نسخ احتياطية (PharmacyPOS أو eStock)', extensions: ['bak', 'db', 'sqlite'] },
       { name: 'كل الملفات', extensions: ['*'] }
     ]
   });
   if (result.canceled || !result.filePaths.length) return { ok: false, canceled: true };
 
+  const filePath = result.filePaths[0];
+
+  // Legacy e-Stock backups are Microsoft SQL Server archives ("TAPE" header),
+  // not SQLite. They cannot replace the database, but their catalogue, stock,
+  // expiry dates, vendors and customers can be imported directly.
+  if (estockBackup.isEStockBackup(filePath)) {
+    return analyzeEStockBackup(filePath, event.sender);
+  }
+
   try {
-    const info = await backupRestore.inspectSqlite(result.filePaths[0]);
+    const info = await backupRestore.inspectSqlite(filePath);
     return { ok: true, info };
   } catch (e) {
     return { ok: false, error: e.message || 'تعذر قراءة الملف.' };
@@ -698,11 +708,86 @@ ipcMain.handle('backup:pick-sqlite', async () => {
 });
 
 ipcMain.handle('backup:inspect-sqlite', async (_event, filePath) => {
+  const file = String(filePath || '');
+  if (estockBackup.isEStockBackup(file)) {
+    return analyzeEStockBackup(file, null);
+  }
   try {
-    const info = await backupRestore.inspectSqlite(String(filePath || ''));
+    const info = await backupRestore.inspectSqlite(file);
     return { ok: true, info };
   } catch (e) {
     return { ok: false, error: e.message || 'تعذر قراءة الملف.' };
+  }
+});
+
+// Turn an eStock .bak into a catalogue JSON once, then hand the renderer its
+// path + counts so the normal import preview/confirm flow can run.
+function analyzeEStockBackup(filePath, sender) {
+  try {
+    const size = fs.statSync(filePath).size;
+    if (sender && !sender.isDestroyed()) {
+      sender.send('backup:restore-progress', { phase: 'analyze', copied: 0, total: size });
+    }
+    const { catalog, counts } = estockBackup.extractEStock(filePath, {
+      onProgress: (p) => {
+        if (sender && !sender.isDestroyed()) {
+          sender.send('backup:restore-progress', {
+            phase: 'analyze',
+            copied: Number(p.bytes) || 0,
+            total: size
+          });
+        }
+      }
+    });
+
+    const dir = app.getPath('temp');
+    const catalogPath = path.join(dir, `estock-catalog-${Date.now()}.json`);
+    fs.writeFileSync(catalogPath, JSON.stringify(catalog), 'utf8');
+
+    if (sender && !sender.isDestroyed()) {
+      sender.send('backup:restore-progress', { phase: 'analyze-done', copied: size, total: size });
+    }
+
+    return {
+      ok: true,
+      info: {
+        kind: 'estock',
+        path: filePath,
+        name: path.basename(filePath),
+        size,
+        sizeText: backupRestore.formatBytes(size),
+        modifiedAt: new Date(fs.statSync(filePath).mtimeMs).toISOString(),
+        catalogPath,
+        counts: {
+          medicines: counts.products,
+          productsInStock: counts.productsInStock,
+          batches: counts.batches,
+          suppliers: counts.vendors,
+          customers: counts.customers
+        },
+        estockCounts: counts
+      }
+    };
+  } catch (e) {
+    console.error('eStock analysis error:', e);
+    return { ok: false, error: e.message || 'تعذر قراءة نسخة eStock.' };
+  }
+}
+
+ipcMain.handle('backup:read-estock-catalog', async (_event, catalogPath) => {
+  try {
+    const file = path.resolve(String(catalogPath || ''));
+    const tempDir = path.resolve(app.getPath('temp'));
+    if (!file.startsWith(tempDir) || !path.basename(file).startsWith('estock-catalog-')) {
+      return { ok: false, error: 'مسار كتالوج eStock غير صالح.' };
+    }
+    if (!fs.existsSync(file)) {
+      return { ok: false, error: 'ملف كتالوج eStock المؤقت غير موجود — أعد اختيار النسخة.' };
+    }
+    const payload = JSON.parse(fs.readFileSync(file, 'utf8'));
+    return { ok: true, payload };
+  } catch (e) {
+    return { ok: false, error: e.message || 'تعذر قراءة كتالوج eStock.' };
   }
 });
 

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { X, Building2, Phone, User, MapPin, DollarSign, CheckCircle2, Search, ArrowUpRight, AlertCircle } from 'lucide-react';
+import { decimalInput } from '../utils/inputGuards';
 
 export function SuppliersModal({ isOpen, onClose, suppliers, onPaySupplier }) {
   const [search, setSearch] = useState('');
@@ -186,7 +187,7 @@ export function SuppliersModal({ isOpen, onClose, suppliers, onPaySupplier }) {
                 required
                 autoFocus
                 value={paymentAmount}
-                onChange={(e) => { setPaymentAmount(e.target.value); setPaymentError(''); }}
+                onChange={(e) => { setPaymentAmount(decimalInput(e.target.value, 2)); setPaymentError(''); }}
                 className="w-full h-11 bg-[#17233A] border border-[#23324D] focus:border-amber-400 rounded-xl px-3 text-amber-300 font-mono font-bold text-base outline-none"
                 dir="ltr"
               />

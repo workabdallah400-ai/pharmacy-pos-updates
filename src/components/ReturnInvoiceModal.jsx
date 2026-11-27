@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { sqliteService } from '../db/sqliteService';
 import { isValidISODate, isValidTime, todayISODate } from '../utils/validation';
+import { digitsOnly } from '../utils/inputGuards';
 import { confirmDialog } from './ConfirmDialog';
 
 export function ReturnInvoiceModal({

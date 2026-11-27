@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, UserPlus, User, Phone, MapPin, DollarSign, FileText, Sparkles, AlertCircle } from 'lucide-react';
 import { isValidPhone } from '../utils/validation';
+import { decimalInput, nameInput, phoneInput } from '../utils/inputGuards';
 
 export function AddCustomerModal({ isOpen, onClose, customerToEdit, onSaveCustomer }) {
   const [name, setName] = useState('');
@@ -115,7 +116,7 @@ export function AddCustomerModal({ isOpen, onClose, customerToEdit, onSaveCustom
                 required
                 autoFocus
                 value={name}
-                onChange={(e) => setName(e.target.value)}
+                onChange={(e) => setName(nameInput(e.target.value))}
                 placeholder="مثال: أ. محمود الشناوي أو د. هاني يوسف"
                 className="w-full bg-[#0B1220] border border-[#23324D] focus:border-teal-400 rounded-xl pl-3 pr-10 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none"
               />
@@ -135,7 +136,7 @@ export function AddCustomerModal({ isOpen, onClose, customerToEdit, onSaveCustom
                   required
                   maxLength={20}
                   value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
+                  onChange={(e) => setPhone(phoneInput(e.target.value))}
                   placeholder="010XXXXXXXX"
                   className="w-full bg-[#0B1220] border border-[#23324D] focus:border-teal-400 rounded-xl pl-3 pr-10 py-2.5 text-sm text-white font-mono placeholder-slate-500 focus:outline-none"
                 />
@@ -154,7 +155,7 @@ export function AddCustomerModal({ isOpen, onClose, customerToEdit, onSaveCustom
                   step="0.01"
                   required
                   value={creditLimit}
-                  onChange={(e) => setCreditLimit(e.target.value)}
+                  onChange={(e) => setCreditLimit(decimalInput(e.target.value, 2))}
                   className="w-full bg-[#0B1220] border border-[#23324D] focus:border-teal-400 rounded-xl pl-12 pr-3.5 py-2.5 text-sm font-bold text-teal-300 focus:outline-none"
                 />
                 <span className="absolute left-3.5 top-2.5 text-xs text-slate-400">ج.م</span>

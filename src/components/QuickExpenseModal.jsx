@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { X, DollarSign, Wallet, CheckCircle2, AlertCircle } from 'lucide-react';
+import { decimalInput } from '../utils/inputGuards';
 
 export function QuickExpenseModal({ isOpen, onClose, onAddExpense }) {
   const [amount, setAmount] = useState('');
@@ -94,7 +95,7 @@ export function QuickExpenseModal({ isOpen, onClose, onAddExpense }) {
               autoFocus
               placeholder="مثال: 50"
               value={amount}
-              onChange={(e) => { setAmount(e.target.value); setError(''); }}
+              onChange={(e) => { setAmount(decimalInput(e.target.value, 2)); setError(''); }}
               className="w-full h-12 bg-[#17233A] border border-[#23324D] focus:border-rose-400 rounded-xl px-4 text-white text-lg font-bold font-mono outline-none"
             />
           </div>
