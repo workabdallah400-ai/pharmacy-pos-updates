@@ -210,6 +210,10 @@ function getAutoUpdater() {
         message: `يتوفر إصدار ${info && info.version ? info.version : ''}`
       };
       broadcastUpdateState();
+      // Draw the operator's attention even if the window is behind others.
+      try {
+        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.flashFrame(true);
+      } catch (e) {}
     });
     updater.on('update-not-available', () => {
       updateState = { ...updateState, status: 'not-available', message: 'أنت على آخر إصدار' };
@@ -230,7 +234,7 @@ function getAutoUpdater() {
         status: 'downloaded',
         version: info && info.version ? info.version : updateState.version,
         progress: 100,
-        message: 'التحديث جاهز — سيُثبَّت عند إغلاق البرنامج'
+        message: 'التحديث جاهز — جارٍ تثبيته وإعادة تشغيل البرنامج'
       };
       broadcastUpdateState();
       mirrorUpdatePackage(info);
@@ -310,7 +314,9 @@ ipcMain.handle('app:version', async () => {
   return { version: app.getVersion(), packaged: app.isPackaged, state: updateState };
 });
 
-ipcMain.handle('app:update-check', async () => {
+// One shared implementation used by the IPC handler and by the automatic
+// startup check, so opening the program is enough to learn about a new build.
+async function performUpdateCheck() {
   updateState.currentVersion = app.getVersion();
   if (!app.isPackaged) {
     return { available: false, reason: 'dev', version: app.getVersion() };
@@ -365,7 +371,9 @@ ipcMain.handle('app:update-check', async () => {
   } finally {
     updateCheckInFlight = false;
   }
-});
+}
+
+ipcMain.handle('app:update-check', async () => performUpdateCheck());
 
 ipcMain.handle('app:update-download', async () => {
   const updater = getAutoUpdater();
@@ -382,7 +390,16 @@ ipcMain.handle('app:update-install', async () => {
   const updater = getAutoUpdater();
   if (!updater) return { success: false, error: 'التحديث غير متاح' };
   try {
-    setTimeout(() => updater.quitAndInstall(false, true), 300);
+    // Silent install + relaunch: the operator clicks "تحديث" once and the
+    // program comes back by itself on the new version.
+    setTimeout(() => {
+      try {
+        updater.quitAndInstall(true, true);
+      } catch (err) {
+        console.warn('Silent update failed, falling back to installer UI:', err && err.message);
+        updater.quitAndInstall(false, true);
+      }
+    }, 600);
     return { success: true };
   } catch (err) {
     return { success: false, error: err.message };
@@ -453,6 +470,22 @@ function createWindow() {
   } else {
     mainWindow.loadURL('http://localhost:3000');
   }
+
+  // Check for a new release as soon as the program opens (the renderer also
+  // asks once; the in-flight guard makes the duplicate harmless), then again
+  // when the window is focused after a long break.
+  let lastFocusCheck = 0;
+  mainWindow.webContents.once('did-finish-load', () => {
+    setTimeout(() => {
+      if (app.isPackaged) performUpdateCheck().catch(() => {});
+    }, 8000);
+  });
+  mainWindow.on('focus', () => {
+    if (!app.isPackaged) return;
+    if (Date.now() - lastFocusCheck < 30 * 60 * 1000) return;
+    lastFocusCheck = Date.now();
+    performUpdateCheck().catch(() => {});
+  });
 
   mainWindow.on('closed', () => {
     mainWindow = null;

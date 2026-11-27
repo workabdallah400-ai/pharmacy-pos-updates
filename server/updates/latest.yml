@@ -1,8 +1,8 @@
-version: 1.5.3
+version: 1.5.4
 files:
-  - url: PharmacyPOS-Setup-v1.5.3.exe
-    sha512: TyCeBeYkuEw1eyFdFphRupJXgEGQOThsQmPBitKWAebc602Q7zQW4BpIeI4X71VUCpwg1yOcI2KwXfwOVd8ATw==
-    size: 84881253
-path: PharmacyPOS-Setup-v1.5.3.exe
-sha512: TyCeBeYkuEw1eyFdFphRupJXgEGQOThsQmPBitKWAebc602Q7zQW4BpIeI4X71VUCpwg1yOcI2KwXfwOVd8ATw==
-releaseDate: '2026-11-27T12:44:52.950Z'
+  - url: PharmacyPOS-Setup-v1.5.4.exe
+    sha512: OFVAWUrd0CqHjoAo0zDnxMIwhiW86BBEljziXaqb0QZrvRjmf3YKVWt7u7Jg2/ipmxV0CzmNEDSvCHUUbNxgUQ==
+    size: 84881735
+path: PharmacyPOS-Setup-v1.5.4.exe
+sha512: OFVAWUrd0CqHjoAo0zDnxMIwhiW86BBEljziXaqb0QZrvRjmf3YKVWt7u7Jg2/ipmxV0CzmNEDSvCHUUbNxgUQ==
+releaseDate: '2026-11-27T13:26:57.735Z'

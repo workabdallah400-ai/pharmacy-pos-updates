@@ -1,6 +1,6 @@
 import { ErrorBoundary } from './components/ErrorBoundary';
 import React, { useState, useEffect, useRef } from 'react';
-import { AlertCircle, Bell, X } from 'lucide-react';
+import { AlertCircle, Bell, X, Download, RefreshCw } from 'lucide-react';
 import { LoginScreen } from './components/LoginScreen';
 import { TopHeader } from './components/TopHeader';
 import { Sidebar } from './components/Sidebar';
@@ -223,15 +223,42 @@ export default function App() {
       // use a saved LAN/report-server URL, which may contain an old feed.
       const res = await checkForUpdates();
       if (!cancelled && res && res.available) {
-        setUpdateBanner({ version: res.version });
+        setUpdateBanner((prev) => {
+          // Never interrupt an in-progress download/install.
+          if (prev && (prev.stage === 'downloading' || prev.stage === 'installing')) return prev;
+          return { version: res.version, stage: 'available', progress: 0 };
+        });
       }
     };
+    // Once when the program opens, then every 30 minutes (GitHub allows only
+    // 60 unauthenticated requests per hour, so a minute-by-minute poll used to
+    // exhaust the limit and silently stop finding updates).
     run();
-    const interval = window.setInterval(run, 60 * 1000);
+    const interval = window.setInterval(run, 30 * 60 * 1000);
 
     const off = onUpdateStatus((payload) => {
-      if (payload && payload.status === 'available' && !cancelled) {
-        setUpdateBanner({ version: payload.version });
+      if (cancelled || !payload) return;
+      if (payload.status === 'available') {
+        setUpdateBanner((prev) => {
+          if (prev && (prev.stage === 'downloading' || prev.stage === 'installing')) return prev;
+          return { version: payload.version, stage: 'available', progress: 0 };
+        });
+      } else if (payload.status === 'downloading') {
+        setUpdateBanner((prev) => (
+          prev && (prev.stage === 'downloading' || prev.stage === 'installing')
+            ? { ...prev, stage: 'downloading', progress: Number(payload.progress) || 0 }
+            : prev
+        ));
+      } else if (payload.status === 'downloaded') {
+        setUpdateBanner((prev) => (
+          prev ? { ...prev, version: payload.version || prev.version, stage: 'installing', progress: 100 } : prev
+        ));
+      } else if (payload.status === 'error') {
+        setUpdateBanner((prev) => (
+          prev && (prev.stage === 'downloading' || prev.stage === 'installing')
+            ? { ...prev, stage: 'error', error: payload.message || 'تعذر تحميل التحديث' }
+            : prev
+        ));
       }
     });
     return () => {
@@ -242,32 +269,114 @@ export default function App() {
   }, []);
 
   const handleApplyUpdate = async () => {
-    setUpdateBanner(null);
+    const version = updateBanner?.version;
+    setUpdateBanner({ version, stage: 'downloading', progress: 0 });
     const res = await downloadUpdate();
-    if (res && res.success) {
-      // The main process installs and relaunches after the download event.
-      await installUpdate();
+    if (!res || !res.success) {
+      setUpdateBanner({
+        version,
+        stage: 'error',
+        progress: 0,
+        error: (res && res.error) || 'تعذر تحميل التحديث. تأكد من اتصال الإنترنت وحاول مرة أخرى.'
+      });
+      return;
     }
+    setUpdateBanner({ version, stage: 'installing', progress: 100 });
+    await installUpdate();
   };
 
   const updateBannerNode = updateBanner ? (
-    <div className="fixed top-3 left-1/2 -translate-x-1/2 z-[60] bg-gradient-to-l from-teal-600 to-emerald-600 text-white px-4 py-2.5 rounded-xl shadow-2xl border border-teal-300/40 flex items-center gap-3 text-xs font-bold animate-fadeIn" role="status" aria-live="polite">
-      <span>⬆️ يتوفر تحديث جديد للبرنامج {updateBanner.version ? `v${updateBanner.version}` : ''}</span>
-      <button
-        type="button"
-        onClick={handleApplyUpdate}
-        className="px-3 py-1 rounded-lg bg-white/20 hover:bg-white/30 text-[11px] font-bold"
-      >
-        تحميل وتثبيت الآن
-      </button>
-      <button
-        type="button"
-        onClick={() => setUpdateBanner(null)}
-        className="px-2 py-1 rounded-lg hover:bg-white/20 text-[11px]"
-        aria-label="إغلاق إشعار التحديث"
-      >
-        ✕
-      </button>
+    <div
+      className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 font-cairo"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="update-dialog-title"
+    >
+      <div className="w-full max-w-md bg-[#111A2B] border border-teal-500/40 rounded-2xl shadow-2xl p-6 text-center">
+        <div className="mx-auto w-14 h-14 rounded-2xl bg-teal-500/15 border border-teal-500/40 flex items-center justify-center mb-4">
+          {updateBanner.stage === 'installing' ? (
+            <RefreshCw className="w-7 h-7 text-teal-300 animate-spin" />
+          ) : updateBanner.stage === 'error' ? (
+            <AlertCircle className="w-7 h-7 text-rose-300" />
+          ) : (
+            <Download className="w-7 h-7 text-teal-300" />
+          )}
+        </div>
+
+        <h2 id="update-dialog-title" className="text-base font-bold text-white">
+          {updateBanner.stage === 'installing'
+            ? 'جارٍ تثبيت التحديث...'
+            : updateBanner.stage === 'downloading'
+            ? 'جارٍ تحميل التحديث...'
+            : updateBanner.stage === 'error'
+            ? 'تعذر إتمام التحديث'
+            : 'تحديث جديد متاح'}
+        </h2>
+
+        <p className="text-xs text-slate-400 mt-2 leading-relaxed">
+          {updateBanner.stage === 'installing'
+            ? 'سيغلق البرنامج تلقائياً ثم يفتح مرة أخرى على الإصدار الجديد. لا تفصل الكهرباء.'
+            : updateBanner.stage === 'downloading'
+            ? `يتم تحميل الإصدار ${updateBanner.version ? `v${updateBanner.version}` : 'الجديد'} ثم تثبيته وإعادة تشغيل البرنامج تلقائياً.`
+            : updateBanner.stage === 'error'
+            ? updateBanner.error
+            : `الإصدار ${updateBanner.version ? `v${updateBanner.version}` : 'الجديد'} متاح الآن. اضغط زر التحديث وسيتم التحميل والتثبيت وإعادة التشغيل تلقائياً.`}
+        </p>
+
+        {updateBanner.stage === 'downloading' && (
+          <div className="mt-4">
+            <div className="h-2.5 rounded-full bg-[#0B1220] overflow-hidden">
+              <div
+                className="h-full bg-gradient-to-r from-teal-500 to-emerald-400 transition-all"
+                style={{ width: `${Math.max(4, Number(updateBanner.progress) || 0)}%` }}
+              />
+            </div>
+            <div className="text-[11px] font-mono text-teal-300 mt-1.5">
+              {Math.round(Number(updateBanner.progress) || 0)}%
+            </div>
+          </div>
+        )}
+
+        <div className="flex items-center justify-center gap-2 mt-5">
+          {updateBanner.stage === 'available' && (
+            <>
+              <button
+                type="button"
+                onClick={handleApplyUpdate}
+                className="px-5 py-2.5 rounded-xl bg-gradient-to-l from-teal-600 to-emerald-600 hover:from-teal-500 hover:to-emerald-500 text-white text-xs font-bold flex items-center gap-2"
+              >
+                <Download className="w-4 h-4" />
+                تحديث الآن
+              </button>
+              <button
+                type="button"
+                onClick={() => setUpdateBanner(null)}
+                className="px-4 py-2.5 rounded-xl bg-[#0B1220] border border-[#23324D] hover:border-slate-400 text-slate-300 text-xs font-bold"
+              >
+                لاحقاً
+              </button>
+            </>
+          )}
+          {updateBanner.stage === 'error' && (
+            <>
+              <button
+                type="button"
+                onClick={handleApplyUpdate}
+                className="px-5 py-2.5 rounded-xl bg-teal-500/15 border border-teal-500/40 hover:border-teal-400 text-teal-300 text-xs font-bold"
+              >
+                إعادة المحاولة
+              </button>
+              <button
+                type="button"
+                onClick={() => setUpdateBanner(null)}
+                className="px-4 py-2.5 rounded-xl bg-[#0B1220] border border-[#23324D] hover:border-slate-400 text-slate-300 text-xs font-bold"
+              >
+                لاحقاً
+              </button>
+            </>
+          )}
+        </div>
+      </div>
     </div>
   ) : null;
 

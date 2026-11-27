@@ -3,7 +3,7 @@
 
 // Injected by Vite from package.json. The browser build is not "v1.0.0";
 // it must report the same version as the header badge and the installer.
-const FALLBACK_VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '1.5.3';
+const FALLBACK_VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '1.5.4';
 
 function getIpc() {
   try {

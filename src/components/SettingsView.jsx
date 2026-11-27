@@ -85,7 +85,7 @@ export function SettingsView({ onUpdatePharmacyName, onRevokeDevice, currentUser
   const [syncRunning, setSyncRunning] = useState(false);
   const [reportServerInfo, setReportServerInfo] = useState(null);
   const [appInfo, setAppInfo] = useState({
-    version: typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '1.5.3',
+    version: typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '1.5.4',
     packaged: false
   });
   const [updateState, setUpdateState] = useState({ status: 'idle', message: '', progress: 0, version: null });
