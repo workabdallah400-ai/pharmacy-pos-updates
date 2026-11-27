@@ -165,6 +165,18 @@ export function ExpiryView({
     });
   }, [activeBatches, searchQuery, supplierFilter, periodFilter]);
 
+  // Paint a bounded window instead of every batch at once. Rendering thousands
+  // of table rows was what made this screen take several seconds to open.
+  const PAGE_SIZE = 100;
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  useEffect(() => {
+    setVisibleCount(PAGE_SIZE);
+  }, [searchQuery, supplierFilter, periodFilter]);
+  const visibleBatches = useMemo(
+    () => filteredBatches.slice(0, visibleCount),
+    [filteredBatches, visibleCount]
+  );
+
   // Selection toggle
   const toggleSelect = (id) => {
     setSelectedBatchIds((prev) => {
@@ -618,7 +630,7 @@ export function ExpiryView({
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#23324D]/60">
-                {filteredBatches.map((batch) => {
+                {visibleBatches.map((batch) => {
                   const isSelected = selectedBatchIds.has(batch.id);
                   const days = getDaysRemaining(batch.expiry_date);
                   const isExpired = days < 0;
@@ -794,10 +806,22 @@ export function ExpiryView({
 
         {/* Table Footer Bar */}
         <div className="bg-[#17233A]/60 border-t border-[#23324D] px-4 py-2.5 flex items-center justify-between text-xs text-slate-400">
-          <div>
-            عرض <span className="font-bold text-white">{filteredBatches.length}</span> تشغيلة مسجلة
+          <div className="flex items-center gap-3">
+            <span>
+              عرض <span className="font-bold text-white">{Math.min(visibleCount, filteredBatches.length)}</span> من{' '}
+              <span className="font-bold text-white">{filteredBatches.length}</span> تشغيلة مسجلة
+            </span>
+            {visibleCount < filteredBatches.length && (
+              <button
+                type="button"
+                onClick={() => setVisibleCount((n) => n + PAGE_SIZE)}
+                className="px-3 py-1 rounded-lg bg-teal-500/15 border border-teal-500/40 hover:border-teal-400 text-teal-300 text-[11px] font-bold transition-colors"
+              >
+                عرض المزيد ({filteredBatches.length - visibleCount})
+              </button>
+            )}
             {selectedBatchIds.size > 0 && (
-              <span className="text-amber-300 font-bold mr-2">
+              <span className="text-amber-300 font-bold">
                 • تم تحديد {selectedBatchIds.size} تشغيلة للإرجاع
               </span>
             )}

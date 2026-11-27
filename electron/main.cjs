@@ -644,20 +644,74 @@ ipcMain.handle('catalog:read', async () => {
   }
 });
 
+// Serialize database writes so two exports can never interleave, and so a
+// backup always sees the newest completed write. Writes go through a temp file
+// and are renamed into place, so a close-time sync flush can never leave a
+// half-written database behind.
+let dbWriteChain = Promise.resolve();
+let dbWriteSeq = 0;
+let dbWrittenSeq = 0;
+
+function queueDatabaseWrite(buffer) {
+  const targetPath = getDatabasePath();
+  const dir = path.dirname(targetPath);
+  const payload = Buffer.from(buffer);
+  const seq = ++dbWriteSeq;
+  const tempPath = `${targetPath}.${seq}.tmp`;
+  dbWriteChain = dbWriteChain
+    .catch(() => {})
+    .then(async () => {
+      try {
+        if (restoreInProgress) throw new Error('restore-in-progress');
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+        await fs.promises.writeFile(tempPath, payload);
+        // A synchronous flush may have already written a newer copy.
+        if (seq < dbWrittenSeq) {
+          try { await fs.promises.unlink(tempPath); } catch (e) {}
+          return;
+        }
+        await fs.promises.rename(tempPath, targetPath);
+        dbWrittenSeq = seq;
+      } catch (e) {
+        try { await fs.promises.unlink(tempPath); } catch (e2) {}
+        throw e;
+      }
+    });
+  return dbWriteChain;
+}
+
 ipcMain.handle('db:write', async (event, buffer) => {
   try {
     if (restoreInProgress) {
       // Never let an in-flight save overwrite a database being restored.
       return { success: false, error: 'restore-in-progress' };
     }
-    const targetPath = getDatabasePath();
-    const dir = path.dirname(targetPath);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(targetPath, Buffer.from(buffer));
+    await queueDatabaseWrite(buffer);
     return { success: true };
   } catch (e) {
     console.error('db:write error:', e);
     return { success: false, error: e.message };
+  }
+});
+
+// Last-resort synchronous flush when the window is closing. Kept separate so
+// the normal path stays fully asynchronous.
+ipcMain.on('db:write-sync', (event, buffer) => {
+  try {
+    if (restoreInProgress) {
+      event.returnValue = { success: false, error: 'restore-in-progress' };
+      return;
+    }
+    const targetPath = getDatabasePath();
+    const seq = ++dbWriteSeq;
+    const tempPath = `${targetPath}.sync-${seq}.tmp`;
+    fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+    fs.writeFileSync(tempPath, Buffer.from(buffer));
+    fs.renameSync(tempPath, targetPath);
+    dbWrittenSeq = seq;
+    event.returnValue = { success: true };
+  } catch (e) {
+    event.returnValue = { success: false, error: e.message };
   }
 });
 
@@ -666,6 +720,9 @@ ipcMain.handle('db:backup', async (event, label = 'shift-close') => {
   try {
     const targetPath = getDatabasePath();
     if (!fs.existsSync(targetPath)) return { success: false, error: 'Database file not found' };
+
+    // Make sure the renderer's latest state reached disk before snapshotting.
+    await dbWriteChain.catch(() => {});
 
     const backupDir = path.join(path.dirname(targetPath), 'backups');
     if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true });
@@ -841,6 +898,8 @@ ipcMain.handle('backup:restore-sqlite', async (event, sourcePath) => {
     }
     const backupDir = path.join(path.dirname(targetPath), 'backups');
 
+    // Finish any queued write first, then lock the file for the restore.
+    await dbWriteChain.catch(() => {});
     restoreInProgress = true;
     if (sender && !sender.isDestroyed()) {
       sender.send('backup:restore-progress', { phase: 'start', copied: 0, total: 0 });

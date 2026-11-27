@@ -236,7 +236,7 @@ export function ReturnInvoiceModal({
       if (res && res.success) {
         setToastMessage(`✅ تم بنجاح استرجاع الأصناف وردها للمخزن (إيصال #${res.refundId})`);
         if (typeof onRefundCompleted === 'function') {
-          await onRefundCompleted();
+          await onRefundCompleted(itemsToSubmit.map((it) => it.medicine_id));
         }
         setTimeout(() => {
           setSelectedInvoice(null);

@@ -1,5 +1,5 @@
 import { ErrorBoundary } from './components/ErrorBoundary';
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AlertCircle, Bell, X, Download, RefreshCw } from 'lucide-react';
 import { LoginScreen } from './components/LoginScreen';
 import { TopHeader } from './components/TopHeader';
@@ -483,48 +483,26 @@ export default function App() {
   const [medicines, setMedicines] = useState([]);
   const [hasUnreadShortages, setHasUnreadShortages] = useState(false);
   const [shortageToast, setShortageToast] = useState(null); // { id, message }
-  const prevMedicineStockMap = useRef(new Map());
-  const isInitialMedsLoad = useRef(true);
+
+  const announceShortages = (newlyShort) => {
+    if (!Array.isArray(newlyShort) || newlyShort.length === 0) return;
+    const first = newlyShort[0];
+    const name = first.trade_name_ar || first.trade_name;
+    const msg = newlyShort.length === 1
+      ? `المنتج [${name}] وصل إلى حد الطلب وتم إضافته إلى كشكول النواقص`
+      : `المنتج [${name}] و (${newlyShort.length - 1}) أصناف أخرى وصلت إلى حد الطلب وتم إضافتها إلى كشكول النواقص`;
+    setShortageToast({ id: Date.now(), message: msg });
+    setHasUnreadShortages(true);
+  };
 
   // Load the full medicine catalog from SQLite so shared views
   // (shortages, purchases, reports) always see the real quantities.
+  // This runs once after login, not on the login screen: reading 70k+ rows
+  // while the cashier types their password was freezing the username field.
   const reloadMedicinesFromDb = async () => {
     try {
       const rows = await sqliteService.getAllMedicines(100000);
-      if (Array.isArray(rows)) {
-        // Detect items that just crossed/reached the reorder_level
-        if (!isInitialMedsLoad.current && prevMedicineStockMap.current.size > 0) {
-          const newlyShort = [];
-          for (const med of rows) {
-            const reorder = Number(med.reorder_level != null ? med.reorder_level : 3);
-            const currentBoxes = Number(med.stock_boxes) || 0;
-            const prevBoxes = prevMedicineStockMap.current.get(med.id);
-            if (prevBoxes !== undefined && prevBoxes > reorder && currentBoxes <= reorder) {
-              newlyShort.push(med);
-            }
-          }
-          if (newlyShort.length > 0) {
-            const first = newlyShort[0];
-            const name = first.trade_name_ar || first.trade_name;
-            const msg = newlyShort.length === 1
-              ? `المنتج [${name}] وصل إلى حد الطلب وتم إضافته إلى كشكول النواقص`
-              : `المنتج [${name}] و (${newlyShort.length - 1}) أصناف أخرى وصلت إلى حد الطلب وتم إضافتها إلى كشكول النواقص`;
-            
-            setShortageToast({ id: Date.now(), message: msg });
-            setHasUnreadShortages(true);
-          }
-        }
-
-        // Update tracking map
-        const newMap = new Map();
-        for (const m of rows) {
-          newMap.set(m.id, Number(m.stock_boxes) || 0);
-        }
-        prevMedicineStockMap.current = newMap;
-        isInitialMedsLoad.current = false;
-
-        setMedicines(rows);
-      }
+      if (Array.isArray(rows)) setMedicines(rows);
     } catch (e) {
       console.warn('Failed to load medicines from SQLite:', e);
     }
@@ -549,8 +527,26 @@ export default function App() {
   }, [shortageToast]);
 
   useEffect(() => {
-    reloadMedicinesFromDb();
-  }, []);
+    if (!currentUser) return;
+    let cancelled = false;
+    const run = () => {
+      if (!cancelled) reloadMedicinesFromDb();
+    };
+    // Let the POS paint and accept input first; the 70k-row catalogue can load
+    // a moment later without freezing the screen the cashier just opened.
+    const timer = setTimeout(() => {
+      if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
+        window.requestIdleCallback(run, { timeout: 2500 });
+      } else {
+        run();
+      }
+    }, 700);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser?.id]);
 
   // 2. Shared Suppliers State
   const [suppliers, setSuppliers] = useState(() => {
@@ -952,9 +948,29 @@ export default function App() {
               isShiftOpen={!!currentShift}
               pharmacyName={pharmacyName}
               onOpenShiftModal={() => setShowOpenShiftModal(true)}
-              onSaleCompleted={async () => {
-                await reloadMedicinesFromDb();
+              onSaleCompleted={async (soldIds) => {
                 try {
+                  // Refresh only the medicines that were actually sold. Reloading
+                  // the whole 70k catalogue after every invoice made the cashier
+                  // wait several seconds per sale.
+                  if (Array.isArray(soldIds) && soldIds.length > 0) {
+                    const freshRows = await sqliteService.getMedicinesByIds(soldIds);
+                    if (freshRows.length > 0) {
+                      const freshById = new Map(freshRows.map((m) => [Number(m.id), m]));
+                      const newlyShort = [];
+                      const next = medicines.map((m) => {
+                        const fresh = freshById.get(Number(m.id));
+                        if (!fresh) return m;
+                        const reorder = reorderLevelOf(fresh);
+                        const before = effectiveStockBoxes(m);
+                        const after = effectiveStockBoxes(fresh);
+                        if (before > reorder && after <= reorder) newlyShort.push(fresh);
+                        return fresh;
+                      });
+                      setMedicines(next);
+                      announceShortages(newlyShort);
+                    }
+                  }
                   const freshShift = await sqliteService.getCurrentShift();
                   if (freshShift) setCurrentShift(freshShift);
                 } catch (e) {}

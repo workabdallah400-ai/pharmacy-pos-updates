@@ -80,6 +80,14 @@ class SQLiteService {
     this._syncFlushTimer = null;
     this._heartbeatTimer = null;
     this._heartbeatRunning = false;
+    // Batched persistence: a sale touches several tables and used to export +
+    // write the whole database (twice) after every single statement. That is
+    // what made the program slower as the catalogue and invoices grew.
+    this._saveTimer = null;
+    this._savePending = false;
+    this._saveInFlight = null;
+    this._saveSuspended = false;
+    this._unloadFlushInstalled = false;
   }
 
   async init() {
@@ -217,6 +225,7 @@ class SQLiteService {
 
         await this._runFullCatalogMigration();
 
+        this._installUnloadFlush();
         this.isInitialized = true;
         console.log('🚀 SQLite Database Service Ready with 30,000 Egyptian Medicines!');
         return this.db;
@@ -229,37 +238,113 @@ class SQLiteService {
     return this.initPromise;
   }
 
-  // Persist DB to disk (in Electron) or localStorage/IndexedDB
+  // Persist DB to disk (in Electron) or IndexedDB.
+  //
+  // Every mutation used to export the full database and write it twice — once
+  // through IPC and once synchronously from the renderer. With 70k+ medicines
+  // and thousands of invoices that blocked the UI for seconds per operation.
+  // Saves are now coalesced into one export/write per burst and never run on
+  // the renderer's critical path.
   saveToDisk() {
-    if (!this.db) return;
-    try {
-      const data = this.db.export();
-      const buffer = new Uint8Array(data);
+    if (!this.db || this._saveSuspended) return;
+    this._savePending = true;
+    if (this._saveTimer) return;
+    this._saveTimer = setTimeout(() => {
+      this._saveTimer = null;
+      this._flushSave();
+    }, 250);
+  }
 
-      if (typeof window !== 'undefined' && window.require) {
+  _flushSave() {
+    if (!this.db || this._saveSuspended || !this._savePending) return Promise.resolve();
+    if (this._saveInFlight) {
+      // A write is already running: run again afterwards so the newest state
+      // is not lost (the in-flight payload may predate the latest mutation).
+      return this._saveInFlight.then(() => this._flushSave());
+    }
+
+    this._savePending = false;
+    let buffer;
+    try {
+      buffer = new Uint8Array(this.db.export());
+    } catch (e) {
+      // sql.js refuses to export while a transaction is open; retry shortly.
+      this._savePending = true;
+      if (!this._saveTimer && !this._saveSuspended) {
+        this._saveTimer = setTimeout(() => {
+          this._saveTimer = null;
+          this._flushSave();
+        }, 500);
+      }
+      console.warn('Database export deferred:', e && e.message);
+      return Promise.resolve();
+    }
+
+    const isElectron = typeof window !== 'undefined' && window.require;
+    if (isElectron) {
+      this._saveInFlight = (async () => {
         try {
           const { ipcRenderer } = window.require('electron');
-          ipcRenderer.invoke('db:write', buffer).catch(() => {});
-        } catch (ipcErr) {}
-
-        try {
-          const fs = window.require('fs');
-          const path = window.require('path');
-          const targetPath = this.dbFilePath || path.join(process.cwd(), 'pharmacy_pos.db');
-          fs.writeFileSync(targetPath, Buffer.from(buffer));
-          console.log(`💾 Persisted SQLite database to: ${targetPath}`);
-          return;
-        } catch (e) {}
-      }
-
-      // If in browser / mobile, persist state in IndexedDB
-      if (typeof window !== 'undefined') {
-        saveToIDB(buffer).catch(() => {});
-      }
-      console.log('💾 Database state updated in SQLite engine & persisted.');
-    } catch (e) {
-      console.error('Error saving SQLite database:', e);
+          const res = await ipcRenderer.invoke('db:write', buffer);
+          if (res && res.success === false) {
+            // Never fight a database restore in progress.
+            this._savePending = false;
+          }
+        } catch (e) {
+          this._savePending = true;
+          console.warn('Database save failed:', e && e.message);
+        }
+      })();
+    } else if (typeof window !== 'undefined') {
+      this._saveInFlight = saveToIDB(buffer).catch(() => {});
+    } else {
+      this._saveInFlight = Promise.resolve();
     }
+
+    return this._saveInFlight.finally(() => {
+      this._saveInFlight = null;
+      if (this._savePending && !this._saveSuspended) this._flushSave();
+    });
+  }
+
+  /** Force the current in-memory state to disk (backups, imports, restore). */
+  async flushToDisk() {
+    if (this._saveTimer) {
+      clearTimeout(this._saveTimer);
+      this._saveTimer = null;
+    }
+    if (this._saveSuspended || !this.db) return;
+    this._savePending = true;
+    await this._flushSave();
+    if (this._saveInFlight) await this._saveInFlight.catch(() => {});
+  }
+
+  /** Stop persisting this in-memory copy — used while a restore swaps the file. */
+  suspendPersistence() {
+    this._saveSuspended = true;
+    this._savePending = false;
+    if (this._saveTimer) {
+      clearTimeout(this._saveTimer);
+      this._saveTimer = null;
+    }
+  }
+
+  resumePersistence() {
+    this._saveSuspended = false;
+  }
+
+  _installUnloadFlush() {
+    if (this._unloadFlushInstalled || typeof window === 'undefined') return;
+    this._unloadFlushInstalled = true;
+    window.addEventListener('beforeunload', () => {
+      if (this._saveSuspended || !this._savePending || !this.db) return;
+      try {
+        const buffer = new Uint8Array(this.db.export());
+        const { ipcRenderer } = window.require('electron');
+        ipcRenderer.sendSync('db:write-sync', buffer);
+        this._savePending = false;
+      } catch (e) {}
+    });
   }
 
   _medicineColumns() {
@@ -343,19 +428,29 @@ class SQLiteService {
       const meta = this.db.exec(`SELECT value FROM app_meta WHERE key = '${MIGRATION_KEY}' LIMIT 1`);
       if (meta.length && meta[0].values.length && meta[0].values[0][0] === '1') return;
 
-      const catalog = await this._loadBakedCatalog();
-      if (!catalog) {
-        console.warn('Full catalog migration skipped: catalog-v1500.json is unavailable.');
-        return;
-      }
-
+      // Decide BEFORE loading catalog-v1500.json (29.6 MB). It used to be
+      // parsed on every startup even when the database already had a catalogue
+      // and transaction rows, which delayed login by seconds.
       const related = ['invoice_items', 'purchase_items', 'expiry_batches'];
       const relatedCounts = related.map((table) => {
         try { return { table, count: Number(this.db.exec(`SELECT COUNT(*) FROM ${table}`)[0].values[0][0]) }; }
         catch (e) { return { table, count: 0 }; }
       });
-      if (relatedCounts.some((x) => x.count > 0)) {
-        console.warn('Full catalog migration skipped: historical transaction rows exist.', relatedCounts);
+      let medicineCount = 0;
+      try {
+        medicineCount = Number(this.db.exec('SELECT COUNT(*) FROM medicines')[0].values[0][0]) || 0;
+      } catch (e) {}
+      if (relatedCounts.some((x) => x.count > 0) || medicineCount >= 20000) {
+        // Nothing to replace: remember that so future launches skip the check
+        // immediately instead of re-reading the bundled catalogue.
+        this.db.run(`INSERT OR REPLACE INTO app_meta (key, value) VALUES ('${MIGRATION_KEY}', '1');`);
+        this.saveToDisk();
+        return;
+      }
+
+      const catalog = await this._loadBakedCatalog();
+      if (!catalog) {
+        console.warn('Full catalog migration skipped: catalog-v1500.json is unavailable.');
         return;
       }
 
@@ -659,6 +754,51 @@ class SQLiteService {
         notes TEXT
       );
     `);
+
+    // Hot-path indexes. The app only had indexes on medicine names; every
+    // report, shift audit and expiry lookup scanned whole tables instead. They
+    // are created once and are no-ops on later launches.
+    const indexStatements = [
+      ['idx_invoices_date', 'CREATE INDEX IF NOT EXISTS idx_invoices_date ON invoices(date_time)'],
+      ['idx_invoices_shift', 'CREATE INDEX IF NOT EXISTS idx_invoices_shift ON invoices(shift_id)'],
+      ['idx_invoice_items_invoice', 'CREATE INDEX IF NOT EXISTS idx_invoice_items_invoice ON invoice_items(invoice_id)'],
+      ['idx_invoice_items_medicine', 'CREATE INDEX IF NOT EXISTS idx_invoice_items_medicine ON invoice_items(medicine_id)'],
+      ['idx_purchase_items_purchase', 'CREATE INDEX IF NOT EXISTS idx_purchase_items_purchase ON purchase_items(purchase_id)'],
+      ['idx_purchase_items_medicine', 'CREATE INDEX IF NOT EXISTS idx_purchase_items_medicine ON purchase_items(medicine_id)'],
+      ['idx_purchase_items_expiry', 'CREATE INDEX IF NOT EXISTS idx_purchase_items_expiry ON purchase_items(expiry)'],
+      ['idx_purchases_date', 'CREATE INDEX IF NOT EXISTS idx_purchases_date ON purchases(date_time)'],
+      ['idx_purchases_supplier', 'CREATE INDEX IF NOT EXISTS idx_purchases_supplier ON purchases(supplier_id)'],
+      ['idx_shifts_opened', 'CREATE INDEX IF NOT EXISTS idx_shifts_opened ON shifts(opened_at)'],
+      ['idx_shifts_status', 'CREATE INDEX IF NOT EXISTS idx_shifts_status ON shifts(status)'],
+      ['idx_expenses_shift', 'CREATE INDEX IF NOT EXISTS idx_expenses_shift ON expenses(shift_id)'],
+      ['idx_expenses_date', 'CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(date_time)'],
+      ['idx_customers_phone', 'CREATE INDEX IF NOT EXISTS idx_customers_phone ON customers(phone)'],
+      ['idx_customers_name', 'CREATE INDEX IF NOT EXISTS idx_customers_name ON customers(name)'],
+      ['idx_customer_ledger_customer', 'CREATE INDEX IF NOT EXISTS idx_customer_ledger_customer ON customer_ledger(customer_id)'],
+      ['idx_sale_refunds_invoice', 'CREATE INDEX IF NOT EXISTS idx_sale_refunds_invoice ON sale_refunds(invoice_id)'],
+      ['idx_sale_refunds_shift', 'CREATE INDEX IF NOT EXISTS idx_sale_refunds_shift ON sale_refunds(shift_id)'],
+      ['idx_audit_logs_date', 'CREATE INDEX IF NOT EXISTS idx_audit_logs_date ON audit_logs(date_time)'],
+      ['idx_stock_takes_date', 'CREATE INDEX IF NOT EXISTS idx_stock_takes_date ON stock_takes(created_at)'],
+      ['idx_supplier_returns_shift', 'CREATE INDEX IF NOT EXISTS idx_supplier_returns_shift ON supplier_returns(shift_id)'],
+      ['idx_med_expiry', 'CREATE INDEX IF NOT EXISTS idx_med_expiry ON medicines(expiry)']
+    ];
+    let existingIndexes = new Set();
+    try {
+      const res = this.db.exec("SELECT name FROM sqlite_master WHERE type = 'index'");
+      existingIndexes = new Set((res[0]?.values || []).map((row) => row[0]));
+    } catch (e) {}
+    let createdAnyIndex = false;
+    for (const [indexName, indexSql] of indexStatements) {
+      if (existingIndexes.has(indexName)) continue;
+      try {
+        this.db.run(indexSql);
+        createdAnyIndex = true;
+      } catch (indexErr) {
+        // A very old database may not have every column yet; skip that index.
+      }
+    }
+    // Persist new indexes once, otherwise they would be rebuilt on every launch.
+    if (createdAnyIndex) this.saveToDisk();
 
     // Migration for customer loyalty points and partial payments
     try {
@@ -1488,6 +1628,40 @@ class SQLiteService {
     await this.init();
     const res = this.db.exec(`SELECT * FROM medicines ORDER BY id ASC LIMIT ${limit}`);
     return this._formatRows(res);
+  }
+
+  /** Refresh only the items touched by a sale/refund instead of all 70k rows. */
+  async getMedicinesByIds(ids = []) {
+    await this.init();
+    const clean = [...new Set(
+      (Array.isArray(ids) ? ids : [])
+        .map((id) => Number(id))
+        .filter((id) => Number.isFinite(id) && id > 0)
+    )];
+    if (clean.length === 0) return [];
+    const res = this.db.exec(`SELECT * FROM medicines WHERE id IN (${clean.join(',')})`);
+    return this._formatRows(res);
+  }
+
+  /** Row counts used to preview what a backup contains before restoring it. */
+  async getDataCounts() {
+    await this.init();
+    const count = (table) => {
+      try {
+        return Number(this.db.exec(`SELECT COUNT(*) FROM ${table}`)[0].values[0][0]) || 0;
+      } catch (e) {
+        return 0;
+      }
+    };
+    return {
+      medicines: count('medicines'),
+      invoices: count('invoices'),
+      shifts: count('shifts'),
+      purchases: count('purchases'),
+      expenses: count('expenses'),
+      customers: count('customers'),
+      suppliers: count('suppliers')
+    };
   }
 
   async saveMedicine(med) {
@@ -3197,7 +3371,6 @@ class SQLiteService {
       WHERE id = '${shiftId}' OR status = 'OPEN'
     `);
 
-    this.saveToDisk();
     this._enqueueSync('shift', shiftId, 'CLOSE', {
       id: shiftId,
       shift_number: shift.shift_number || null,
@@ -3217,6 +3390,9 @@ class SQLiteService {
       actual_cash: counted,
       discrepancy
     }, shiftId);
+    // Write the closed shift to disk BEFORE snapshotting, otherwise the backup
+    // could miss the very shift it is named after.
+    await this.flushToDisk();
     console.log(`🔒 Shift ${shiftId} closed: Expected=${expected}, Counted=${counted}, Discrepancy=${discrepancy}`);
 
     // Automatic SQLite Database Backup to offline backups folder
@@ -3224,9 +3400,7 @@ class SQLiteService {
       if (typeof window !== 'undefined' && window.require) {
         const { ipcRenderer } = window.require('electron');
         if (ipcRenderer && ipcRenderer.invoke) {
-          ipcRenderer.invoke('db:backup', `shift_${shiftId}`).catch((e) => {
-            console.warn('Shift auto-backup error:', e);
-          });
+          await ipcRenderer.invoke('db:backup', `shift_${shiftId}`);
         }
       }
     } catch (bkErr) {
@@ -4333,6 +4507,7 @@ class SQLiteService {
       FROM purchase_items pi
       LEFT JOIN purchases p ON p.id = pi.purchase_id
       LEFT JOIN medicines m ON m.id = pi.medicine_id
+      WHERE (COALESCE(pi.quantity, 0) > 0 OR COALESCE(pi.bonus, 0) > 0)
       ORDER BY pi.id DESC
     `);
     const rows = this._formatRows(res) || [];
@@ -5012,7 +5187,7 @@ class SQLiteService {
       throw e;
     }
 
-    this.saveToDisk();
+    await this.flushToDisk();
     this._recordAuditLogInternal(
       actor.username, 'IMPORT_EXTERNAL_CATALOG', 'medicines', null,
       `استيراد خارجي: ${stats.addedProducts} صنف جديد، ${stats.updatedProducts} صنف محّدث، ${stats.addedSuppliers} مورد، ${stats.addedCustomers || 0} عميل، ${stats.addedBatches || 0} تشغيلة`

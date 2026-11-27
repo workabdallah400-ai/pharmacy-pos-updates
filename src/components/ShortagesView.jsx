@@ -103,57 +103,60 @@ export function ShortagesView({
     setTimeout(() => setToastMessage(''), 3000);
   };
 
+  // Filter the 70k+ catalogue only when the catalogue/filters change. Editing
+  // an order quantity must not rescan every medicine on each keystroke.
+  const shortCatalogItems = useMemo(() => {
+    return medicines.filter((m) => {
+      if (dismissedIds.has(m.id)) return false;
+      const stock = effectiveStockBoxes(m);
+      const isTracked = stock > 0 || trackedMedicineIds.has(Number(m.id));
+      if (!isTracked && !showFullCatalog) return false;
+      // Item is short when the real shelf quantity (boxes + strips + units)
+      // is at or below the reorder level.
+      return stock <= reorderLevelOf(m);
+    });
+  }, [medicines, dismissedIds, trackedMedicineIds, showFullCatalog]);
+
   // Determine standard shortages from master medicines catalog
   const catalogShortages = useMemo(() => {
-    return medicines
-      .filter((m) => {
-        if (dismissedIds.has(m.id)) return false;
-        const stock = effectiveStockBoxes(m);
-        const isTracked = stock > 0 || trackedMedicineIds.has(Number(m.id));
-        if (!isTracked && !showFullCatalog) return false;
-        const reorder = reorderLevelOf(m);
-        // Item is short when the real shelf quantity (boxes + strips + units)
-        // is at or below the reorder level.
-        return stock <= reorder;
-      })
-      .map((m) => {
-        const reorder = reorderLevelOf(m);
-        const stock = effectiveStockBoxes(m);
-        // Smart suggested order quantity: (reorder * 2) - current_stock, minimum 5 boxes
-        const suggestedQty = Math.max(5, Math.ceil(reorder * 2 - stock));
-        const preferredSupplier =
-          m.preferred_supplier ||
-          (m.category === 'أدوية الضغط والقلب'
-            ? 'الشركة المتحدة للصيادلة (UCP)'
-            : m.category === 'مضادات حيوية'
-            ? 'فارما أوفرسيز'
-            : m.category === 'مسكنات وخافض حرارة'
-            ? 'ابن سينا فارما'
-            : m.category === 'دوار وأذن داخلية'
-            ? 'رامكو فارما'
-            : 'أوفيس فارما');
+    return shortCatalogItems.map((m) => {
+      const reorder = reorderLevelOf(m);
+      const stock = effectiveStockBoxes(m);
+      // Smart suggested order quantity: (reorder * 2) - current_stock, minimum 5 boxes
+      const suggestedQty = Math.max(5, Math.ceil(reorder * 2 - stock));
+      const preferredSupplier =
+        m.preferred_supplier ||
+        (m.category === 'أدوية الضغط والقلب'
+          ? 'الشركة المتحدة للصيادلة (UCP)'
+          : m.category === 'مضادات حيوية'
+          ? 'فارما أوفرسيز'
+          : m.category === 'مسكنات وخافض حرارة'
+          ? 'ابن سينا فارما'
+          : m.category === 'دوار وأذن داخلية'
+          ? 'رامكو فارما'
+          : 'أوفيس فارما');
 
-        return {
-          id: m.id,
-          isCustom: false,
-          trade_name: m.trade_name,
-          trade_name_ar: m.trade_name_ar,
-          generic_name: m.generic_name,
-          stock_boxes: Number(m.stock_boxes) || 0,
-          stock_strips: Number(m.stock_strips) || 0,
-          stock_units: Number(m.stock_units) || 0,
-          effective_stock: Math.round(stock * 100) / 100,
-          reorder_level: reorder,
-          suggested_quantity: suggestedQty,
-          order_quantity: orderQuantities[m.id] !== undefined ? orderQuantities[m.id] : suggestedQty,
-          shelf: m.shelf || 'A-01',
-          preferred_supplier: preferredSupplier,
-          price_box: m.price_box,
-          type: stock <= 0 ? 'OUT_OF_STOCK' : 'NEAR_EMPTY',
-          isUrgent: stock <= 0
-        };
-      });
-  }, [medicines, dismissedIds, orderQuantities, trackedMedicineIds, showFullCatalog]);
+      return {
+        id: m.id,
+        isCustom: false,
+        trade_name: m.trade_name,
+        trade_name_ar: m.trade_name_ar,
+        generic_name: m.generic_name,
+        stock_boxes: Number(m.stock_boxes) || 0,
+        stock_strips: Number(m.stock_strips) || 0,
+        stock_units: Number(m.stock_units) || 0,
+        effective_stock: Math.round(stock * 100) / 100,
+        reorder_level: reorder,
+        suggested_quantity: suggestedQty,
+        order_quantity: orderQuantities[m.id] !== undefined ? orderQuantities[m.id] : suggestedQty,
+        shelf: m.shelf || 'A-01',
+        preferred_supplier: preferredSupplier,
+        price_box: m.price_box,
+        type: stock <= 0 ? 'OUT_OF_STOCK' : 'NEAR_EMPTY',
+        isUrgent: stock <= 0
+      };
+    });
+  }, [shortCatalogItems, orderQuantities]);
 
   // Combine custom shortages with catalog shortages
   const allShortages = useMemo(() => {

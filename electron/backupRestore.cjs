@@ -185,6 +185,25 @@ async function inspectSqlite(filePath) {
 
     result.deep = true;
 
+    // A short, human summary shown in the restore preview: owners need to see
+    // whether the file actually contains their sales, shifts and profit before
+    // they replace the live database.
+    try {
+      const one = (sql) => db.exec(sql)[0]?.values?.[0]?.[0] ?? null;
+      const has = (t) => tableNames.includes(t);
+      result.summary = {
+        invoices: Number(result.counts.invoices) || 0,
+        shifts: Number(result.counts.shifts) || 0,
+        purchases: Number(result.counts.purchases) || 0,
+        expenses: Number(result.counts.expenses) || 0,
+        profit: has('invoices') ? Number(one('SELECT COALESCE(SUM(total_profit), 0) FROM invoices')) || 0 : 0,
+        lastInvoiceAt: has('invoices') ? one('SELECT MAX(date_time) FROM invoices') : null,
+        lastShiftAt: has('shifts') ? one('SELECT MAX(opened_at) FROM shifts') : null
+      };
+    } catch (e) {
+      result.summary = null;
+    }
+
     const hasSignature = SIGNATURE_TABLES.some((t) => tableNames.includes(t));
     if (!hasSignature) {
       result.blocking.push('الملف لا يحتوي جداول برنامج صيدليتي — استعادة ملف قاعدة مختلف ستفقد بيانات المتجر.');

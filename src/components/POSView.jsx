@@ -831,9 +831,11 @@ export function POSView({
       if (Array.isArray(refreshed)) setSqliteMedicines(refreshed);
     } catch (e) {}
 
-    // Let the parent reload the shared catalog + open shift (headers/reports)
+    // Let the parent refresh only the sold items + the open shift
     try {
-      if (typeof onSaleCompleted === 'function') await onSaleCompleted();
+      if (typeof onSaleCompleted === 'function') {
+        await onSaleCompleted(cart.map((item) => item.id));
+      }
     } catch (e) {}
 
     // Clear cart
@@ -1640,16 +1642,16 @@ export function POSView({
         }}
         currentUser={currentUser}
         currentShift={currentShift}
-        onRefundCompleted={async () => {
+        onRefundCompleted={async (refundedIds) => {
           try {
             const refreshed = await sqliteService.searchMedicines(searchQuery, 50);
             if (Array.isArray(refreshed)) setSqliteMedicines(refreshed);
           } catch (e) {}
-          // The refund decreased the live shift totals — refresh the footer
+          // The refund changed the live shift totals — refresh the footer
           // counters immediately instead of waiting for a tab remount.
           await refreshShiftStats();
           if (typeof onSaleCompleted === 'function') {
-            await onSaleCompleted();
+            await onSaleCompleted(refundedIds);
           }
         }}
       />

@@ -85,7 +85,7 @@ export function SettingsView({ onUpdatePharmacyName, onRevokeDevice, currentUser
   const [syncRunning, setSyncRunning] = useState(false);
   const [reportServerInfo, setReportServerInfo] = useState(null);
   const [appInfo, setAppInfo] = useState({
-    version: typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '1.5.4',
+    version: typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '1.5.5',
     packaged: false
   });
   const [updateState, setUpdateState] = useState({ status: 'idle', message: '', progress: 0, version: null });
@@ -103,6 +103,19 @@ export function SettingsView({ onUpdatePharmacyName, onRevokeDevice, currentUser
     backups: [],
     error: ''
   });
+  // Counts from the LIVE database, so the preview can warn when the chosen
+  // backup is older and would drop newer invoices/shifts.
+  const [currentDataCounts, setCurrentDataCounts] = useState(null);
+  const restoreSummary = sqliteRestore.info?.summary || null;
+  const backupOlderThanLive = !!(
+    sqliteRestore.info &&
+    sqliteRestore.info.kind !== 'estock' &&
+    currentDataCounts &&
+    (Number(sqliteRestore.info.counts?.invoices || 0) < currentDataCounts.invoices ||
+      Number(sqliteRestore.info.counts?.shifts || 0) < currentDataCounts.shifts ||
+      Number(sqliteRestore.info.counts?.purchases || 0) < currentDataCounts.purchases ||
+      Number(sqliteRestore.info.counts?.expenses || 0) < currentDataCounts.expenses)
+  );
 
   const refreshSyncStatus = async () => {
     try {
@@ -488,8 +501,19 @@ export function SettingsView({ onUpdatePharmacyName, onRevokeDevice, currentUser
     }
   };
 
+  const refreshCurrentDataCounts = async () => {
+    try {
+      setCurrentDataCounts(await sqliteService.getDataCounts());
+    } catch (e) {
+      setCurrentDataCounts(null);
+    }
+  };
+
   useEffect(() => {
-    if (activeTab === 'backup') refreshLocalBackups();
+    if (activeTab === 'backup') {
+      refreshLocalBackups();
+      refreshCurrentDataCounts();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
 
@@ -509,6 +533,7 @@ export function SettingsView({ onUpdatePharmacyName, onRevokeDevice, currentUser
         return;
       }
       setSqliteRestore((prev) => ({ ...prev, info: res.info, error: '' }));
+      refreshCurrentDataCounts();
     } catch (e) {
       setSqliteRestore((prev) => ({ ...prev, error: e.message }));
     }
@@ -526,6 +551,7 @@ export function SettingsView({ onUpdatePharmacyName, onRevokeDevice, currentUser
         return;
       }
       setSqliteRestore((prev) => ({ ...prev, info: res.info, error: '' }));
+      refreshCurrentDataCounts();
     } catch (e) {
       setSqliteRestore((prev) => ({ ...prev, error: e.message }));
     }
@@ -608,10 +634,20 @@ export function SettingsView({ onUpdatePharmacyName, onRevokeDevice, currentUser
 
     const medicines = info.counts?.medicines;
     const detail = medicines != null ? ` (${Number(medicines).toLocaleString('en-US')} صنف)` : '';
+    const summary = info.summary;
+    const salesDetail = summary
+      ? `\nالمبيعات: ${Number(summary.invoices || 0).toLocaleString('en-US')} فاتورة` +
+        ` · الورديات: ${Number(summary.shifts || 0).toLocaleString('en-US')}` +
+        ` · الأرباح: ${Number(summary.profit || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })} ج.م`
+      : '';
+    const olderWarning = backupOlderThanLive
+      ? `\n\n⚠️ هذه النسخة أقدم من بياناتك الحالية (${Number(currentDataCounts?.invoices || 0).toLocaleString('en-US')} فاتورة و${Number(currentDataCounts?.shifts || 0).toLocaleString('en-US')} وردية حالياً).`
+      : '';
     const ok = window.confirm(
-      `تأكيد استعادة قاعدة البيانات من:\n${info.name}${detail}\n\n` +
-        'سيتم أخذ نسخة أمان من القاعدة الحالية أولاً، ثم استبدالها.\n' +
-        'أي تغييرات غير محفوظة في هذه الجلسة ستُفقد.'
+      `تأكيد استعادة قاعدة البيانات من:\n${info.name}${detail}${salesDetail}\n\n` +
+        'سيتم أخذ نسخة أمان من القاعدة الحالية أولاً، ثم استبدالها بالكامل.\n' +
+        'ستُفقد أي بيانات أحدث من النسخة المختارة.' +
+        olderWarning
     );
     if (!ok) return;
 
@@ -633,8 +669,14 @@ export function SettingsView({ onUpdatePharmacyName, onRevokeDevice, currentUser
 
     ipc.on('backup:restore-progress', onProgress);
     try {
+      // Persist the newest state first, then stop this renderer from writing
+      // its (now stale) in-memory copy over the file being restored.
+      try { await sqliteService.flushToDisk(); } catch (e) {}
+      sqliteService.suspendPersistence();
+
       const res = await ipc.invoke('backup:restore-sqlite', info.path);
       if (!res?.ok) {
+        sqliteService.resumePersistence();
         setSqliteRestore((prev) => ({ ...prev, busy: false, error: res?.error || 'فشلت الاستعادة' }));
         showToast(res?.error || 'فشلت الاستعادة');
         return;
@@ -643,6 +685,7 @@ export function SettingsView({ onUpdatePharmacyName, onRevokeDevice, currentUser
       playCashDrawerSound();
       setTimeout(() => window.location.reload(), 1600);
     } catch (e) {
+      sqliteService.resumePersistence();
       setSqliteRestore((prev) => ({ ...prev, busy: false, error: e.message }));
     } finally {
       ipc.removeListener('backup:restore-progress', onProgress);
@@ -1195,9 +1238,10 @@ export function SettingsView({ onUpdatePharmacyName, onRevokeDevice, currentUser
                       استعادة من نسخة احتياطية (PharmacyPOS أو eStock)
                     </div>
                     <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
-                      نسخة PharmacyPOS (‎.db) تُستعاد كاملة مع أخذ نسخة أمان أولاً.
+                      نسخة PharmacyPOS (‎.db) تُستعاد كاملة مع أخذ نسخة أمان أولاً — وتشمل
+                      المبيعات والورديات والفواتير والأرباح والمشتريات والمصروفات والعملاء.
                       أما نسخة eStock القديمة (SQL Server ‎.bak) فيتم قراءة الأصناف والأرصدة والصلاحيات والموردين والعملاء
-                      منها ودمجها مع بياناتك الحالية دون حذف أي شيء.
+                      منها ودمجها مع بياناتك الحالية دون حذف المبيعات أو الورديات.
                     </p>
                   </div>
                   <button
@@ -1233,7 +1277,8 @@ export function SettingsView({ onUpdatePharmacyName, onRevokeDevice, currentUser
                       <>
                         <div className="rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-200 text-[10.5px] leading-relaxed p-2.5">
                           نسخة eStock قديمة (SQL Server). سيتم دمج الأصناف والأرصدة والصلاحيات والموردين والعملاء
-                          مع بياناتك الحالية — لن تُحذف أو تُستبدل أي بيانات موجودة.
+                          مع بياناتك الحالية — لن تُحذف أو تُستبدل أي بيانات موجودة،
+                          وتبقى مبيعاتك ووردياتك وفواتيرك وأرباحك كما هي.
                         </div>
                         <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[11px] text-slate-300">
                           <div>
@@ -1303,10 +1348,42 @@ export function SettingsView({ onUpdatePharmacyName, onRevokeDevice, currentUser
                             </b>
                           </div>
                           <div>
-                            الفواتير:{' '}
+                            الفواتير (المبيعات):{' '}
                             <b className="text-white">
                               {sqliteRestore.info.counts?.invoices != null
                                 ? Number(sqliteRestore.info.counts.invoices).toLocaleString('en-US')
+                                : '—'}
+                            </b>
+                          </div>
+                          <div>
+                            الورديات:{' '}
+                            <b className="text-white">
+                              {sqliteRestore.info.counts?.shifts != null
+                                ? Number(sqliteRestore.info.counts.shifts).toLocaleString('en-US')
+                                : '—'}
+                            </b>
+                          </div>
+                          <div>
+                            المشتريات:{' '}
+                            <b className="text-white">
+                              {sqliteRestore.info.counts?.purchases != null
+                                ? Number(sqliteRestore.info.counts.purchases).toLocaleString('en-US')
+                                : '—'}
+                            </b>
+                          </div>
+                          <div>
+                            المصروفات:{' '}
+                            <b className="text-white">
+                              {sqliteRestore.info.counts?.expenses != null
+                                ? Number(sqliteRestore.info.counts.expenses).toLocaleString('en-US')
+                                : '—'}
+                            </b>
+                          </div>
+                          <div>
+                            إجمالي الأرباح المسجلة:{' '}
+                            <b className="text-emerald-300">
+                              {restoreSummary
+                                ? `${Number(restoreSummary.profit || 0).toLocaleString('en-US', { maximumFractionDigits: 2 })} ج.م`
                                 : '—'}
                             </b>
                           </div>
@@ -1327,6 +1404,11 @@ export function SettingsView({ onUpdatePharmacyName, onRevokeDevice, currentUser
                             </b>
                           </div>
                           <div className="col-span-2 text-[10px] text-slate-400">
+                            آخر فاتورة في النسخة:{' '}
+                            {restoreSummary?.lastInvoiceAt
+                              ? new Date(restoreSummary.lastInvoiceAt).toLocaleString('ar-EG')
+                              : 'لا توجد مبيعات مسجلة'}
+                            {' · '}
                             آخر تعديل للملف:{' '}
                             {sqliteRestore.info.modifiedAt
                               ? new Date(sqliteRestore.info.modifiedAt).toLocaleString('ar-EG')
@@ -1336,6 +1418,18 @@ export function SettingsView({ onUpdatePharmacyName, onRevokeDevice, currentUser
                               : ''}
                           </div>
                         </div>
+
+                        {backupOlderThanLive && (
+                          <div className="rounded-lg bg-rose-500/10 border border-rose-500/40 text-rose-200 text-[11px] leading-relaxed p-2.5">
+                            <b>⚠️ هذه النسخة أقدم من بياناتك الحالية.</b>{' '}
+                            بها {Number(sqliteRestore.info.counts?.invoices || 0).toLocaleString('en-US')} فاتورة
+                            و{Number(sqliteRestore.info.counts?.shifts || 0).toLocaleString('en-US')} وردية،
+                            بينما قاعدة البيانات الحالية بها {Number(currentDataCounts?.invoices || 0).toLocaleString('en-US')} فاتورة
+                            و{Number(currentDataCounts?.shifts || 0).toLocaleString('en-US')} وردية.
+                            الاستعادة ستستبدل القاعدة الحالية وتفقد أي مبيعات أو ورديات أو مشتريات
+                            أو مصروفات أحدث منها. لو تقصد استرجاع الأصناف فقط، استخدم استيراد eStock بدلاً منها.
+                          </div>
+                        )}
 
                         {(sqliteRestore.info.blocking || []).map((msg, i) => (
                           <div key={`block-${i}`} className="text-[11px] font-bold text-rose-300 flex items-start gap-2">
